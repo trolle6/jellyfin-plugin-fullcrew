@@ -8,12 +8,12 @@
     "category": "Metadata",
     "versions": [
       {
-        "changelog": "Initial release: full TMDB cast/crew accordion, JS Injector + File Transformation injection, shared Jellyfin TMDB key fallback.",
+        "changelog": "Release 1.0.0.0",
         "targetAbi": "10.11.0.0",
         "version": "1.0.0.0",
         "sourceUrl": "https://github.com/trolle6/jellyfin-plugin-fullcrew/releases/download/v1.0.0.0/Jellyfin.Plugin.FullCrew_10.11.0.zip",
-        "checksum": "E62ADCB7EF01D611CAF6B128B5F48B16",
-        "timestamp": "2026-08-01T19:08:29Z"
+        "checksum": "D2A00700336542C9C1D148DE58784C9C",
+        "timestamp": "2026-08-01T19:14:29Z"
       }
     ]
   }
