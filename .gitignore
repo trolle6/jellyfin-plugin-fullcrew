@@ -1,0 +1,37 @@
+## .NET
+bin/
+obj/
+[Bb]uild/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+## Rider / IDE
+.idea/
+*.sln.iml
+riderModule.iml
+/_ReSharper.Caches/
+.vs/
+*.DotSettings.user
+
+## OS
+.DS_Store
+Thumbs.db
+
+## NuGet
+packages/
+*.nupkg
+
+## Build output
+*.dll
+*.pdb
+*.xml
+!build.yaml
+dist/
+*.zip

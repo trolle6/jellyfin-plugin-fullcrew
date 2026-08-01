@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Full Crew</title>
+</head>
+<body>
+    <div id="FullCrewConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="FullCrewConfigForm">
+                    <div class="sectionTitleContainer flex align-items-center">
+                        <h2 class="sectionTitle">Full Crew</h2>
+                    </div>
+                    <p>
+                        Shows a categorized full cast &amp; crew accordion on movie and series detail pages in Jellyfin Web,
+                        using live TMDB credits (Camera, Costume &amp; Make-Up, Sound, VFX, and more).
+                    </p>
+
+                    <div class="inputContainer">
+                        <input is="emby-input" type="password" id="TmdbApiKey" label="TMDB API Key (optional)" autocomplete="off" />
+                        <div class="fieldDescription">
+                            Leave blank to use Jellyfin’s built-in shared TMDB key (same as the official TheMovieDb provider).
+                            Only set your own key if you want separate rate limits / usage tracking —
+                            free keys at
+                            <a is="emby-linkbutton" class="button-link" target="_blank" rel="noopener noreferrer" href="https://www.themoviedb.org/settings/api">themoviedb.org/settings/api</a>.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="CacheHours" min="1" max="168" label="Cache hours" />
+                        <div class="fieldDescription">How long to cache TMDB credits in memory (1–168).</div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="MaxPeoplePerDepartment" min="1" max="1000" label="Max people per department" />
+                    </div>
+
+                    <div class="verticalSection">
+                        <h3 class="sectionTitle">Departments</h3>
+                        <div class="fieldDescription" style="margin-bottom:0.75em;">Choose which departments appear in the accordion.</div>
+                        <div id="DepartmentToggles"></div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <h3 class="sectionTitle">Web UI injection</h3>
+                        <p class="fieldDescription">
+                            The plugin injects a script into Jellyfin Web. Prefer installing the
+                            <strong>File Transformation</strong> plugin for Docker-safe injection.
+                            Otherwise the plugin will try to patch <code>index.html</code>, or you can add:
+                        </p>
+                        <pre style="white-space:pre-wrap;opacity:0.85;font-size:0.9em;">&lt;script plugin="FullCrew" src="/FullCrew/fullcrew.js"&gt;&lt;/script&gt;</pre>
+                        <p class="fieldDescription">After installing, restart Jellyfin and hard-refresh the web client.</p>
+                    </div>
+
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block">
+                            <span>Save</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <script type="text/javascript">
+            var FullCrewConfig = {
+                pluginUniqueId: 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f',
+                allDepartments: [
+                    'Cast',
+                    'Directing',
+                    'Writing',
+                    'Production',
+                    'Camera',
+                    'Editing',
+                    'Sound',
+                    'Art',
+                    'Costume & Make-Up',
+                    'Visual Effects',
+                    'Lighting',
+                    'Crew',
+                    'Other'
+                ]
+            };
+
+            function renderDepartmentToggles(enabled) {
+                var container = document.querySelector('#DepartmentToggles');
+                container.innerHTML = '';
+                var enabledSet = {};
+                (enabled || []).forEach(function (name) {
+                    enabledSet[name] = true;
+                });
+
+                FullCrewConfig.allDepartments.forEach(function (name, index) {
+                    var id = 'Dept_' + index;
+                    var label = document.createElement('label');
+                    label.className = 'checkboxContainer';
+
+                    var input = document.createElement('input');
+                    input.setAttribute('is', 'emby-checkbox');
+                    input.type = 'checkbox';
+                    input.id = id;
+                    input.dataset.department = name;
+                    input.checked = !!enabledSet[name];
+
+                    var span = document.createElement('span');
+                    span.textContent = name;
+
+                    label.appendChild(input);
+                    label.appendChild(span);
+                    container.appendChild(label);
+                });
+            }
+
+            function readEnabledDepartments() {
+                return Array.prototype.slice
+                    .call(document.querySelectorAll('#DepartmentToggles input[type="checkbox"]'))
+                    .filter(function (el) { return el.checked; })
+                    .map(function (el) { return el.dataset.department; });
+            }
+
+            document.querySelector('#FullCrewConfigPage')
+                .addEventListener('pageshow', function () {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(FullCrewConfig.pluginUniqueId).then(function (config) {
+                        document.querySelector('#TmdbApiKey').value = config.TmdbApiKey || '';
+                        document.querySelector('#CacheHours').value = config.CacheHours != null ? config.CacheHours : 12;
+                        document.querySelector('#MaxPeoplePerDepartment').value =
+                            config.MaxPeoplePerDepartment != null ? config.MaxPeoplePerDepartment : 100;
+                        renderDepartmentToggles(config.EnabledDepartments || FullCrewConfig.allDepartments);
+                        Dashboard.hideLoadingMsg();
+                    });
+                });
+
+            document.querySelector('#FullCrewConfigForm')
+                .addEventListener('submit', function (e) {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(FullCrewConfig.pluginUniqueId).then(function (config) {
+                        config.TmdbApiKey = document.querySelector('#TmdbApiKey').value;
+                        config.CacheHours = parseInt(document.querySelector('#CacheHours').value, 10) || 12;
+                        config.MaxPeoplePerDepartment =
+                            parseInt(document.querySelector('#MaxPeoplePerDepartment').value, 10) || 100;
+                        config.EnabledDepartments = readEnabledDepartments();
+                        ApiClient.updatePluginConfiguration(FullCrewConfig.pluginUniqueId, config).then(function (result) {
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                        });
+                    });
+
+                    e.preventDefault();
+                    return false;
+                });
+        </script>
+    </div>
+</body>
+</html>

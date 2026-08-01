@@ -1,0 +1,104 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Plugin version (e.g. 1.0.0.0)"
+        required: true
+        default: "1.0.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Build
+        run: dotnet build Jellyfin.Plugin.FullCrew/Jellyfin.Plugin.FullCrew.csproj -c Release
+
+      - name: Package
+        id: package
+        env:
+          VERSION: ${{ github.event.inputs.version || github.ref_name }}
+        run: |
+          VERSION="${VERSION#v}"
+          OUT=dist
+          mkdir -p "$OUT/pkg"
+          cp Jellyfin.Plugin.FullCrew/bin/Release/net9.0/Jellyfin.Plugin.FullCrew.dll "$OUT/pkg/"
+          cp meta.json "$OUT/pkg/"
+          # Keep meta version in sync when tagged
+          python3 - <<PY
+          import json, os
+          version = os.environ["VERSION"]
+          meta = json.load(open("meta.json"))
+          meta["version"] = version
+          json.dump(meta, open("dist/pkg/meta.json", "w"), indent=2)
+          print("version", version)
+          PY
+          ZIP="Jellyfin.Plugin.FullCrew_10.11.0.zip"
+          (cd "$OUT/pkg" && python3 -c "import zipfile; z=zipfile.ZipFile('../$ZIP','w',zipfile.ZIP_DEFLATED); z.write('Jellyfin.Plugin.FullCrew.dll'); z.write('meta.json'); z.close()")
+          CHECKSUM=$(md5sum "$OUT/$ZIP" | awk '{print toupper($1)}')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
+          echo "Checksum: $CHECKSUM"
+
+      - name: Update manifest
+        env:
+          VERSION: ${{ steps.package.outputs.version }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+          ZIP: ${{ steps.package.outputs.zip }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, datetime
+          version = os.environ["VERSION"]
+          checksum = os.environ["CHECKSUM"]
+          zip_name = os.environ["ZIP"]
+          repo = os.environ["REPO"]
+          source = f"https://github.com/{repo}/releases/download/v{version}/{zip_name}"
+          entry = {
+              "changelog": f"Release {version}",
+              "targetAbi": "10.11.0.0",
+              "version": version,
+              "sourceUrl": source,
+              "checksum": checksum,
+              "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+          }
+          path = "manifest.json"
+          data = json.load(open(path))
+          # newest first
+          versions = [v for v in data[0].get("versions", []) if v.get("version") != version]
+          data[0]["versions"] = [entry] + versions
+          json.dump(data, open(path, "w"), indent=2)
+          print(json.dumps(entry, indent=2))
+          PY
+
+      - name: Commit manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git diff --cached --quiet || git commit -m "chore: update manifest for v${{ steps.package.outputs.version }}"
+          git push origin HEAD:master || git push origin HEAD:main || true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.package.outputs.version }}
+          name: Full Crew ${{ steps.package.outputs.version }}
+          files: dist/${{ steps.package.outputs.zip }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
