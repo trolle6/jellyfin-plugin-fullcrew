@@ -4,7 +4,7 @@
     "name": "Full Crew",
     "overview": "Full cast and crew by department on movie and series pages",
     "description": "Fetches complete TMDB cast and crew for movies and series, groups people by department (Cast, Camera, Costume & Make-Up, Sound, Visual Effects, and more), and shows them in a polished accordion on Jellyfin Web item detail pages.",
-    "owner": "local",
+    "owner": "trolle6",
     "category": "Metadata",
     "versions": []
   }

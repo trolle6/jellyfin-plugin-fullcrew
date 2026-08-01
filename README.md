@@ -9,7 +9,7 @@ Jellyfin’s built-in TMDb importer only keeps a thin slice of people. This plug
 1. Dashboard → Plugins → Repositories → add:
 
 ```text
-https://raw.githubusercontent.com/<YOUR_GITHUB_USER>/jellyfin-plugin-fullcrew/master/manifest.json
+https://raw.githubusercontent.com/trolle6/jellyfin-plugin-fullcrew/master/manifest.json
 ```
 
 2. Catalog → find **Full Crew** → Install → restart Jellyfin.
