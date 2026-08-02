@@ -104,7 +104,9 @@ public class CreditsService
             };
         }
 
-        var cacheKey = $"fullcrew-{lookup.MediaKind}-{lookup.TmdbId}";
+        var cacheKey = lookup.SeasonNumber is int seasonNumber
+            ? $"fullcrew-{lookup.MediaKind}-{lookup.TmdbId}-s{seasonNumber}"
+            : $"fullcrew-{lookup.MediaKind}-{lookup.TmdbId}";
         if (_memoryCache.TryGetValue(cacheKey, out FullCrewResponse? cached) && cached is not null)
         {
             return CloneForItem(cached, item);
@@ -140,18 +142,52 @@ public class CreditsService
         var client = _httpClientFactory.CreateClient();
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Jellyfin-Plugin-FullCrew/1.0");
 
-        var path = lookup.MediaKind == TmdbMediaKind.Movie
-            ? $"https://api.themoviedb.org/3/movie/{lookup.TmdbId}/credits?api_key={Uri.EscapeDataString(apiKey)}"
-            : $"https://api.themoviedb.org/3/tv/{lookup.TmdbId}/aggregate_credits?api_key={Uri.EscapeDataString(apiKey)}";
-
+        var path = BuildTmdbCreditsUrl(lookup, apiKey);
         using var httpResponse = await client.GetAsync(path, cancellationToken).ConfigureAwait(false);
+
+        if (!httpResponse.IsSuccessStatusCode && lookup.SeasonNumber is not null)
+        {
+            // Season credits missing — fall back to full-series aggregate credits.
+            _logger.LogDebug(
+                "TMDB season credits unavailable for {TmdbId} S{Season}; falling back to series aggregate credits.",
+                lookup.TmdbId,
+                lookup.SeasonNumber);
+
+            var fallbackPath = BuildTmdbCreditsUrl(lookup with { SeasonNumber = null }, apiKey);
+            using var fallbackResponse = await client.GetAsync(fallbackPath, cancellationToken).ConfigureAwait(false);
+            return await ParseCreditsResponseAsync(item, lookup, fallbackResponse, cancellationToken).ConfigureAwait(false);
+        }
+
+        return await ParseCreditsResponseAsync(item, lookup, httpResponse, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string BuildTmdbCreditsUrl(TmdbLookup lookup, string apiKey)
+    {
+        if (lookup.MediaKind == TmdbMediaKind.Movie)
+        {
+            return $"https://api.themoviedb.org/3/movie/{lookup.TmdbId}/credits?api_key={Uri.EscapeDataString(apiKey)}";
+        }
+
+        if (lookup.SeasonNumber is int seasonNumber)
+        {
+            return $"https://api.themoviedb.org/3/tv/{lookup.TmdbId}/season/{seasonNumber.ToString(CultureInfo.InvariantCulture)}/credits?api_key={Uri.EscapeDataString(apiKey)}";
+        }
+
+        return $"https://api.themoviedb.org/3/tv/{lookup.TmdbId}/aggregate_credits?api_key={Uri.EscapeDataString(apiKey)}";
+    }
+
+    private async Task<FullCrewResponse> ParseCreditsResponseAsync(
+        BaseItem item,
+        TmdbLookup lookup,
+        HttpResponseMessage httpResponse,
+        CancellationToken cancellationToken)
+    {
         if (!httpResponse.IsSuccessStatusCode)
         {
             var body = await httpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             _logger.LogWarning(
-                "TMDB credits request failed ({StatusCode}) for {Path}: {Body}",
+                "TMDB credits request failed ({StatusCode}): {Body}",
                 (int)httpResponse.StatusCode,
-                path.Split('?')[0],
                 body);
 
             return new FullCrewResponse
@@ -186,9 +222,9 @@ public class CreditsService
             StringComparer.OrdinalIgnoreCase);
         var maxPerDept = Math.Clamp(config?.MaxPeoplePerDepartment ?? 100, 1, 1000);
 
-        var buckets = new Dictionary<string, List<CrewPerson>>(StringComparer.OrdinalIgnoreCase);
+        var rawCredits = new List<(string Department, CrewPerson Person)>();
 
-        void AddPerson(string department, CrewPerson person)
+        void AddRaw(string department, CrewPerson person)
         {
             var key = NormalizeDepartment(department);
             if (!enabled.Contains(key))
@@ -196,22 +232,7 @@ public class CreditsService
                 return;
             }
 
-            if (!buckets.TryGetValue(key, out var list))
-            {
-                list = [];
-                buckets[key] = list;
-            }
-
-            // Deduplicate by TMDB id + role within department
-            if (list.Any(p =>
-                    p.TmdbPersonId == person.TmdbPersonId
-                    && string.Equals(p.Role, person.Role, StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(p.Name, person.Name, StringComparison.OrdinalIgnoreCase)))
-            {
-                return;
-            }
-
-            list.Add(person);
+            rawCredits.Add((key, person));
         }
 
         if (payload?.Cast is not null)
@@ -227,7 +248,30 @@ public class CreditsService
                     ? member.Character!
                     : FirstRole(member.Roles) ?? "Actor";
 
-                AddPerson(
+                // Aggregate credits can list several characters for one person.
+                if (member.Roles is { Count: > 0 } && string.IsNullOrWhiteSpace(member.Character))
+                {
+                    foreach (var character in member.Roles
+                                 .Select(r => r.Character)
+                                 .Where(c => !string.IsNullOrWhiteSpace(c))
+                                 .Distinct(StringComparer.OrdinalIgnoreCase))
+                    {
+                        AddRaw(
+                            "Cast",
+                            new CrewPerson
+                            {
+                                Name = member.Name.Trim(),
+                                Role = character!.Trim(),
+                                TmdbPersonId = member.Id,
+                                ProfileUrl = ToProfileUrl(member.ProfilePath),
+                                Order = member.Order
+                            });
+                    }
+
+                    continue;
+                }
+
+                AddRaw(
                     "Cast",
                     new CrewPerson
                     {
@@ -254,7 +298,7 @@ public class CreditsService
                     foreach (var job in member.Jobs)
                     {
                         var jobTitle = string.IsNullOrWhiteSpace(job.Job) ? "Crew" : job.Job!;
-                        AddPerson(
+                        AddRaw(
                             string.IsNullOrWhiteSpace(member.Department) ? "Crew" : member.Department!,
                             new CrewPerson
                             {
@@ -268,7 +312,7 @@ public class CreditsService
                 else
                 {
                     var jobTitle = string.IsNullOrWhiteSpace(member.Job) ? "Crew" : member.Job!;
-                    AddPerson(
+                    AddRaw(
                         string.IsNullOrWhiteSpace(member.Department) ? "Crew" : member.Department!,
                         new CrewPerson
                         {
@@ -281,6 +325,57 @@ public class CreditsService
             }
         }
 
+        // One card per person: stack roles, park them in their primary department
+        // (earliest match in DepartmentOrder — e.g. Production before Editing).
+        var buckets = new Dictionary<string, List<CrewPerson>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var group in rawCredits.GroupBy(PersonKey, StringComparer.OrdinalIgnoreCase))
+        {
+            var credits = group.ToList();
+            var primaryDepartment = credits
+                .Select(c => c.Department)
+                .OrderBy(DepartmentSortIndex)
+                .ThenBy(d => d, StringComparer.OrdinalIgnoreCase)
+                .First();
+
+            var stackedRoles = credits
+                .OrderBy(c => DepartmentSortIndex(c.Department))
+                .ThenBy(c => c.Person.Role, StringComparer.OrdinalIgnoreCase)
+                .Select(c => c.Person.Role)
+                .Where(r => !string.IsNullOrWhiteSpace(r))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var best = credits
+                .OrderBy(c => string.IsNullOrWhiteSpace(c.Person.ProfileUrl) ? 1 : 0)
+                .ThenBy(c => c.Person.Order ?? int.MaxValue)
+                .Select(c => c.Person)
+                .First();
+
+            var billingOrders = credits
+                .Select(c => c.Person.Order)
+                .Where(o => o.HasValue)
+                .Select(o => o!.Value)
+                .ToList();
+
+            var stacked = new CrewPerson
+            {
+                Name = best.Name,
+                Role = string.Join(" · ", stackedRoles),
+                TmdbPersonId = best.TmdbPersonId,
+                ProfileUrl = best.ProfileUrl ?? credits.Select(c => c.Person.ProfileUrl).FirstOrDefault(u => !string.IsNullOrWhiteSpace(u)),
+                Order = billingOrders.Count > 0 ? billingOrders.Min() : null
+            };
+
+            if (!buckets.TryGetValue(primaryDepartment, out var list))
+            {
+                list = [];
+                buckets[primaryDepartment] = list;
+            }
+
+            list.Add(stacked);
+        }
+
         var result = new List<CrewDepartment>();
         foreach (var deptName in DepartmentOrder)
         {
@@ -291,8 +386,8 @@ public class CreditsService
 
             IEnumerable<CrewPerson> ordered = string.Equals(deptName, "Cast", StringComparison.OrdinalIgnoreCase)
                 ? people.OrderBy(p => p.Order ?? int.MaxValue).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
-                : people.OrderBy(p => p.Role, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase);
+                : people.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(p => p.Role, StringComparer.OrdinalIgnoreCase);
 
             result.Add(new CrewDepartment
             {
@@ -315,14 +410,37 @@ public class CreditsService
             {
                 Name = orphan,
                 People = buckets[orphan]
-                    .OrderBy(p => p.Role, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(p => p.Role, StringComparer.OrdinalIgnoreCase)
                     .Take(maxPerDept)
                     .ToList()
             });
         }
 
         return result;
+    }
+
+    private static string PersonKey((string Department, CrewPerson Person) credit)
+    {
+        if (credit.Person.TmdbPersonId is int id and > 0)
+        {
+            return "id:" + id.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return "name:" + credit.Person.Name.Trim().ToLowerInvariant();
+    }
+
+    private static int DepartmentSortIndex(string department)
+    {
+        for (var i = 0; i < DepartmentOrder.Length; i++)
+        {
+            if (string.Equals(DepartmentOrder[i], department, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return DepartmentOrder.Length + 1;
     }
 
     private static string NormalizeDepartment(string department)
@@ -377,7 +495,7 @@ public class CreditsService
             return null;
         }
 
-        return "https://image.tmdb.org/t/p/w185" + profilePath;
+        return "https://image.tmdb.org/t/p/w342" + profilePath;
     }
 
     private static FullCrewResponse CloneForItem(FullCrewResponse cached, BaseItem item)
@@ -395,6 +513,26 @@ public class CreditsService
 
     private static TmdbLookup? ResolveTmdbLookup(BaseItem item)
     {
+        if (item is Season season)
+        {
+            var series = season.Series;
+            if (series is not null)
+            {
+                var seriesId = GetProviderId(series, "Tmdb") ?? GetProviderId(series, "TmdbSeries");
+                if (!string.IsNullOrWhiteSpace(seriesId))
+                {
+                    return new TmdbLookup(seriesId, TmdbMediaKind.Tv, season.IndexNumber);
+                }
+            }
+
+            // Some libraries store the series TMDB id on the season itself.
+            var seasonSeriesId = GetProviderId(item, "Tmdb") ?? GetProviderId(item, "TmdbSeries");
+            if (!string.IsNullOrWhiteSpace(seasonSeriesId))
+            {
+                return new TmdbLookup(seasonSeriesId, TmdbMediaKind.Tv, season.IndexNumber);
+            }
+        }
+
         if (item is Episode episode)
         {
             var series = episode.Series;
@@ -403,7 +541,7 @@ public class CreditsService
                 var seriesId = GetProviderId(series, "Tmdb") ?? GetProviderId(series, "TmdbSeries");
                 if (!string.IsNullOrWhiteSpace(seriesId))
                 {
-                    return new TmdbLookup(seriesId, TmdbMediaKind.Tv);
+                    return new TmdbLookup(seriesId, TmdbMediaKind.Tv, episode.ParentIndexNumber);
                 }
             }
         }
@@ -430,8 +568,11 @@ public class CreditsService
         var tmdb = GetProviderId(item, "Tmdb");
         if (!string.IsNullOrWhiteSpace(tmdb))
         {
-            var kind = item is Series or Episode ? TmdbMediaKind.Tv : TmdbMediaKind.Movie;
-            return new TmdbLookup(tmdb, kind);
+            var kind = item is Series or Season or Episode ? TmdbMediaKind.Tv : TmdbMediaKind.Movie;
+            int? seasonNumber = item is Season s ? s.IndexNumber
+                : item is Episode e ? e.ParentIndexNumber
+                : null;
+            return new TmdbLookup(tmdb, kind, seasonNumber);
         }
 
         var tmdbSeries = GetProviderId(item, "TmdbSeries");
@@ -464,7 +605,7 @@ public class CreditsService
         return string.IsNullOrWhiteSpace(trimmed) ? JellyfinSharedTmdbApiKey : trimmed;
     }
 
-    private sealed record TmdbLookup(string TmdbId, TmdbMediaKind MediaKind);
+    private sealed record TmdbLookup(string TmdbId, TmdbMediaKind MediaKind, int? SeasonNumber = null);
 
     private enum TmdbMediaKind
     {

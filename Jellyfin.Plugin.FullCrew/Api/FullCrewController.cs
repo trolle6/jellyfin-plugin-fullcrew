@@ -1,5 +1,5 @@
 using System;
-using System.Reflection;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.FullCrew.Models;
@@ -51,33 +51,69 @@ public class FullCrewController : ControllerBase
     /// Serves the client JavaScript.
     /// </summary>
     [HttpGet("fullcrew.js")]
+    [HttpHead("fullcrew.js")]
     [AllowAnonymous]
     public ActionResult GetScript()
     {
-        return GetEmbeddedResource("Web.fullcrew.js", "application/javascript");
+        return GetClientAsset("fullcrew.js", "application/javascript");
     }
 
     /// <summary>
     /// Serves the client CSS.
     /// </summary>
     [HttpGet("fullcrew.css")]
+    [HttpHead("fullcrew.css")]
     [AllowAnonymous]
     public ActionResult GetStyles()
     {
-        return GetEmbeddedResource("Web.fullcrew.css", "text/css");
+        return GetClientAsset("fullcrew.css", "text/css");
     }
 
-    private ActionResult GetEmbeddedResource(string relativeName, string contentType)
+    private ActionResult GetClientAsset(string fileName, string contentType)
     {
-        var assembly = Assembly.GetExecutingAssembly();
-        var resourceName = $"{typeof(Plugin).Namespace}.{relativeName}";
+        // Prefer loose files next to the plugin DLL. Overwriting the DLL while Jellyfin is
+        // running corrupts memory-mapped embedded resources; disk files stay readable.
+        var diskPath = ResolvePluginWebPath(fileName);
+        if (diskPath is not null && System.IO.File.Exists(diskPath))
+        {
+            return PhysicalFile(diskPath, contentType);
+        }
+
+        var assembly = typeof(Plugin).Assembly;
+        var resourceName = $"{typeof(Plugin).Namespace}.Web.{fileName}";
         var stream = assembly.GetManifestResourceStream(resourceName);
         if (stream is null)
         {
-            _logger.LogWarning("Embedded resource not found: {ResourceName}", resourceName);
+            _logger.LogWarning(
+                "Full Crew client asset missing: {FileName} (disk and embedded). Restart Jellyfin after updating the plugin DLL.",
+                fileName);
             return NotFound();
         }
 
         return new FileStreamResult(stream, contentType);
+    }
+
+    private static string? ResolvePluginWebPath(string fileName)
+    {
+        try
+        {
+            var assemblyPath = typeof(Plugin).Assembly.Location;
+            if (string.IsNullOrWhiteSpace(assemblyPath))
+            {
+                return null;
+            }
+
+            var pluginDir = Path.GetDirectoryName(assemblyPath);
+            if (string.IsNullOrWhiteSpace(pluginDir))
+            {
+                return null;
+            }
+
+            return Path.Combine(pluginDir, "Web", fileName);
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

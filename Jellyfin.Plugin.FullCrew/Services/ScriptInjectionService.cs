@@ -17,7 +17,7 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 /// </summary>
 public class ScriptInjectionService : IHostedService
 {
-    internal const string ScriptTag = "<script plugin=\"FullCrew\" src=\"/FullCrew/fullcrew.js\"></script>";
+    internal const string ScriptTag = "<script plugin=\"FullCrew\" src=\"/FullCrew/fullcrew.js\" defer></script>";
 
     private readonly ILogger<ScriptInjectionService> _logger;
     private readonly IServerApplicationPaths _applicationPaths;
@@ -39,33 +39,80 @@ public class ScriptInjectionService : IHostedService
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        if (TryRegisterFileTransformation())
+        TryExtractWebAssets();
+
+        // Try every injection path. JS Injector registration alone is not enough when its
+        // own loader was never written into index.html (common alongside Jellyfin Enhanced).
+        var fileTransformation = TryRegisterFileTransformation();
+        var jsInjector = TryRegisterJavaScriptInjector();
+        var indexHtml = TryPatchIndexHtml();
+
+        if (fileTransformation)
         {
-            _logger.LogInformation(
-                "Full Crew: registered script injection via File Transformation plugin (no filesystem writes).");
-            return Task.CompletedTask;
+            _logger.LogInformation("Full Crew: registered via File Transformation.");
         }
 
-        if (TryRegisterJavaScriptInjector())
+        if (jsInjector)
         {
-            _logger.LogInformation(
-                "Full Crew: registered client script via JavaScript Injector plugin. Hard-refresh the web client.");
-            return Task.CompletedTask;
+            _logger.LogInformation("Full Crew: registered script with JavaScript Injector.");
         }
 
-        if (TryPatchIndexHtml())
+        if (indexHtml)
         {
-            _logger.LogInformation("Full Crew: injected script tag into index.html.");
-            return Task.CompletedTask;
+            _logger.LogInformation("Full Crew: ensured script tag in index.html.");
         }
 
-        _logger.LogWarning(
-            "Full Crew: could not auto-inject client script. You already may have JavaScript Injector — "
-            + "add a script that loads /FullCrew/fullcrew.js, install File Transformation, "
-            + "or add this line before </body> in jellyfin-web index.html: {ScriptTag}",
-            ScriptTag);
+        if (!fileTransformation && !jsInjector && !indexHtml)
+        {
+            _logger.LogWarning(
+                "Full Crew: could not auto-inject client script. Add this before </body> in jellyfin-web index.html: {ScriptTag}",
+                ScriptTag);
+        }
+        else if (!indexHtml && !fileTransformation)
+        {
+            _logger.LogWarning(
+                "Full Crew: index.html was not patched. If the UI section is missing, hard-refresh after adding "
+                + "the Full Crew script in JS Injector, or manually insert: {ScriptTag}",
+                ScriptTag);
+        }
 
         return Task.CompletedTask;
+    }
+
+    private void TryExtractWebAssets()
+    {
+        try
+        {
+            var assembly = typeof(Plugin).Assembly;
+            var pluginDir = Path.GetDirectoryName(assembly.Location);
+            if (string.IsNullOrWhiteSpace(pluginDir))
+            {
+                return;
+            }
+
+            var webDir = Path.Combine(pluginDir, "Web");
+            Directory.CreateDirectory(webDir);
+
+            foreach (var fileName in new[] { "fullcrew.js", "fullcrew.css" })
+            {
+                var resourceName = $"{typeof(Plugin).Namespace}.Web.{fileName}";
+                using var stream = assembly.GetManifestResourceStream(resourceName);
+                if (stream is null)
+                {
+                    continue;
+                }
+
+                var target = Path.Combine(webDir, fileName);
+                using var output = File.Create(target);
+                stream.CopyTo(output);
+            }
+
+            _logger.LogInformation("Full Crew: extracted client assets to {WebDir}", webDir);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Full Crew: could not extract client assets to disk.");
+        }
     }
 
     /// <inheritdoc />
@@ -262,19 +309,36 @@ public class ScriptInjectionService : IHostedService
             }
 
             var contents = File.ReadAllText(indexPath);
-            if (contents.Contains(ScriptTag, StringComparison.OrdinalIgnoreCase)
-                || contents.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase))
+            if (contents.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
 
-            var bodyIndex = contents.IndexOf("</body>", StringComparison.OrdinalIgnoreCase);
-            if (bodyIndex < 0)
+            string updated;
+            const string enhancedMarker = "JellyfinEnhanced/script";
+            var enhancedIdx = contents.IndexOf(enhancedMarker, StringComparison.OrdinalIgnoreCase);
+            if (enhancedIdx >= 0)
+            {
+                var scriptEnd = contents.IndexOf("</script>", enhancedIdx, StringComparison.OrdinalIgnoreCase);
+                if (scriptEnd >= 0)
+                {
+                    updated = contents.Insert(scriptEnd + "</script>".Length, ScriptTag);
+                }
+                else
+                {
+                    updated = InsertBeforeBodyClose(contents);
+                }
+            }
+            else
+            {
+                updated = InsertBeforeBodyClose(contents);
+            }
+
+            if (ReferenceEquals(updated, contents) || updated == contents)
             {
                 return false;
             }
 
-            var updated = contents.Insert(bodyIndex, "    " + ScriptTag + Environment.NewLine);
             File.WriteAllText(indexPath, updated);
             return true;
         }
@@ -283,6 +347,14 @@ public class ScriptInjectionService : IHostedService
             _logger.LogWarning(ex, "Full Crew: failed to patch index.html.");
             return false;
         }
+    }
+
+    private static string InsertBeforeBodyClose(string contents)
+    {
+        var bodyIndex = contents.IndexOf("</body>", StringComparison.OrdinalIgnoreCase);
+        return bodyIndex < 0
+            ? contents
+            : contents.Insert(bodyIndex, ScriptTag);
     }
 }
 

@@ -56,11 +56,69 @@
         );
     }
 
-    function findInsertionPoint(view) {
+    function findNativeCastSections(view) {
+        var nodes = [];
+
+        function add(el) {
+            if (!el || el.id === SECTION_ID || el.classList.contains('fullCrewSection')) {
+                return;
+            }
+            if (nodes.indexOf(el) !== -1) {
+                return;
+            }
+            nodes.push(el);
+        }
+
         var cast = view.querySelector('#castContent');
         if (cast) {
-            var section = cast.closest('.verticalSection') || cast.parentElement;
-            return section || cast;
+            add(cast.closest('.verticalSection') || cast.parentElement || cast);
+        }
+
+        var people = view.querySelector('.peopleItemsContainer');
+        if (people) {
+            add(people.closest('.verticalSection') || people.parentElement || people);
+        }
+
+        var titles = view.querySelectorAll('.sectionTitle, h2, .detailSectionHeader');
+        Array.prototype.forEach.call(titles, function (titleEl) {
+            var text = (titleEl.textContent || '').replace(/\s+/g, ' ').trim();
+            if (/^cast\s*(?:&|and)\s*crew$/i.test(text) && !titleEl.closest('.fullCrewSection')) {
+                add(titleEl.closest('.verticalSection') || titleEl.parentElement);
+            }
+        });
+
+        // Vanilla Jellyfin detail fact rows for people (Director / Writer).
+        // Keep Genres / Studios — those aren't duplicated in Full Crew.
+        Array.prototype.forEach.call(view.querySelectorAll('.directorsGroup, .writersGroup'), function (el) {
+            add(el);
+        });
+
+        return nodes;
+    }
+
+    function hideNativeCast(view) {
+        findNativeCastSections(view).forEach(function (el) {
+            el.classList.add('fullCrewHideNative');
+            el.setAttribute('data-fullcrew-hidden', '1');
+        });
+    }
+
+    function showNativeCast(view) {
+        Array.prototype.forEach.call(view.querySelectorAll('[data-fullcrew-hidden="1"]'), function (el) {
+            el.classList.remove('fullCrewHideNative');
+            el.removeAttribute('data-fullcrew-hidden');
+        });
+    }
+
+    function findInsertionPoint(view) {
+        var natives = findNativeCastSections(view);
+        if (natives.length) {
+            return natives[0];
+        }
+
+        var cast = view.querySelector('#castContent');
+        if (cast) {
+            return cast.closest('.verticalSection') || cast.parentElement || cast;
         }
 
         var people = view.querySelector('.peopleItemsContainer');
@@ -160,15 +218,26 @@
             var list = createElement('ul', 'fullCrewPeople');
 
             people.forEach(function (person) {
-                var li = createElement('li', 'fullCrewPerson');
                 var personName = person.Name || person.name || 'Unknown';
                 var role = person.Role || person.role || '';
                 var profileUrl = person.ProfileUrl || person.profileUrl;
+                var tmdbId = person.TmdbPersonId || person.tmdbPersonId;
+                var card;
+
+                if (tmdbId) {
+                    card = createElement('a', 'fullCrewPerson');
+                    card.href = 'https://www.themoviedb.org/person/' + encodeURIComponent(String(tmdbId));
+                    card.target = '_blank';
+                    card.rel = 'noopener noreferrer';
+                    card.title = personName + ' on TMDB';
+                } else {
+                    card = createElement('div', 'fullCrewPerson');
+                }
 
                 if (profileUrl) {
                     var img = createElement('img', 'fullCrewAvatar');
                     img.src = profileUrl;
-                    img.alt = '';
+                    img.alt = personName;
                     img.loading = 'lazy';
                     img.referrerPolicy = 'no-referrer';
                     img.onerror = function () {
@@ -177,9 +246,9 @@
                             img.parentNode.replaceChild(fallback, img);
                         }
                     };
-                    li.appendChild(img);
+                    card.appendChild(img);
                 } else {
-                    li.appendChild(createElement('div', 'fullCrewAvatar fullCrewAvatarFallback', initials(personName)));
+                    card.appendChild(createElement('div', 'fullCrewAvatar fullCrewAvatarFallback', initials(personName)));
                 }
 
                 var text = createElement('div', 'fullCrewPersonText');
@@ -187,7 +256,10 @@
                 if (role) {
                     text.appendChild(createElement('div', 'fullCrewPersonRole', role));
                 }
-                li.appendChild(text);
+                card.appendChild(text);
+
+                var li = createElement('li');
+                li.appendChild(card);
                 list.appendChild(li);
             });
 
@@ -211,7 +283,7 @@
         section.id = SECTION_ID;
 
         var header = createElement('div', 'fullCrewHeader');
-        header.appendChild(createElement('h2', 'fullCrewTitle sectionTitle', 'Full Cast & Crew'));
+        header.appendChild(createElement('h2', 'fullCrewTitle sectionTitle', 'Cast & Crew'));
         header.appendChild(createElement('div', 'fullCrewMeta', ''));
 
         var body = createElement('div', 'fullCrewBody');
@@ -271,15 +343,12 @@
 
         var section = createSection();
         section.setAttribute('data-item-id', itemId);
-        renderStatus(section, 'Loading full cast & crew…', false);
+        renderStatus(section, 'Loading cast & crew…', false);
 
         var anchor = findInsertionPoint(view);
         if (anchor && anchor.parentNode) {
-            if (anchor.nextSibling) {
-                anchor.parentNode.insertBefore(section, anchor.nextSibling);
-            } else {
-                anchor.parentNode.appendChild(section);
-            }
+            // Sit where the native Cast & Crew block is (we'll hide that once data loads).
+            anchor.parentNode.insertBefore(section, anchor);
         } else {
             view.appendChild(section);
         }
@@ -292,10 +361,19 @@
 
                 var error = data.Error || data.error;
                 if (error) {
-                    renderStatus(section, error, true);
+                    showNativeCast(view);
+                    section.remove();
                     return;
                 }
 
+                var departments = data.Departments || data.departments || [];
+                if (!departments.length) {
+                    showNativeCast(view);
+                    section.remove();
+                    return;
+                }
+
+                hideNativeCast(view);
                 renderDepartments(section, data);
             })
             .catch(function (err) {
@@ -303,7 +381,8 @@
                     return;
                 }
                 console.warn('[FullCrew] failed to load credits', err);
-                renderStatus(section, 'Could not load full cast & crew.', true);
+                showNativeCast(view);
+                section.remove();
             });
     }
 
