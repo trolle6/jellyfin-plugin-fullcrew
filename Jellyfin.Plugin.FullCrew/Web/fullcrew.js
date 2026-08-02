@@ -220,6 +220,13 @@
             people.forEach(function (person) {
                 var personName = person.Name || person.name || 'Unknown';
                 var role = person.Role || person.role || '';
+                var roles = person.Roles || person.roles;
+                if (!roles || !roles.length) {
+                    roles = String(role)
+                        .split(/\s*·\s*|\n+/)
+                        .map(function (part) { return part.trim(); })
+                        .filter(Boolean);
+                }
                 var profileUrl = person.ProfileUrl || person.profileUrl;
                 var tmdbId = person.TmdbPersonId || person.tmdbPersonId;
                 var card;
@@ -253,8 +260,12 @@
 
                 var text = createElement('div', 'fullCrewPersonText');
                 text.appendChild(createElement('div', 'fullCrewPersonName', personName));
-                if (role) {
-                    text.appendChild(createElement('div', 'fullCrewPersonRole', role));
+                if (roles.length) {
+                    var roleList = createElement('div', 'fullCrewPersonRoles');
+                    roles.forEach(function (entry) {
+                        roleList.appendChild(createElement('div', 'fullCrewPersonRole', entry));
+                    });
+                    text.appendChild(roleList);
                 }
                 card.appendChild(text);
 
