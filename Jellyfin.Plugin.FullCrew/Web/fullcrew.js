@@ -1555,13 +1555,13 @@
             { title: 'Video codecs', categoryKey: 'videoCodecs', keyPascal: 'VideoCodecs', keyCamel: 'videoCodecs' },
             { title: 'Audio channels', categoryKey: 'audioChannels', keyPascal: 'AudioChannels', keyCamel: 'audioChannels' },
             { title: 'Audio codecs', categoryKey: 'audioCodecs', keyPascal: 'AudioCodecs', keyCamel: 'audioCodecs' },
-            { title: 'Genres', categoryKey: 'genres', keyPascal: 'Genres', keyCamel: 'genres', hint: 'Share of genre tags' },
-            { title: 'Studios', categoryKey: 'studios', keyPascal: 'Studios', keyCamel: 'studios', hint: 'Share of studio credits' },
+            { title: 'Genres', categoryKey: 'genres', keyPascal: 'Genres', keyCamel: 'genres', hint: 'Share of genre tags · top names (full list via title)' },
+            { title: 'Studios', categoryKey: 'studios', keyPascal: 'Studios', keyCamel: 'studios', hint: 'Share of studio credits · top names (full list via title)' },
             { title: 'Collections', categoryKey: 'collections', keyPascal: 'Collections', keyCamel: 'collections', hint: 'Share of collection memberships' },
             { title: 'Years', categoryKey: 'decades', keyPascal: 'Decades', keyCamel: 'decades' },
             { title: 'Official ratings', categoryKey: 'ratings', keyPascal: 'OfficialRatings', keyCamel: 'officialRatings' },
             { title: 'Community scores', categoryKey: 'community', keyPascal: 'CommunityRatings', keyCamel: 'communityRatings' },
-            { title: 'Tags', categoryKey: 'tags', keyPascal: 'Tags', keyCamel: 'tags', hint: 'Share of tag assignments' },
+            { title: 'Tags', categoryKey: 'tags', keyPascal: 'Tags', keyCamel: 'tags', hint: 'Share of tag assignments · top names (full list via title)' },
             { title: 'Languages', categoryKey: 'languages', keyPascal: 'Languages', keyCamel: 'languages' }
         ];
 
@@ -1578,16 +1578,42 @@
                 buckets: people,
                 keyPascal: 'People:' + kind,
                 categoryKey: peopleCategoryKey(kind),
-                hint: 'Share of ' + String(role).toLowerCase() + ' credits'
+                hint: 'Each movie/series counts once (not per episode) · share of ' + String(role).toLowerCase() + ' credits'
             });
         });
 
         return sections;
     }
 
-    /** Keep every API bucket (top N + Other). Never drop Other via a hard slice. */
-    function chartDisplayBuckets(buckets) {
-        return (buckets || []).slice();
+    /**
+     * Overview: keep API buckets, but never show a broken/dominating Other.
+     * Detail pages pass omitOther=false so the full ranked list is shown as-is.
+     */
+    function chartDisplayBuckets(buckets, omitDominantOther) {
+        var items = (buckets || []).slice();
+        if (!omitDominantOther || !items.length) {
+            return items;
+        }
+
+        var other = null;
+        for (var i = 0; i < items.length; i++) {
+            if (String(items[i].name || '') === 'Other') {
+                other = items[i];
+                break;
+            }
+        }
+        if (!other) {
+            return items;
+        }
+
+        var otherPct = Number(other.percent) || 0;
+        if (otherPct > 40 || otherPct > 100) {
+            return items.filter(function (b) {
+                return String(b.name || '') !== 'Other';
+            });
+        }
+
+        return items;
     }
 
     function drawPieChart(canvas, buckets) {
@@ -1631,9 +1657,9 @@
         ctx.fill();
     }
 
-    function renderChartInto(container, buckets, mode) {
+    function renderChartInto(container, buckets, mode, omitDominantOther) {
         container.innerHTML = '';
-        var items = chartDisplayBuckets(buckets);
+        var items = chartDisplayBuckets(buckets, !!omitDominantOther);
         if (!items.length) {
             container.appendChild(createElement('div', 'fullCrewStatsEmpty', 'No data'));
             return;
@@ -1805,7 +1831,7 @@
             }
             var chartHost = createElement('div', 'fullCrewStatsChartHost');
             chartHost.setAttribute('data-section', section.keyPascal);
-            renderChartInto(chartHost, buckets, mode);
+            renderChartInto(chartHost, buckets, mode, true);
             card.appendChild(chartHost);
             card._buckets = buckets;
             grid.appendChild(card);
@@ -1815,6 +1841,7 @@
         var generatedAt = prop(data, 'GeneratedAt', 'generatedAt');
         if (generatedAt) {
             var footerParts = ['Updated ' + String(generatedAt)];
+            footerParts.push('People credits count each movie/series once (not per episode)');
             if (mediaInfoSampleCount > 0) {
                 footerParts.push(
                     'Resolution / HDR / codec / audio % of ' +
@@ -1888,7 +1915,7 @@
                     buckets = normalizeBuckets(prop(statsCachedData, key, map[key]));
                 }
             }
-            renderChartInto(host, buckets || [], mode);
+            renderChartInto(host, buckets || [], mode, true);
         });
     }
 

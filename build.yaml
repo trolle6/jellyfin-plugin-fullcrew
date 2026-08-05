@@ -1,7 +1,7 @@
 ---
 name: "Full Crew"
 guid: "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f"
-version: "1.2.6.0"
+version: "1.2.7.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Full cast and crew by department, break bumpers, and library stats"
@@ -15,7 +15,4 @@ owner: "trolle6"
 artifacts:
 - "Jellyfin.Plugin.FullCrew.dll"
 changelog: >
-  Library Stats: clickable chart titles open a full ranked detail page per
-  category (#/fullcrew/stats/{key}). New GET /FullCrew/stats/{category} returns
-  the uncapped list (safety cap 2000) with the same percent rules as 1.2.5.
-  Overview still uses Top 20 + Other.
+  Library Stats wave 1: richer Insights (oldest/newest movie, median year, longest-running series, production location, actor in most collections), top 25 named buckets with Other omitted on overview when >40%, and clearer per-title people credit copy.

@@ -20,12 +20,15 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 public class LibraryStatsService
 {
     private const int CacheMinutes = 5;
-    private const int TopBucketLimit = 20;
-    private const int TopPeopleLimit = 20;
+    private const int TopBucketLimit = 25;
+    private const int TopPeopleLimit = 25;
     private const int MaxPeoplePerItem = 40;
     private const int MaxCategoryBuckets = 2000;
     private const int SeriesEpisodeSampleLimit = 12;
-    private const string CacheKeyPrefix = "fullcrew:library-stats:v4:";
+    private const int MaxInsights = 14;
+    /// <summary>When Other would exceed this share on overview charts, omit it (detail page still has full list).</summary>
+    private const double OmitOtherPercentThreshold = 40.0;
+    private const string CacheKeyPrefix = "fullcrew:library-stats:v5:";
     private const string AnimationGenre = "Animation";
     private const string OtherBucketName = "Other";
     private const string UnknownBucketName = "Unknown";
@@ -175,6 +178,7 @@ public class LibraryStatsService
             var decadeCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var tagCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var languageCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var locationCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var communityCounts = CommunityRatingBucketOrder.ToDictionary(
                 name => name,
                 _ => 0,
@@ -185,6 +189,7 @@ public class LibraryStatsService
             var videoCodecCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var audioChannelCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var audioCodecCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var productionYears = new List<int>(items.Count);
 
             var animationCount = 0;
             long movieRuntimeTotal = 0;
@@ -192,6 +197,13 @@ public class LibraryStatsService
             long seriesRuntimeTotal = 0;
             var seriesRuntimeSamples = 0;
             var mediaInfoSampleCount = 0;
+            TitleYearFact? oldestMovie = null;
+            TitleYearFact? newestMovie = null;
+            SeriesSpanFact? longestSeries = null;
+
+            var libraryItemIds = items.Select(i => i.Id).ToHashSet();
+            var (collectionCounts, collectionMemberships) = BuildCollectionData(user, libraryItemIds);
+            var actorCollectionSets = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var item in items)
             {
@@ -217,6 +229,11 @@ public class LibraryStatsService
                     Increment(tagCounts, tag.Trim());
                 }
 
+                foreach (var location in (item.ProductionLocations ?? []).Where(l => !string.IsNullOrWhiteSpace(l)))
+                {
+                    Increment(locationCounts, location.Trim());
+                }
+
                 var rating = string.IsNullOrWhiteSpace(item.OfficialRating)
                     ? UnknownBucketName
                     : item.OfficialRating.Trim();
@@ -224,6 +241,7 @@ public class LibraryStatsService
 
                 if (item.ProductionYear is int year && year >= 1000)
                 {
+                    productionYears.Add(year);
                     var decadeStart = (year / 10) * 10;
                     Increment(decadeCounts, decadeStart.ToString(CultureInfo.InvariantCulture) + "s");
                 }
@@ -254,9 +272,24 @@ public class LibraryStatsService
                     }
                 }
 
+                if (kind == BaseItemKind.Movie)
+                {
+                    TrackMovieYearFacts(item, ref oldestMovie, ref newestMovie);
+                }
+                else if (kind == BaseItemKind.Series)
+                {
+                    TrackLongestSeries(item, ref longestSeries);
+                }
+
                 if (item.SupportsPeople)
                 {
                     AggregatePeople(item, peopleByKind);
+
+                    if (collectionMemberships.TryGetValue(item.Id, out var memberOf)
+                        && memberOf.Count > 0)
+                    {
+                        AggregateActorCollections(item, memberOf, actorCollectionSets);
+                    }
                 }
 
                 if (TryAggregateMediaQuality(
@@ -272,8 +305,12 @@ public class LibraryStatsService
                 }
             }
 
-            var libraryItemIds = items.Select(i => i.Id).ToHashSet();
-            var collectionCounts = BuildCollectionCounts(user, libraryItemIds);
+            var topActorByCollections = actorCollectionSets
+                .Select(kv => (Name: kv.Key, Count: kv.Value.Count))
+                .Where(x => x.Count >= 2)
+                .OrderByDescending(x => x.Count)
+                .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
 
             var aggregate = new LibraryStatsAggregate
             {
@@ -295,6 +332,7 @@ public class LibraryStatsService
                 DecadeCounts = decadeCounts,
                 TagCounts = tagCounts,
                 LanguageCounts = languageCounts,
+                LocationCounts = locationCounts,
                 CommunityCounts = communityCounts,
                 ResolutionCounts = resolutionCounts,
                 VideoRangeCounts = videoRangeCounts,
@@ -302,7 +340,14 @@ public class LibraryStatsService
                 AudioChannelCounts = audioChannelCounts,
                 AudioCodecCounts = audioCodecCounts,
                 CollectionCounts = collectionCounts,
-                PeopleByKind = peopleByKind
+                PeopleByKind = peopleByKind,
+                MedianProductionYear = MedianYear(productionYears),
+                OldestMovie = oldestMovie,
+                NewestMovie = newestMovie,
+                LongestSeries = longestSeries,
+                TopActorByCollectionCount = topActorByCollections.Name is null
+                    ? null
+                    : new NamedCountFact { Name = topActorByCollections.Name, Count = topActorByCollections.Count }
             };
 
             _logger.LogDebug(
@@ -328,23 +373,24 @@ public class LibraryStatsService
         var total = agg.TotalCount;
         var types = BuildTypeBuckets(agg.MovieCount, agg.SeriesCount, total);
         // Rule B — multi-label: percent of total assignments (not title count).
-        var genres = ToTopBuckets(agg.GenreCounts, SumCounts(agg.GenreCounts), TopBucketLimit);
-        var studios = ToTopBuckets(agg.StudioCounts, SumCounts(agg.StudioCounts), TopBucketLimit);
-        var tags = ToTopBuckets(agg.TagCounts, SumCounts(agg.TagCounts), TopBucketLimit);
+        // Overview: top 25 named; omit Other when it would dominate (>40%).
+        var genres = ToTopBuckets(agg.GenreCounts, SumCounts(agg.GenreCounts), TopBucketLimit, omitDominantOther: true);
+        var studios = ToTopBuckets(agg.StudioCounts, SumCounts(agg.StudioCounts), TopBucketLimit, omitDominantOther: true);
+        var tags = ToTopBuckets(agg.TagCounts, SumCounts(agg.TagCounts), TopBucketLimit, omitDominantOther: true);
         // Rule A — exclusive single-value: percent of titles (or media samples).
-        var ratings = ToTopBuckets(agg.RatingCounts, total, TopBucketLimit, foldUnknown: false);
+        var ratings = ToTopBuckets(agg.RatingCounts, total, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
         var decades = ToDecadeBuckets(agg.DecadeCounts, total);
         var communityRatings = ToOrderedBuckets(agg.CommunityCounts, total, CommunityRatingBucketOrder);
-        var languages = ToTopBuckets(agg.LanguageCounts, total, TopBucketLimit, foldUnknown: false);
-        var collections = ToTopBuckets(agg.CollectionCounts, SumCounts(agg.CollectionCounts), TopBucketLimit, foldUnknown: false);
+        var languages = ToTopBuckets(agg.LanguageCounts, total, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
+        var collections = ToTopBuckets(agg.CollectionCounts, SumCounts(agg.CollectionCounts), TopBucketLimit, foldUnknown: false, omitDominantOther: true);
         // Rule C — people: percent of credits within that role (see BuildPeopleGroups).
         var peopleByRole = BuildPeopleGroups(agg.PeopleByKind);
         var mediaDenom = agg.MediaInfoSampleCount;
         var resolutions = ToOrderedBuckets(agg.ResolutionCounts, mediaDenom, ResolutionBucketOrder);
         var videoRanges = ToOrderedBuckets(agg.VideoRangeCounts, mediaDenom, VideoRangeBucketOrder);
-        var videoCodecs = ToTopBuckets(agg.VideoCodecCounts, mediaDenom, TopBucketLimit, foldUnknown: false);
-        var audioChannels = ToTopBuckets(agg.AudioChannelCounts, mediaDenom, TopBucketLimit, foldUnknown: false);
-        var audioCodecs = ToTopBuckets(agg.AudioCodecCounts, mediaDenom, TopBucketLimit, foldUnknown: false);
+        var videoCodecs = ToTopBuckets(agg.VideoCodecCounts, mediaDenom, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
+        var audioChannels = ToTopBuckets(agg.AudioChannelCounts, mediaDenom, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
+        var audioCodecs = ToTopBuckets(agg.AudioCodecCounts, mediaDenom, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
 
         return new LibraryStatsResponse
         {
@@ -375,26 +421,7 @@ public class LibraryStatsService
             AudioChannels = audioChannels,
             AudioCodecs = audioCodecs,
             PeopleByRole = peopleByRole,
-            Insights = BuildInsights(
-                agg.MovieCount,
-                agg.SeriesCount,
-                total,
-                agg.AnimationPercent,
-                genres,
-                studios,
-                ratings,
-                decades,
-                communityRatings,
-                peopleByRole,
-                agg.MovieRuntimeSampleCount,
-                agg.MovieRuntimeTicksTotal,
-                tags,
-                languages,
-                collections,
-                mediaDenom,
-                resolutions,
-                videoRanges,
-                videoCodecs)
+            Insights = BuildInsights(agg, genres, studios, ratings, decades, communityRatings, peopleByRole, tags, languages, collections, resolutions, videoRanges, videoCodecs)
         };
     }
 
@@ -716,14 +743,18 @@ public class LibraryStatsService
            && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Builds collection size counts from Jellyfin BoxSets (native collections).
+    /// Builds collection size counts and per-item membership from Jellyfin BoxSets.
     /// Count = Movie/Series members visible in the scoped library.
     /// </summary>
-    private Dictionary<string, int> BuildCollectionCounts(User? user, HashSet<Guid> libraryItemIds)
+    private (Dictionary<string, int> Counts, Dictionary<Guid, HashSet<string>> Memberships) BuildCollectionData(
+        User? user,
+        HashSet<Guid> libraryItemIds)
     {
+        var emptyCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var emptyMemberships = new Dictionary<Guid, HashSet<string>>();
         if (libraryItemIds.Count == 0)
         {
-            return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            return (emptyCounts, emptyMemberships);
         }
 
         try
@@ -742,59 +773,71 @@ public class LibraryStatsService
 
             if (boxSets.Count == 0)
             {
-                return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                return (emptyCounts, emptyMemberships);
             }
 
             var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var memberships = new Dictionary<Guid, HashSet<string>>();
             foreach (var boxSet in boxSets)
             {
-                var memberCount = CountCollectionMembers(boxSet, libraryItemIds);
-                if (memberCount <= 0)
+                var name = boxSet.Name.Trim();
+                var memberIds = GetCollectionMemberIds(boxSet, libraryItemIds);
+                if (memberIds.Count == 0)
                 {
                     continue;
                 }
 
-                var name = boxSet.Name.Trim();
                 if (counts.TryGetValue(name, out var existing))
                 {
-                    counts[name] = existing + memberCount;
+                    counts[name] = existing + memberIds.Count;
                 }
                 else
                 {
-                    counts[name] = memberCount;
+                    counts[name] = memberIds.Count;
+                }
+
+                foreach (var id in memberIds)
+                {
+                    if (!memberships.TryGetValue(id, out var set))
+                    {
+                        set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        memberships[id] = set;
+                    }
+
+                    set.Add(name);
                 }
             }
 
-            return counts;
+            return (counts, memberships);
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Skipping collection stats");
-            return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            return (emptyCounts, emptyMemberships);
         }
     }
 
-    private int CountCollectionMembers(BaseItem boxSet, HashSet<Guid> libraryItemIds)
+    private HashSet<Guid> GetCollectionMemberIds(BaseItem boxSet, HashSet<Guid> libraryItemIds)
     {
+        var members = new HashSet<Guid>();
+
         // Prefer LinkedChildren ItemIds — already on the BoxSet, no per-member lookup.
         if (boxSet is Folder folder && folder.LinkedChildren is { Length: > 0 } linked)
         {
-            var seen = new HashSet<Guid>();
-            var count = 0;
             foreach (var child in linked)
             {
-                if (child.ItemId is not Guid id || id == Guid.Empty || !seen.Add(id))
+                if (child.ItemId is not Guid id || id == Guid.Empty)
                 {
                     continue;
                 }
 
                 if (libraryItemIds.Contains(id))
                 {
-                    count++;
+                    members.Add(id);
                 }
             }
 
-            return count;
+            return members;
         }
 
         // Legacy folder-style boxsets with no LinkedChildren: one ParentId query.
@@ -808,12 +851,61 @@ public class LibraryStatsService
                 IsVirtualItem = false
             });
 
-            return children.Count(c => c is not null && libraryItemIds.Contains(c.Id));
+            foreach (var child in children)
+            {
+                if (child is not null && libraryItemIds.Contains(child.Id))
+                {
+                    members.Add(child.Id);
+                }
+            }
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Skipping members for collection {CollectionId}", boxSet.Id);
-            return 0;
+        }
+
+        return members;
+    }
+
+    private void AggregateActorCollections(
+        BaseItem item,
+        IReadOnlyCollection<string> collectionNames,
+        IDictionary<string, HashSet<string>> actorCollectionSets)
+    {
+        IReadOnlyList<PersonInfo> people;
+        try
+        {
+            people = _libraryManager.GetPeople(item);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Skipping actor-collection stats for item {ItemId}", item.Id);
+            return;
+        }
+
+        if (people is null || people.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var person in people.Take(MaxPeoplePerItem))
+        {
+            if (person.Type != PersonKind.Actor || string.IsNullOrWhiteSpace(person.Name))
+            {
+                continue;
+            }
+
+            var name = person.Name.Trim();
+            if (!actorCollectionSets.TryGetValue(name, out var set))
+            {
+                set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                actorCollectionSets[name] = set;
+            }
+
+            foreach (var collection in collectionNames)
+            {
+                set.Add(collection);
+            }
         }
     }
 
@@ -887,8 +979,8 @@ public class LibraryStatsService
                 continue;
             }
 
-            // Keep "Other" so top-N + Other percents sum to ~100% of this role's credits.
-            var buckets = ToTopBuckets(map, roleTotal, TopPeopleLimit, foldUnknown: false);
+            // Top N named; omit Other when it would dominate overview (>40%).
+            var buckets = ToTopBuckets(map, roleTotal, TopPeopleLimit, foldUnknown: false, omitDominantOther: true);
             if (buckets.Count == 0)
             {
                 continue;
@@ -1012,7 +1104,8 @@ public class LibraryStatsService
         IReadOnlyDictionary<string, int> counts,
         int total,
         int limit,
-        bool foldUnknown = true)
+        bool foldUnknown = true,
+        bool omitDominantOther = false)
     {
         if (counts.Count == 0 || total <= 0)
         {
@@ -1048,12 +1141,18 @@ public class LibraryStatsService
 
         if (otherCount > 0)
         {
-            buckets.Add(new LibraryStatsBucket
+            var otherPercent = Percent(otherCount, total);
+            // Never emit a broken Other (>100%). On overview, also omit when Other would dominate.
+            if (otherPercent is > 0 and <= 100
+                && !(omitDominantOther && otherPercent > OmitOtherPercentThreshold))
             {
-                Name = OtherBucketName,
-                Count = otherCount,
-                Percent = Percent(otherCount, total)
-            });
+                buckets.Add(new LibraryStatsBucket
+                {
+                    Name = OtherBucketName,
+                    Count = otherCount,
+                    Percent = otherPercent
+                });
+            }
         }
 
         return buckets;
@@ -1117,32 +1216,34 @@ public class LibraryStatsService
     }
 
     private static IReadOnlyList<string> BuildInsights(
-        int movieCount,
-        int seriesCount,
-        int total,
-        double animationPercent,
+        LibraryStatsAggregate agg,
         IReadOnlyList<LibraryStatsBucket> genres,
         IReadOnlyList<LibraryStatsBucket> studios,
         IReadOnlyList<LibraryStatsBucket> ratings,
         IReadOnlyList<LibraryStatsBucket> decades,
         IReadOnlyList<LibraryStatsBucket> communityRatings,
         IReadOnlyList<LibraryStatsPeopleGroup> peopleByRole,
-        int movieRuntimeSamples,
-        long movieRuntimeTotal,
         IReadOnlyList<LibraryStatsBucket> tags,
         IReadOnlyList<LibraryStatsBucket> languages,
         IReadOnlyList<LibraryStatsBucket> collections,
-        int mediaInfoSampleCount,
         IReadOnlyList<LibraryStatsBucket> resolutions,
         IReadOnlyList<LibraryStatsBucket> videoRanges,
         IReadOnlyList<LibraryStatsBucket> videoCodecs)
     {
+        var movieCount = agg.MovieCount;
+        var seriesCount = agg.SeriesCount;
+        var total = agg.TotalCount;
+        var animationPercent = agg.AnimationPercent;
+        var movieRuntimeSamples = agg.MovieRuntimeSampleCount;
+        var movieRuntimeTotal = agg.MovieRuntimeTicksTotal;
+        var mediaInfoSampleCount = agg.MediaInfoSampleCount;
+
         if (total <= 0)
         {
             return ["Your library has no movies or series to summarize yet."];
         }
 
-        var insights = new List<string>(12)
+        var insights = new List<string>(MaxInsights)
         {
             string.Format(
                 CultureInfo.InvariantCulture,
@@ -1158,7 +1259,7 @@ public class LibraryStatsService
             var seriesPct = Percent(seriesCount, total);
             if (moviePct >= seriesPct)
             {
-                insights.Add(string.Format(
+                AddInsight(insights, string.Format(
                     CultureInfo.InvariantCulture,
                     "Movies make up {0}% of the library; series are {1}%.",
                     moviePct,
@@ -1166,7 +1267,7 @@ public class LibraryStatsService
             }
             else
             {
-                insights.Add(string.Format(
+                AddInsight(insights, string.Format(
                     CultureInfo.InvariantCulture,
                     "Series make up {0}% of the library; movies are {1}%.",
                     seriesPct,
@@ -1174,10 +1275,83 @@ public class LibraryStatsService
             }
         }
 
+        if (agg.OldestMovie is { } oldest)
+        {
+            AddInsight(insights, string.Format(
+                CultureInfo.InvariantCulture,
+                "Oldest movie: {0} ({1}).",
+                oldest.Name,
+                FormatYearLabel(oldest)));
+        }
+
+        if (agg.NewestMovie is { } newest
+            && (agg.OldestMovie is null
+                || !string.Equals(newest.Name, agg.OldestMovie.Name, StringComparison.OrdinalIgnoreCase)
+                || newest.Year != agg.OldestMovie.Year))
+        {
+            AddInsight(insights, string.Format(
+                CultureInfo.InvariantCulture,
+                "Newest movie: {0} ({1}).",
+                newest.Name,
+                FormatYearLabel(newest)));
+        }
+
+        if (agg.MedianProductionYear is int medianYear)
+        {
+            AddInsight(insights, string.Format(
+                CultureInfo.InvariantCulture,
+                "Median release year is {0}.",
+                medianYear));
+        }
+
+        if (agg.LongestSeries is { } longest && longest.SpanYears >= 1)
+        {
+            AddInsight(insights, string.Format(
+                CultureInfo.InvariantCulture,
+                "Longest-running series: {0} ({1}–{2}, {3} years).",
+                longest.Name,
+                longest.StartYear,
+                longest.EndYear,
+                longest.SpanYears));
+        }
+
+        var topCollection = FirstNamed(collections);
+        if (topCollection is not null && topCollection.Count >= 2)
+        {
+            AddInsight(insights, string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} is your largest collection with {1} titles.",
+                topCollection.Name,
+                topCollection.Count));
+        }
+
+        if (agg.TopActorByCollectionCount is { } franchiseActor && franchiseActor.Count >= 2)
+        {
+            AddInsight(insights, string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} appears in the most collections/franchises ({1}).",
+                franchiseActor.Name,
+                franchiseActor.Count));
+        }
+
+        var topLocation = agg.LocationCounts
+            .OrderByDescending(kv => kv.Value)
+            .ThenBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+        if (!string.IsNullOrEmpty(topLocation.Key) && topLocation.Value > 0)
+        {
+            var locTotal = SumCounts(agg.LocationCounts);
+            AddInsight(insights, string.Format(
+                CultureInfo.InvariantCulture,
+                "Most common production location is {0} ({1}% of location tags).",
+                topLocation.Key,
+                Percent(topLocation.Value, locTotal)));
+        }
+
         var topResolution = FirstNamed(resolutions, allowUnknown: false);
         if (topResolution is not null && mediaInfoSampleCount > 0)
         {
-            insights.Add(string.Format(
+            AddInsight(insights, string.Format(
                 CultureInfo.InvariantCulture,
                 "Most common resolution is {0} ({1}% of {2} titles with media info).",
                 topResolution.Name,
@@ -1195,7 +1369,7 @@ public class LibraryStatsService
             var hdrPercent = Percent(hdrShare, mediaInfoSampleCount);
             if (hdrPercent > 0)
             {
-                insights.Add(string.Format(
+                AddInsight(insights, string.Format(
                     CultureInfo.InvariantCulture,
                     "{0}% of titles with media info are HDR (HDR10 / HDR10+ / HLG / Dolby Vision).",
                     hdrPercent));
@@ -1206,7 +1380,7 @@ public class LibraryStatsService
                     b.Name.Equals("SDR", StringComparison.OrdinalIgnoreCase));
                 if (sdr is not null && sdr.Percent >= 50)
                 {
-                    insights.Add(string.Format(
+                    AddInsight(insights, string.Format(
                         CultureInfo.InvariantCulture,
                         "{0}% of titles with media info are SDR.",
                         sdr.Percent));
@@ -1215,9 +1389,9 @@ public class LibraryStatsService
         }
 
         var topCodec = FirstNamed(videoCodecs, allowUnknown: false);
-        if (topCodec is not null && mediaInfoSampleCount > 0 && insights.Count < 12)
+        if (topCodec is not null && mediaInfoSampleCount > 0)
         {
-            insights.Add(string.Format(
+            AddInsight(insights, string.Format(
                 CultureInfo.InvariantCulture,
                 "Most common video codec is {0} ({1}%).",
                 topCodec.Name,
@@ -1227,7 +1401,7 @@ public class LibraryStatsService
         var topGenre = FirstNamed(genres);
         if (topGenre is not null)
         {
-            insights.Add(string.Format(
+            AddInsight(insights, string.Format(
                 CultureInfo.InvariantCulture,
                 "Most common genre tag is {0} ({1}% of genre tags).",
                 topGenre.Name,
@@ -1237,21 +1411,11 @@ public class LibraryStatsService
         var topStudio = FirstNamed(studios);
         if (topStudio is not null)
         {
-            insights.Add(string.Format(
+            AddInsight(insights, string.Format(
                 CultureInfo.InvariantCulture,
                 "{0}% of studio credits are {1}.",
                 topStudio.Percent,
                 topStudio.Name));
-        }
-
-        var topCollection = FirstNamed(collections);
-        if (topCollection is not null && topCollection.Count >= 2)
-        {
-            insights.Add(string.Format(
-                CultureInfo.InvariantCulture,
-                "{0} is your largest collection with {1} titles.",
-                topCollection.Name,
-                topCollection.Count));
         }
 
         AddTopPersonInsight(insights, peopleByRole, "Actor");
@@ -1262,7 +1426,7 @@ public class LibraryStatsService
 
         if (animationPercent > 0)
         {
-            insights.Add(string.Format(
+            AddInsight(insights, string.Format(
                 CultureInfo.InvariantCulture,
                 "{0}% of titles are tagged Animation.",
                 animationPercent));
@@ -1274,7 +1438,7 @@ public class LibraryStatsService
             .FirstOrDefault();
         if (topCommunity is not null)
         {
-            insights.Add(string.Format(
+            AddInsight(insights, string.Format(
                 CultureInfo.InvariantCulture,
                 "Most titles with a community score fall in {0} ({1}%).",
                 topCommunity.Name,
@@ -1284,7 +1448,7 @@ public class LibraryStatsService
         if (movieRuntimeSamples > 0 && movieRuntimeTotal > 0)
         {
             var avgMinutes = (movieRuntimeTotal / movieRuntimeSamples) / TimeSpan.TicksPerMinute;
-            insights.Add(string.Format(
+            AddInsight(insights, string.Format(
                 CultureInfo.InvariantCulture,
                 "Average movie runtime is about {0} minutes ({1} movies with runtime data).",
                 avgMinutes,
@@ -1292,9 +1456,9 @@ public class LibraryStatsService
         }
 
         var topTag = FirstNamed(tags);
-        if (topTag is not null && insights.Count < 12)
+        if (topTag is not null)
         {
-            insights.Add(string.Format(
+            AddInsight(insights, string.Format(
                 CultureInfo.InvariantCulture,
                 "Most used tag is {0} ({1}% of tag assignments).",
                 topTag.Name,
@@ -1302,9 +1466,9 @@ public class LibraryStatsService
         }
 
         var topLanguage = FirstNamed(languages);
-        if (topLanguage is not null && insights.Count < 12)
+        if (topLanguage is not null)
         {
-            insights.Add(string.Format(
+            AddInsight(insights, string.Format(
                 CultureInfo.InvariantCulture,
                 "Preferred metadata language is most often {0} ({1}%).",
                 topLanguage.Name,
@@ -1312,9 +1476,9 @@ public class LibraryStatsService
         }
 
         var topRating = FirstNamed(ratings, allowUnknown: false);
-        if (topRating is not null && insights.Count < 12)
+        if (topRating is not null)
         {
-            insights.Add(string.Format(
+            AddInsight(insights, string.Format(
                 CultureInfo.InvariantCulture,
                 "The most common official rating is {0} ({1}%).",
                 topRating.Name,
@@ -1327,16 +1491,26 @@ public class LibraryStatsService
             .OrderByDescending(d => d.Count)
             .ThenBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
-        if (topDecade is not null && insights.Count < 12)
+        if (topDecade is not null)
         {
-            insights.Add(string.Format(
+            AddInsight(insights, string.Format(
                 CultureInfo.InvariantCulture,
                 "Most titles are from the {0} ({1}%).",
                 topDecade.Name,
                 topDecade.Percent));
         }
 
-        return insights.Take(12).ToList();
+        return insights.Take(MaxInsights).ToList();
+    }
+
+    private static void AddInsight(ICollection<string> insights, string line)
+    {
+        if (insights.Count >= MaxInsights)
+        {
+            return;
+        }
+
+        insights.Add(line);
     }
 
     private static void AddTopPersonInsight(
@@ -1344,7 +1518,7 @@ public class LibraryStatsService
         IReadOnlyList<LibraryStatsPeopleGroup> peopleByRole,
         string role)
     {
-        if (insights.Count >= 12)
+        if (insights.Count >= MaxInsights)
         {
             return;
         }
@@ -1362,12 +1536,130 @@ public class LibraryStatsService
         var roleLabel = string.IsNullOrWhiteSpace(group!.Role) ? role.ToLowerInvariant() : group.Role.ToLowerInvariant();
         insights.Add(string.Format(
             CultureInfo.InvariantCulture,
-            "{0} is {1}% of {2} credits ({3}).",
+            "{0} is {1}% of {2} credits ({3} titles).",
             top.Name,
             top.Percent,
             roleLabel,
             top.Count));
     }
+
+    private static void TrackMovieYearFacts(
+        BaseItem item,
+        ref TitleYearFact? oldest,
+        ref TitleYearFact? newest)
+    {
+        if (string.IsNullOrWhiteSpace(item.Name))
+        {
+            return;
+        }
+
+        var sortKey = ResolveTitleSortDate(item);
+        if (sortKey is null)
+        {
+            return;
+        }
+
+        var fact = new TitleYearFact
+        {
+            Name = item.Name.Trim(),
+            Year = sortKey.Value.Year,
+            SortKey = sortKey.Value
+        };
+
+        if (oldest is null || fact.SortKey < oldest.SortKey
+            || (fact.SortKey == oldest.SortKey
+                && string.Compare(fact.Name, oldest.Name, StringComparison.OrdinalIgnoreCase) < 0))
+        {
+            oldest = fact;
+        }
+
+        if (newest is null || fact.SortKey > newest.SortKey
+            || (fact.SortKey == newest.SortKey
+                && string.Compare(fact.Name, newest.Name, StringComparison.OrdinalIgnoreCase) < 0))
+        {
+            newest = fact;
+        }
+    }
+
+    private static void TrackLongestSeries(BaseItem item, ref SeriesSpanFact? longest)
+    {
+        if (string.IsNullOrWhiteSpace(item.Name))
+        {
+            return;
+        }
+
+        var startYear = item.PremiereDate?.Year
+            ?? (item.ProductionYear is int py && py >= 1000 ? py : null);
+        if (startYear is null)
+        {
+            return;
+        }
+
+        var endYear = item.EndDate?.Year;
+        if (endYear is null || endYear < startYear)
+        {
+            // Ongoing / unknown end: treat as running through the start year only (no span insight).
+            return;
+        }
+
+        var span = endYear.Value - startYear.Value;
+        if (span < 1)
+        {
+            return;
+        }
+
+        var candidate = new SeriesSpanFact
+        {
+            Name = item.Name.Trim(),
+            StartYear = startYear.Value,
+            EndYear = endYear.Value,
+            SpanYears = span
+        };
+
+        if (longest is null
+            || candidate.SpanYears > longest.SpanYears
+            || (candidate.SpanYears == longest.SpanYears
+                && string.Compare(candidate.Name, longest.Name, StringComparison.OrdinalIgnoreCase) < 0))
+        {
+            longest = candidate;
+        }
+    }
+
+    private static DateTime? ResolveTitleSortDate(BaseItem item)
+    {
+        if (item.PremiereDate is DateTime premiere && premiere.Year >= 1000)
+        {
+            return premiere.Date;
+        }
+
+        if (item.ProductionYear is int year && year >= 1000)
+        {
+            return new DateTime(year, 1, 1);
+        }
+
+        return null;
+    }
+
+    private static int? MedianYear(List<int> years)
+    {
+        if (years.Count == 0)
+        {
+            return null;
+        }
+
+        years.Sort();
+        var mid = years.Count / 2;
+        if (years.Count % 2 == 1)
+        {
+            return years[mid];
+        }
+
+        // Even count: average of the two middle years, rounded away from zero.
+        return (int)Math.Round((years[mid - 1] + years[mid]) / 2.0, MidpointRounding.AwayFromZero);
+    }
+
+    private static string FormatYearLabel(TitleYearFact fact)
+        => fact.Year.ToString(CultureInfo.InvariantCulture);
 
     private static LibraryStatsBucket? FirstNamed(
         IReadOnlyList<LibraryStatsBucket> buckets,
@@ -1522,7 +1814,8 @@ public class LibraryStatsService
             {
                 Category = canonical,
                 Title = title,
-                DenominatorHint = "Share of " + FormatPersonKind(kind).ToLowerInvariant() + " credits",
+                DenominatorHint = "Share of " + FormatPersonKind(kind).ToLowerInvariant()
+                    + " credits (each movie/series once)",
                 Denominator = 0,
                 GeneratedAt = agg.GeneratedAt,
                 Buckets = []
@@ -1536,7 +1829,8 @@ public class LibraryStatsService
         {
             Category = canonical,
             Title = title,
-            DenominatorHint = "Share of " + FormatPersonKind(kind).ToLowerInvariant() + " credits",
+            DenominatorHint = "Share of " + FormatPersonKind(kind).ToLowerInvariant()
+                + " credits (each movie/series once)",
             Denominator = roleTotal,
             GeneratedAt = agg.GeneratedAt,
             Truncated = truncated,
@@ -1725,6 +2019,8 @@ public class LibraryStatsService
 
         public Dictionary<string, int> LanguageCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+        public Dictionary<string, int> LocationCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
         public Dictionary<string, int> CommunityCounts { get; set; } = new(StringComparer.Ordinal);
 
         public Dictionary<string, int> ResolutionCounts { get; set; } = new(StringComparer.Ordinal);
@@ -1740,5 +2036,42 @@ public class LibraryStatsService
         public Dictionary<string, int> CollectionCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
         public Dictionary<PersonKind, Dictionary<string, int>> PeopleByKind { get; set; } = new();
+
+        public int? MedianProductionYear { get; set; }
+
+        public TitleYearFact? OldestMovie { get; set; }
+
+        public TitleYearFact? NewestMovie { get; set; }
+
+        public SeriesSpanFact? LongestSeries { get; set; }
+
+        public NamedCountFact? TopActorByCollectionCount { get; set; }
+    }
+
+    private sealed class TitleYearFact
+    {
+        public string Name { get; set; } = string.Empty;
+
+        public int Year { get; set; }
+
+        public DateTime SortKey { get; set; }
+    }
+
+    private sealed class SeriesSpanFact
+    {
+        public string Name { get; set; } = string.Empty;
+
+        public int StartYear { get; set; }
+
+        public int EndYear { get; set; }
+
+        public int SpanYears { get; set; }
+    }
+
+    private sealed class NamedCountFact
+    {
+        public string Name { get; set; } = string.Empty;
+
+        public int Count { get; set; }
     }
 }

@@ -200,7 +200,7 @@ public class LibraryStatsBucket
 
 /// <summary>
 /// Full ranked list for a single library-stats category (detail page).
-/// Overview keeps Top N + Other; this endpoint returns the uncapped (or high-cap) list.
+/// Overview keeps Top N (+ Other when it is not dominating); this endpoint returns the uncapped (or high-cap) list.
 /// </summary>
 public class LibraryStatsCategoryResponse
 {
