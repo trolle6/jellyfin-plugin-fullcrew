@@ -1,19 +1,429 @@
 (function () {
     'use strict';
 
-    var SECTION_ID = 'fullCrewSection';
-    var STYLE_ID = 'fullCrewStyles';
+    /* ================================================================== */
+    /* Architecture                                                       */
+    /*                                                                    */
+    /* One injected script (Jellyfin plugin constraint). Features live as */
+    /* named sections that share Core primitives:                         */
+    /*   Core.el / Core.prop / Core.getJson / Core.PageTitle / Core.Ui    */
+    /*   Core.CustomPage — mount/teardown for hash-routed overlays        */
+    /* Features: Crew accordion · Bumper/Trailer · Stats · Studio         */
+    /* ================================================================== */
 
-    function ensureStyles() {
-        if (document.getElementById(STYLE_ID)) {
-            return;
+    var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
+
+    var Core = (function () {
+        var STYLE_ID = 'fullCrewStyles';
+
+        function ensureStyles() {
+            if (document.getElementById(STYLE_ID)) {
+                return;
+            }
+            var link = document.createElement('link');
+            link.id = STYLE_ID;
+            link.rel = 'stylesheet';
+            link.href = '/FullCrew/fullcrew.css';
+            document.head.appendChild(link);
         }
 
-        var link = document.createElement('link');
-        link.id = STYLE_ID;
-        link.rel = 'stylesheet';
-        link.href = '/FullCrew/fullcrew.css';
-        document.head.appendChild(link);
+        function el(tag, className, text) {
+            var node = document.createElement(tag);
+            if (className) {
+                node.className = className;
+            }
+            if (text != null) {
+                node.textContent = text;
+            }
+            return node;
+        }
+
+        function prop(obj, pascal, camel) {
+            if (!obj) {
+                return undefined;
+            }
+            if (pascal && Object.prototype.hasOwnProperty.call(obj, pascal) && obj[pascal] !== undefined) {
+                return obj[pascal];
+            }
+            if (camel && Object.prototype.hasOwnProperty.call(obj, camel) && obj[camel] !== undefined) {
+                return obj[camel];
+            }
+            if (pascal && obj[pascal] !== undefined) {
+                return obj[pascal];
+            }
+            if (camel && obj[camel] !== undefined) {
+                return obj[camel];
+            }
+            return undefined;
+        }
+
+        function apiClient() {
+            return window.ApiClient || window.apiClient || null;
+        }
+
+        function getJson(path) {
+            var client = apiClient();
+            var relative = String(path || '').replace(/^\//, '');
+
+            if (client && typeof client.ajax === 'function') {
+                return Promise.resolve(
+                    client.ajax({
+                        url: client.getUrl(relative),
+                        type: 'GET',
+                        dataType: 'json'
+                    })
+                );
+            }
+            if (client && typeof client.getJSON === 'function') {
+                return Promise.resolve(client.getJSON(client.getUrl(relative)));
+            }
+            return fetch('/' + relative, { credentials: 'same-origin' }).then(function (res) {
+                if (!res.ok) {
+                    throw new Error('HTTP ' + res.status);
+                }
+                return res.json();
+            });
+        }
+
+        function normalizeHash(hash) {
+            var raw = (hash || '').split('?')[0];
+            if (raw.indexOf('#!/') === 0) {
+                return '#' + raw.slice(2);
+            }
+            return raw;
+        }
+
+        function parseQuery(query) {
+            var params = {};
+            if (!query) {
+                return params;
+            }
+            query.split('&').forEach(function (pair) {
+                var i = pair.indexOf('=');
+                if (i < 0) {
+                    return;
+                }
+                try {
+                    params[decodeURIComponent(pair.slice(0, i))] = decodeURIComponent(pair.slice(i + 1));
+                } catch (e) {
+                    /* ignore */
+                }
+            });
+            return params;
+        }
+
+        function detailsHashForItem(itemId) {
+            return '#/details?id=' + encodeURIComponent(itemId);
+        }
+
+        function navigateToItem(itemId) {
+            if (!itemId) {
+                return false;
+            }
+            try {
+                if (window.Dashboard && typeof window.Dashboard.navigate === 'function') {
+                    window.Dashboard.navigate('details?id=' + encodeURIComponent(itemId));
+                    return true;
+                }
+            } catch (e0) { /* fall through */ }
+            try {
+                if (window.appRouter && typeof window.appRouter.showItem === 'function') {
+                    window.appRouter.showItem(itemId);
+                    return true;
+                }
+            } catch (e1) { /* fall through */ }
+            window.location.hash = detailsHashForItem(itemId);
+            return true;
+        }
+
+        // Overridable by the full in-app router once Feature: Stats defines it.
+        var navigateImpl = navigateToItem;
+
+        function primaryImageUrl(itemId, maxHeight) {
+            if (!itemId) {
+                return null;
+            }
+            var h = maxHeight || 360;
+            var client = apiClient();
+            try {
+                if (client && typeof client.getImageUrl === 'function') {
+                    return client.getImageUrl(itemId, { type: 'Primary', maxHeight: h });
+                }
+            } catch (e) { /* ignore */ }
+            var base = client && typeof client.getUrl === 'function'
+                ? client.getUrl('Items/' + itemId + '/Images/Primary')
+                : '/Items/' + encodeURIComponent(itemId) + '/Images/Primary';
+            return base + (base.indexOf('?') >= 0 ? '&' : '?') + 'maxHeight=' + h + '&quality=90';
+        }
+
+        /**
+         * First-class document + skinHeader title ownership.
+         * claim()/release() set intent; tick() re-applies after Jellyfin overwrites
+         * the header (e.g. "Page not found") during SPA navigations.
+         */
+        var PageTitle = (function () {
+            var owned = false;
+            var label = '';
+            var PREV_DOC = 'data-fullcrew-prev-title';
+            var OWNED = 'data-fullcrew-owned-title';
+            var PREV_HDR = 'data-fullcrew-prev-header';
+            var HEADER_SEL =
+                '.skinHeader .pageTitle, .skinHeader .headerButton.headerTitle, .headerTop .pageTitle, .headerTitle, .skinHeader h1, .skinHeader .sectionTitle';
+
+            function headerNodes() {
+                return document.querySelectorAll(HEADER_SEL);
+            }
+
+            function shouldTake(node) {
+                var text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+                if (node.getAttribute(OWNED) === '1') {
+                    return true;
+                }
+                return !text || /page not found/i.test(text) || /^home$/i.test(text) || /^stats$/i.test(text);
+            }
+
+            function apply() {
+                if (!owned) {
+                    return;
+                }
+                try {
+                    if (!document.documentElement.getAttribute(PREV_DOC)) {
+                        document.documentElement.setAttribute(PREV_DOC, document.title || '');
+                    }
+                    document.title = label;
+                } catch (e) { /* ignore */ }
+
+                Array.prototype.forEach.call(headerNodes(), function (node) {
+                    if (!node || node.id === 'fullCrewStatsTab' || node.closest('#fullCrewStatsTab')) {
+                        return;
+                    }
+                    if (!shouldTake(node)) {
+                        return;
+                    }
+                    var text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+                    if (!node.getAttribute(PREV_HDR)) {
+                        node.setAttribute(PREV_HDR, text);
+                    }
+                    node.setAttribute(OWNED, '1');
+                    if (node.textContent !== label) {
+                        node.textContent = label;
+                    }
+                });
+            }
+
+            function restore() {
+                try {
+                    var prev = document.documentElement.getAttribute(PREV_DOC);
+                    if (prev != null) {
+                        document.title = prev;
+                        document.documentElement.removeAttribute(PREV_DOC);
+                    }
+                } catch (e) { /* ignore */ }
+                Array.prototype.forEach.call(headerNodes(), function (node) {
+                    if (!node || node.getAttribute(PREV_HDR) == null) {
+                        return;
+                    }
+                    node.textContent = node.getAttribute(PREV_HDR);
+                    node.removeAttribute(PREV_HDR);
+                    node.removeAttribute(OWNED);
+                });
+            }
+
+            return {
+                claim: function (titleText) {
+                    owned = true;
+                    label = titleText || 'Full Crew';
+                    apply();
+                },
+                release: function () {
+                    if (!owned) {
+                        return;
+                    }
+                    owned = false;
+                    label = '';
+                    restore();
+                },
+                tick: function () {
+                    if (owned) {
+                        apply();
+                    }
+                },
+                isOwned: function () {
+                    return owned;
+                }
+            };
+        })();
+
+        var Ui = {
+            status: function (message, isError, className) {
+                return el(
+                    'div',
+                    (className || 'fullCrewStatsStatus') + (isError ? ' fullCrewStatsStatus--error' : ''),
+                    message
+                );
+            },
+            metaRows: function (rows) {
+                var dl = el('dl', 'fullCrewMetaRows fullCrewStudioMetaRows');
+                (rows || []).forEach(function (row) {
+                    if (!row || !row.value) {
+                        return;
+                    }
+                    dl.appendChild(el('dt', 'fullCrewStudioMetaLabel', row.label));
+                    dl.appendChild(el('dd', 'fullCrewStudioMetaValue', row.value));
+                });
+                return dl.childNodes.length ? dl : null;
+            },
+            badgeLink: function (labelText, href) {
+                var a = el('a', 'fullCrewStudioBadge', labelText);
+                a.href = href;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                return a;
+            },
+            itemLink: function (text, itemId, className) {
+                var a = el('a', className || 'fullCrewStatsItemLink', text);
+                a.href = detailsHashForItem(itemId);
+                a.addEventListener('click', function (ev) {
+                    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) {
+                        return;
+                    }
+                    if (navigateImpl(itemId)) {
+                        ev.preventDefault();
+                    }
+                });
+                return a;
+            },
+            externalLink: function (text, href, className) {
+                var a = el('a', className || 'fullCrewStatsItemLink', text);
+                a.href = href;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                return a;
+            },
+            posterCard: function (opts) {
+                var id = opts.id;
+                var card = el('a', 'fullCrewStudioCard');
+                card.href = detailsHashForItem(id);
+                card.addEventListener('click', function (ev) {
+                    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) {
+                        return;
+                    }
+                    if (navigateImpl(id)) {
+                        ev.preventDefault();
+                    }
+                });
+                var poster = el('div', 'fullCrewStudioPoster');
+                var imgUrl = primaryImageUrl(id);
+                if (imgUrl && opts.imageTag) {
+                    var img = el('img', 'fullCrewStudioPosterImg');
+                    img.src = imgUrl;
+                    img.alt = opts.name || '';
+                    img.loading = 'lazy';
+                    poster.appendChild(img);
+                } else {
+                    poster.appendChild(el('div', 'fullCrewStudioPosterFallback', (opts.type || 'Title').charAt(0)));
+                }
+                card.appendChild(poster);
+                var caption = el('div', 'fullCrewStudioCardCaption');
+                caption.appendChild(el('div', 'fullCrewStudioCardName', opts.name || 'Untitled'));
+                var line = [];
+                if (opts.year) { line.push(String(opts.year)); }
+                if (opts.rating) { line.push('★ ' + Number(opts.rating).toFixed(1)); }
+                if (line.length) {
+                    caption.appendChild(el('div', 'fullCrewStudioCardMeta', line.join(' · ')));
+                }
+                card.appendChild(caption);
+                return card;
+            },
+            posterRow: function (heading, cards) {
+                var section = el('section', 'fullCrewStudioSection fullCrewStudioSection--library');
+                section.appendChild(el('h2', 'fullCrewStudioSectionTitle', heading));
+                var scroller = el('div', 'fullCrewStudioRow');
+                (cards || []).forEach(function (card) { scroller.appendChild(card); });
+                section.appendChild(scroller);
+                return section;
+            }
+        };
+
+        function CustomPage(spec) {
+            this.spec = spec;
+        }
+
+        CustomPage.prototype.findMount = function () {
+            return (
+                document.querySelector('.mainAnimatedPages') ||
+                document.querySelector('#mainContent') ||
+                document.querySelector('.mainDrawer-scrollContainer') ||
+                document.body
+            );
+        };
+
+        CustomPage.prototype.get = function () {
+            return document.getElementById(this.spec.id);
+        };
+
+        CustomPage.prototype.tearDown = function (opts) {
+            opts = opts || {};
+            if (this.spec.bodyClass) {
+                document.body.classList.remove(this.spec.bodyClass);
+            }
+            if (opts.releaseTitle !== false && this.spec.ownsTitle) {
+                PageTitle.release();
+            }
+            var page = this.get();
+            if (page && page.parentNode) {
+                page.parentNode.removeChild(page);
+            }
+        };
+
+        CustomPage.prototype.isCurrent = function (routeKey) {
+            var page = this.get();
+            return !!(page && page.getAttribute('data-route') === routeKey && page.getAttribute('data-loaded') === '1');
+        };
+
+        CustomPage.prototype.mountShell = function (routeKey, buildShell) {
+            this.tearDown({ releaseTitle: false });
+            var page = buildShell();
+            page.setAttribute('data-route', routeKey);
+            if (this.spec.bodyClass) {
+                document.body.classList.add(this.spec.bodyClass);
+            }
+            this.findMount().appendChild(page);
+            return page;
+        };
+
+        return {
+            ensureStyles: ensureStyles,
+            el: el,
+            prop: prop,
+            apiClient: apiClient,
+            getJson: getJson,
+            normalizeHash: normalizeHash,
+            parseQuery: parseQuery,
+            detailsHashForItem: detailsHashForItem,
+            navigateToItem: function (itemId) {
+                return navigateImpl(itemId);
+            },
+            setNavigateToItem: function (fn) {
+                if (typeof fn === 'function') {
+                    navigateImpl = fn;
+                }
+            },
+            primaryImageUrl: primaryImageUrl,
+            PageTitle: PageTitle,
+            Ui: Ui,
+            CustomPage: CustomPage
+        };
+    })();
+
+    /* ================================================================== */
+    /* Feature: Cast & Crew accordion                                     */
+    /* ================================================================== */
+
+    var SECTION_ID = 'fullCrewSection';
+
+    function ensureStyles() {
+        Core.ensureStyles();
     }
 
     function getItemIdFromView(view) {
@@ -148,14 +558,7 @@
     }
 
     function createElement(tag, className, text) {
-        var el = document.createElement(tag);
-        if (className) {
-            el.className = className;
-        }
-        if (text != null) {
-            el.textContent = text;
-        }
-        return el;
+        return Core.el(tag, className, text);
     }
 
     function removeExisting(view) {
@@ -304,30 +707,11 @@
     }
 
     function apiClient() {
-        return window.ApiClient || (window.ApiClient && window.ApiClient) || null;
+        return Core.apiClient();
     }
 
     function fetchCredits(itemId) {
-        var client = apiClient();
-        if (client && typeof client.ajax === 'function') {
-            return client.ajax({
-                url: client.getUrl('FullCrew/' + itemId),
-                type: 'GET',
-                dataType: 'json'
-            });
-        }
-
-        if (client && typeof client.getJSON === 'function') {
-            return client.getJSON(client.getUrl('FullCrew/' + itemId));
-        }
-
-        var url = '/FullCrew/' + encodeURIComponent(itemId);
-        return fetch(url, { credentials: 'same-origin' }).then(function (res) {
-            if (!res.ok) {
-                throw new Error('HTTP ' + res.status);
-            }
-            return res.json();
-        });
+        return Core.getJson('FullCrew/' + encodeURIComponent(itemId));
     }
 
     function mount(view) {
@@ -399,53 +783,19 @@
             });
     }
 
+    /* ================================================================== */
+    /* Feature: Break bumper & trailer buttons                            */
+    /* ================================================================== */
+
     var BUMPER_BTN_ID = 'fullCrewBumperButton';
     var TRAILER_BTN_ID = 'fullCrewTrailerButton';
 
     function fetchBumper(itemId) {
-        var client = apiClient();
-        if (client && typeof client.ajax === 'function') {
-            return client.ajax({
-                url: client.getUrl('FullCrew/' + itemId + '/bumper'),
-                type: 'GET',
-                dataType: 'json'
-            });
-        }
-
-        if (client && typeof client.getJSON === 'function') {
-            return client.getJSON(client.getUrl('FullCrew/' + itemId + '/bumper'));
-        }
-
-        return fetch('/FullCrew/' + encodeURIComponent(itemId) + '/bumper', { credentials: 'same-origin' })
-            .then(function (res) {
-                if (!res.ok) {
-                    throw new Error('HTTP ' + res.status);
-                }
-                return res.json();
-            });
+        return Core.getJson('FullCrew/' + encodeURIComponent(itemId) + '/bumper');
     }
 
     function fetchTrailer(itemId) {
-        var client = apiClient();
-        if (client && typeof client.ajax === 'function') {
-            return client.ajax({
-                url: client.getUrl('FullCrew/' + itemId + '/trailer'),
-                type: 'GET',
-                dataType: 'json'
-            });
-        }
-
-        if (client && typeof client.getJSON === 'function') {
-            return client.getJSON(client.getUrl('FullCrew/' + itemId + '/trailer'));
-        }
-
-        return fetch('/FullCrew/' + encodeURIComponent(itemId) + '/trailer', { credentials: 'same-origin' })
-            .then(function (res) {
-                if (!res.ok) {
-                    throw new Error('HTTP ' + res.status);
-                }
-                return res.json();
-            });
+        return Core.getJson('FullCrew/' + encodeURIComponent(itemId) + '/trailer');
     }
 
     function extractYouTubeId(url) {
@@ -869,16 +1219,16 @@
         });
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Library Stats page                                                 */
-    /* ------------------------------------------------------------------ */
+    /* ================================================================== */
+    /* Feature: Library Stats                                             */
+    /* ================================================================== */
 
     var STATS_TAB_ID = 'fullCrewStatsTab';
     var STATS_PAGE_ID = 'fullCrewStatsPage';
     var STATS_HASH = '#/fullcrew/stats';
     var STATS_VIEW_KEY = 'fullCrew.statsViewMode';
     var STATS_DETAIL_VIEW_KEY = 'fullCrew.statsDetailViewMode';
-    var PLUGIN_UNIQUE_ID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
+    var PLUGIN_UNIQUE_ID = PLUGIN_GUID;
     var CHART_COLORS = [
         '#00a4dc',
         '#52b54b',
@@ -918,11 +1268,7 @@
     var statsDetailBuckets = null;
 
     function normalizeStatsHash(hash) {
-        var raw = (hash || '').split('?')[0];
-        if (raw.indexOf('#!/') === 0) {
-            return '#' + raw.slice(2);
-        }
-        return raw;
+        return Core.normalizeHash(hash);
     }
 
     function parseStatsRoute() {
@@ -987,13 +1333,7 @@
     }
 
     function prop(obj, pascal, camel) {
-        if (!obj) {
-            return undefined;
-        }
-        if (obj[pascal] != null) {
-            return obj[pascal];
-        }
-        return obj[camel];
+        return Core.prop(obj, pascal, camel);
     }
 
     function normalizeBuckets(list) {
@@ -1023,7 +1363,7 @@
     }
 
     function detailsHashForItem(itemId) {
-        return '#/details?id=' + encodeURIComponent(String(itemId));
+        return Core.detailsHashForItem(itemId);
     }
 
     function studioPageHash(bucket) {
@@ -1104,6 +1444,9 @@
         window.location.hash = detailsHashForItem(itemId);
         return true;
     }
+
+    // Prefer the full in-app router path for shared Ui links/cards.
+    Core.setNavigateToItem(navigateToItem);
 
     function createBucketNameEl(tagName, className, bucket) {
         var label = displayBucketName(bucket.name);
@@ -1299,27 +1642,7 @@
             return statsFetchInFlight;
         }
 
-        var client = apiClient();
-        var request;
-
-        if (client && typeof client.ajax === 'function') {
-            request = client.ajax({
-                url: client.getUrl('FullCrew/stats'),
-                type: 'GET',
-                dataType: 'json'
-            });
-        } else if (client && typeof client.getJSON === 'function') {
-            request = client.getJSON(client.getUrl('FullCrew/stats'));
-        } else {
-            request = fetch('/FullCrew/stats', { credentials: 'same-origin' }).then(function (res) {
-                if (!res.ok) {
-                    throw new Error('HTTP ' + res.status);
-                }
-                return res.json();
-            });
-        }
-
-        statsFetchInFlight = Promise.resolve(request)
+        statsFetchInFlight = Core.getJson('FullCrew/stats')
             .then(function (data) {
                 statsCachedData = data;
                 statsFetchInFlight = null;
@@ -1342,28 +1665,7 @@
             return statsCategoryFetchInFlight[key];
         }
 
-        var client = apiClient();
-        var path = 'FullCrew/stats/' + encodeURIComponent(key);
-        var request;
-
-        if (client && typeof client.ajax === 'function') {
-            request = client.ajax({
-                url: client.getUrl(path),
-                type: 'GET',
-                dataType: 'json'
-            });
-        } else if (client && typeof client.getJSON === 'function') {
-            request = client.getJSON(client.getUrl(path));
-        } else {
-            request = fetch('/' + path, { credentials: 'same-origin' }).then(function (res) {
-                if (!res.ok) {
-                    throw new Error('HTTP ' + res.status);
-                }
-                return res.json();
-            });
-        }
-
-        statsCategoryFetchInFlight[key] = Promise.resolve(request)
+        statsCategoryFetchInFlight[key] = Core.getJson('FullCrew/stats/' + encodeURIComponent(key))
             .then(function (data) {
                 statsCategoryCache[key] = data;
                 delete statsCategoryFetchInFlight[key];
@@ -1537,46 +1839,11 @@
     }
 
     function setCustomDocumentTitle(active, titleText) {
-        var label = titleText || 'Full Crew';
-        try {
-            if (active) {
-                if (!document.documentElement.getAttribute('data-fullcrew-prev-title')) {
-                    document.documentElement.setAttribute('data-fullcrew-prev-title', document.title || '');
-                }
-                document.title = label;
-            } else {
-                var prev = document.documentElement.getAttribute('data-fullcrew-prev-title');
-                if (prev != null) {
-                    document.title = prev;
-                    document.documentElement.removeAttribute('data-fullcrew-prev-title');
-                }
-            }
-        } catch (e) {
-            /* ignore */
+        if (active) {
+            Core.PageTitle.claim(titleText);
+        } else {
+            Core.PageTitle.release();
         }
-
-        var headerCandidates = document.querySelectorAll(
-            '.skinHeader .pageTitle, .skinHeader .headerButton.headerTitle, .headerTop .pageTitle, .headerTitle, .skinHeader h1, .skinHeader .sectionTitle'
-        );
-        Array.prototype.forEach.call(headerCandidates, function (el) {
-            if (!el || el.id === STATS_TAB_ID || el.closest('#' + STATS_TAB_ID)) {
-                return;
-            }
-            var text = (el.textContent || '').replace(/\s+/g, ' ').trim();
-            if (active) {
-                if (/page not found/i.test(text) || text === '' || /^home$/i.test(text) || /^stats$/i.test(text) || el.getAttribute('data-fullcrew-owned-title') === '1') {
-                    if (!el.getAttribute('data-fullcrew-prev-header')) {
-                        el.setAttribute('data-fullcrew-prev-header', text);
-                    }
-                    el.setAttribute('data-fullcrew-owned-title', '1');
-                    el.textContent = label;
-                }
-            } else if (el.getAttribute('data-fullcrew-prev-header') != null) {
-                el.textContent = el.getAttribute('data-fullcrew-prev-header');
-                el.removeAttribute('data-fullcrew-prev-header');
-                el.removeAttribute('data-fullcrew-owned-title');
-            }
-        });
     }
 
     function setStatsDocumentTitle(active) {
@@ -2234,7 +2501,7 @@
     }
 
     function createStatsPageShell() {
-        var page = createElement('div', 'fullCrewStatsPage');
+        var page = createElement('div', 'fullCrewPage fullCrewStatsPage');
         page.id = STATS_PAGE_ID;
         page.setAttribute('role', 'main');
         page.setAttribute('data-route', 'overview');
@@ -2251,7 +2518,7 @@
     }
 
     function createStatsDetailShell(category) {
-        var page = createElement('div', 'fullCrewStatsPage fullCrewStatsPage--detail');
+        var page = createElement('div', 'fullCrewPage fullCrewStatsPage fullCrewStatsPage--detail');
         page.id = STATS_PAGE_ID;
         page.setAttribute('role', 'main');
         page.setAttribute('data-route', 'detail:' + category);
@@ -2482,11 +2749,16 @@
         maybeOpenFavoritesFromFlag();
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Studio detail page                                                 */
-    /* ------------------------------------------------------------------ */
+    /* ================================================================== */
+    /* Feature: Studio detail page                                        */
+    /* ================================================================== */
 
     var STUDIO_PAGE_ID = 'fullCrewStudioPage';
+    var studioPageCtrl = new Core.CustomPage({
+        id: STUDIO_PAGE_ID,
+        bodyClass: 'fullCrewStudioActive',
+        ownsTitle: true
+    });
 
     function parseStudioRoute() {
         var raw = window.location.hash || '';
@@ -2505,19 +2777,7 @@
             name = match[1];
         }
 
-        var params = {};
-        if (query) {
-            query.split('&').forEach(function (pair) {
-                var i = pair.indexOf('=');
-                if (i < 0) {
-                    return;
-                }
-                var k = decodeURIComponent(pair.slice(0, i));
-                var v = decodeURIComponent(pair.slice(i + 1));
-                params[k] = v;
-            });
-        }
-
+        var params = Core.parseQuery(query);
         var branches = [];
         if (params.branches) {
             branches = params.branches.split(/[|,]/).map(function (s) {
@@ -2537,16 +2797,10 @@
     }
 
     function tearDownStudioPage() {
-        document.body.classList.remove('fullCrewStudioActive');
-        setCustomDocumentTitle(false);
-        var page = document.getElementById(STUDIO_PAGE_ID);
-        if (page && page.parentNode) {
-            page.parentNode.removeChild(page);
-        }
+        studioPageCtrl.tearDown();
     }
 
     function fetchStudioPage(route) {
-        var client = apiClient();
         var path = 'FullCrew/studio/' + encodeURIComponent(route.name);
         var query = [];
         if (route.id) {
@@ -2558,34 +2812,11 @@
         if (query.length) {
             path += '?' + query.join('&');
         }
-
-        if (client && typeof client.getJSON === 'function') {
-            return client.getJSON(client.getUrl(path));
-        }
-        return fetch('/' + path, { credentials: 'same-origin' }).then(function (r) {
-            if (!r.ok) {
-                throw new Error('studio ' + r.status);
-            }
-            return r.json();
-        });
+        return Core.getJson(path);
     }
 
     function primaryImageUrl(itemId) {
-        if (!itemId) {
-            return null;
-        }
-        var client = apiClient();
-        try {
-            if (client && typeof client.getImageUrl === 'function') {
-                return client.getImageUrl(itemId, { type: 'Primary', maxHeight: 360 });
-            }
-        } catch (e) {
-            /* ignore */
-        }
-        var base = client && typeof client.getUrl === 'function'
-            ? client.getUrl('Items/' + itemId + '/Images/Primary')
-            : '/Items/' + encodeURIComponent(itemId) + '/Images/Primary';
-        return base + (base.indexOf('?') >= 0 ? '&' : '?') + 'maxHeight=360&quality=90';
+        return Core.primaryImageUrl(itemId);
     }
 
     function renderStudioPageContent(page, data) {
@@ -2616,36 +2847,26 @@
             body.appendChild(createElement('p', 'fullCrewStudioOverview', overview));
         }
 
-        var metaRows = createElement('dl', 'fullCrewStudioMetaRows');
-        var hq = prop(data, 'Headquarters', 'headquarters');
-        var country = prop(data, 'OriginCountry', 'originCountry');
-        var parent = prop(data, 'ParentCompany', 'parentCompany');
         var stats = prop(data, 'Stats', 'stats');
         var firstY = stats ? prop(stats, 'FirstReleaseYear', 'firstReleaseYear') : null;
-        if (firstY) {
-            appendStudioMetaRow(metaRows, 'First release', String(firstY));
-        }
-        if (hq) {
-            appendStudioMetaRow(metaRows, 'Headquarters', hq);
-        }
-        if (country) {
-            appendStudioMetaRow(metaRows, 'Country', country);
-        }
-        if (parent) {
-            appendStudioMetaRow(metaRows, 'Parent', parent);
-        }
-        if (metaRows.childNodes.length) {
-            body.appendChild(metaRows);
+        var meta = Core.Ui.metaRows([
+            { label: 'First release', value: firstY ? String(firstY) : null },
+            { label: 'Headquarters', value: prop(data, 'Headquarters', 'headquarters') },
+            { label: 'Country', value: prop(data, 'OriginCountry', 'originCountry') },
+            { label: 'Parent', value: prop(data, 'ParentCompany', 'parentCompany') }
+        ]);
+        if (meta) {
+            body.appendChild(meta);
         }
 
         var links = createElement('div', 'fullCrewStudioLinks');
         var tmdbUrl = prop(data, 'TmdbUrl', 'tmdbUrl');
         var homepage = prop(data, 'Homepage', 'homepage');
         if (tmdbUrl) {
-            links.appendChild(studioBadgeLink('TMDb', tmdbUrl));
+            links.appendChild(Core.Ui.badgeLink('TMDb', tmdbUrl));
         }
         if (homepage) {
-            links.appendChild(studioBadgeLink('Homepage', homepage));
+            links.appendChild(Core.Ui.badgeLink('Homepage', homepage));
         }
         if (links.childNodes.length) {
             body.appendChild(links);
@@ -2737,11 +2958,7 @@
                 if (media) { text += ' · ' + media; }
                 var href = prop(m, 'TmdbUrl', 'tmdbUrl');
                 if (href) {
-                    var a = createElement('a', 'fullCrewStatsItemLink', text);
-                    a.href = href;
-                    a.target = '_blank';
-                    a.rel = 'noopener noreferrer';
-                    li.appendChild(a);
+                    li.appendChild(Core.Ui.externalLink(text, href));
                 } else {
                     li.textContent = text;
                 }
@@ -2750,22 +2967,6 @@
             missSection.appendChild(missList);
             body.appendChild(missSection);
         }
-    }
-
-    function appendStudioMetaRow(dl, label, value) {
-        if (!value) {
-            return;
-        }
-        dl.appendChild(createElement('dt', 'fullCrewStudioMetaLabel', label));
-        dl.appendChild(createElement('dd', 'fullCrewStudioMetaValue', value));
-    }
-
-    function studioBadgeLink(label, href) {
-        var a = createElement('a', 'fullCrewStudioBadge', label);
-        a.href = href;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        return a;
     }
 
     function renderStudioQuietStats(stats) {
@@ -2814,13 +3015,7 @@
         row.appendChild(createElement('span', 'fullCrewStudioQuietDetailLabel', label));
         var value = createElement('span', 'fullCrewStudioQuietDetailValue');
         if (id) {
-            var a = createElement('a', 'fullCrewStatsItemLink', title);
-            a.href = detailsHashForItem(id);
-            a.addEventListener('click', function (ev) {
-                if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) { return; }
-                if (navigateToItem(id)) { ev.preventDefault(); }
-            });
-            value.appendChild(a);
+            value.appendChild(Core.Ui.itemLink(title, id));
         } else {
             value.appendChild(document.createTextNode(title));
         }
@@ -2832,52 +3027,17 @@
     }
 
     function renderStudioTitleRow(heading, titles) {
-        var section = createElement('section', 'fullCrewStudioSection fullCrewStudioSection--library');
-        section.appendChild(createElement('h2', 'fullCrewStudioSectionTitle', heading));
-        var scroller = createElement('div', 'fullCrewStudioRow');
-        titles.forEach(function (t) {
-            scroller.appendChild(renderStudioPosterCard(t));
+        var cards = titles.map(function (t) {
+            return Core.Ui.posterCard({
+                id: prop(t, 'Id', 'id'),
+                name: prop(t, 'Name', 'name'),
+                type: prop(t, 'Type', 'type'),
+                year: prop(t, 'ProductionYear', 'productionYear'),
+                rating: prop(t, 'CommunityRating', 'communityRating'),
+                imageTag: prop(t, 'ImageTag', 'imageTag')
+            });
         });
-        section.appendChild(scroller);
-        return section;
-    }
-
-    function renderStudioPosterCard(t) {
-        var id = prop(t, 'Id', 'id');
-        var card = createElement('a', 'fullCrewStudioCard');
-        card.href = detailsHashForItem(id);
-        card.addEventListener('click', function (ev) {
-            if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) { return; }
-            if (navigateToItem(id)) { ev.preventDefault(); }
-        });
-
-        var poster = createElement('div', 'fullCrewStudioPoster');
-        var imgUrl = primaryImageUrl(id);
-        if (imgUrl && prop(t, 'ImageTag', 'imageTag')) {
-            var img = createElement('img', 'fullCrewStudioPosterImg');
-            img.src = imgUrl;
-            img.alt = prop(t, 'Name', 'name') || '';
-            img.loading = 'lazy';
-            poster.appendChild(img);
-        } else {
-            poster.appendChild(
-                createElement('div', 'fullCrewStudioPosterFallback', (prop(t, 'Type', 'type') || 'Title').charAt(0))
-            );
-        }
-        card.appendChild(poster);
-
-        var caption = createElement('div', 'fullCrewStudioCardCaption');
-        caption.appendChild(createElement('div', 'fullCrewStudioCardName', prop(t, 'Name', 'name') || 'Untitled'));
-        var year = prop(t, 'ProductionYear', 'productionYear');
-        var rating = prop(t, 'CommunityRating', 'communityRating');
-        var line = [];
-        if (year) { line.push(String(year)); }
-        if (rating) { line.push('★ ' + Number(rating).toFixed(1)); }
-        if (line.length) {
-            caption.appendChild(createElement('div', 'fullCrewStudioCardMeta', line.join(' · ')));
-        }
-        card.appendChild(caption);
-        return card;
+        return Core.Ui.posterRow(heading, cards);
     }
 
     function mountStudioPage() {
@@ -2891,7 +3051,6 @@
         ensureHeaderTabsVisible();
         injectStatsTab();
 
-        var mount = findStatsMountPoint();
         var existing = document.getElementById(STUDIO_PAGE_ID);
         var routeKey = route.name + '|' + (route.id || '') + '|' + (route.branches || []).join(',');
         if (existing && existing.getAttribute('data-route') === routeKey && existing.getAttribute('data-loaded') === '1') {
@@ -2901,26 +3060,24 @@
             return;
         }
 
-        tearDownStudioPage();
         tearDownStatsPage();
 
-        var page = createElement('div', 'fullCrewStudioPage');
-        page.id = STUDIO_PAGE_ID;
-        page.setAttribute('role', 'main');
-        page.setAttribute('data-route', routeKey);
+        var page = studioPageCtrl.mountShell(routeKey, function () {
+            var p = createElement('div', 'fullCrewPage fullCrewStudioPage');
+            p.id = STUDIO_PAGE_ID;
+            p.setAttribute('role', 'main');
 
-        var header = createElement('div', 'fullCrewStudioHeader');
-        var back = createElement('a', 'fullCrewStudioBack', '← Stats · Studios');
-        back.href = statsDetailHash('studios');
-        header.appendChild(back);
-        page.appendChild(header);
+            var header = createElement('div', 'fullCrewStudioHeader');
+            var back = createElement('a', 'fullCrewStudioBack', '← Stats · Studios');
+            back.href = statsDetailHash('studios');
+            header.appendChild(back);
+            p.appendChild(header);
 
-        var body = createElement('div', 'fullCrewStudioBody');
-        body.appendChild(createElement('div', 'fullCrewStatsStatus', 'Loading studio…'));
-        page.appendChild(body);
-
-        mount.appendChild(page);
-        document.body.classList.add('fullCrewStudioActive');
+            var body = createElement('div', 'fullCrewStudioBody');
+            body.appendChild(Core.Ui.status('Loading studio…'));
+            p.appendChild(body);
+            return p;
+        });
         setStatsTabSelected(false);
         setCustomDocumentTitle(true, route.name);
 
@@ -2933,17 +3090,23 @@
             })
             .catch(function (err) {
                 console.warn('[FullCrew] studio page failed', err);
-                body.innerHTML = '';
-                body.appendChild(
-                    createElement('div', 'fullCrewStatsStatus', 'Could not load studio details.')
-                );
+                var body = page.querySelector('.fullCrewStudioBody');
+                if (body) {
+                    body.innerHTML = '';
+                    body.appendChild(Core.Ui.status('Could not load studio details.', true));
+                }
                 setCustomDocumentTitle(true, route.name);
             });
     }
 
+    /* ================================================================== */
+    /* Boot — single scan loop owns all feature mount/teardown            */
+    /* ================================================================== */
+
     function scanAll() {
         scan();
         syncStatsUi();
+        Core.PageTitle.tick();
     }
 
     function start() {
@@ -2974,6 +3137,7 @@
                 window.setTimeout(function () {
                     mount(view);
                     syncStatsUi();
+                    Core.PageTitle.tick();
                 }, 200);
             } else {
                 window.setTimeout(scanAll, 200);

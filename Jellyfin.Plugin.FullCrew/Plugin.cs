@@ -29,7 +29,8 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public override string Name => "Full Crew";
 
     /// <inheritdoc />
-    public override string Description => "Shows full cast and crew by department on movie and series detail pages.";
+    public override string Description =>
+        "Full cast and crew by department, break bumpers, library stats, and studio pages.";
 
     /// <inheritdoc />
     public override Guid Id => Guid.Parse("a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f");

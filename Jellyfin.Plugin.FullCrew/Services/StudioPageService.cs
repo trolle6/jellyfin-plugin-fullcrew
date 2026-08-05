@@ -23,8 +23,6 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 /// </summary>
 public class StudioPageService
 {
-    private const string JellyfinSharedTmdbApiKey = "4219e299c89411838049ab0dab19ebd5";
-    private const string TmdbImageBase = "https://image.tmdb.org/t/p/w500";
     private const int MaxTitles = 400;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -112,18 +110,18 @@ public class StudioPageService
         {
             Name = displayName,
             ItemId = itemIdN,
-            Overview = NullIfEmpty(tmdb?.Description),
+            Overview = TmdbDefaults.NullIfEmpty(tmdb?.Description),
             LogoUrl = string.IsNullOrWhiteSpace(tmdb?.LogoPath)
                 ? null
-                : TmdbImageBase + tmdb!.LogoPath,
-            Homepage = NullIfEmpty(tmdb?.Homepage),
+                : TmdbDefaults.ImageBaseW500 + tmdb!.LogoPath,
+            Homepage = TmdbDefaults.NullIfEmpty(tmdb?.Homepage),
             TmdbCompanyId = tmdb?.Id > 0 ? tmdb.Id : null,
             TmdbUrl = tmdb?.Id > 0
                 ? "https://www.themoviedb.org/company/" + tmdb.Id.ToString(CultureInfo.InvariantCulture)
                 : null,
-            Headquarters = NullIfEmpty(tmdb?.Headquarters),
-            OriginCountry = NullIfEmpty(tmdb?.OriginCountry),
-            ParentCompany = NullIfEmpty(tmdb?.ParentCompany?.Name),
+            Headquarters = TmdbDefaults.NullIfEmpty(tmdb?.Headquarters),
+            OriginCountry = TmdbDefaults.NullIfEmpty(tmdb?.OriginCountry),
+            ParentCompany = TmdbDefaults.NullIfEmpty(tmdb?.ParentCompany?.Name),
             Branches = matchNames,
             Titles = titles,
             Stats = stats,
@@ -383,7 +381,7 @@ public class StudioPageService
         IReadOnlyList<string> matchNames,
         CancellationToken cancellationToken)
     {
-        var apiKey = ResolveApiKey(Plugin.Instance?.Configuration.TmdbApiKey);
+        var apiKey = TmdbDefaults.ResolveApiKey(Plugin.Instance?.Configuration.TmdbApiKey);
         var searchNames = new List<string> { displayName };
         foreach (var n in matchNames)
         {
@@ -525,7 +523,7 @@ public class StudioPageService
     {
         try
         {
-            var apiKey = ResolveApiKey(Plugin.Instance?.Configuration.TmdbApiKey);
+            var apiKey = TmdbDefaults.ResolveApiKey(Plugin.Instance?.Configuration.TmdbApiKey);
             var ownedKeys = new HashSet<string>(
                 owned.Select(t => NormalizeTitleKey(t.Name)),
                 StringComparer.OrdinalIgnoreCase);
@@ -536,7 +534,7 @@ public class StudioPageService
             var missing = new List<StudioMissingTitle>();
             foreach (var hit in movies.Concat(shows))
             {
-                var title = NullIfEmpty(hit.Title) ?? NullIfEmpty(hit.Name);
+                var title = TmdbDefaults.NullIfEmpty(hit.Title) ?? TmdbDefaults.NullIfEmpty(hit.Name);
                 if (title is null)
                 {
                     continue;
@@ -648,15 +646,6 @@ public class StudioPageService
         return await JsonSerializer.DeserializeAsync<TmdbCompanyDetails>(stream, JsonOptions, cancellationToken)
             .ConfigureAwait(false);
     }
-
-    private static string ResolveApiKey(string? configuredKey)
-    {
-        var trimmed = configuredKey?.Trim();
-        return string.IsNullOrWhiteSpace(trimmed) ? JellyfinSharedTmdbApiKey : trimmed;
-    }
-
-    private static string? NullIfEmpty(string? value)
-        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private sealed class TmdbCompanySearchPayload
     {

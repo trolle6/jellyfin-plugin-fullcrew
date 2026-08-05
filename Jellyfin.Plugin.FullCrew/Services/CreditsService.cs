@@ -23,12 +23,6 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 /// </summary>
 public class CreditsService
 {
-    /// <summary>
-    /// Same shared TMDB API key Jellyfin's official TheMovieDb provider uses
-    /// (<c>MediaBrowser.Providers.Plugins.Tmdb.TmdbUtils.ApiKey</c>) when no custom key is configured.
-    /// </summary>
-    private const string JellyfinSharedTmdbApiKey = "4219e299c89411838049ab0dab19ebd5";
-
     private static readonly string[] DepartmentOrder =
     [
         "Cast",
@@ -119,7 +113,7 @@ public class CreditsService
         }
 
         var config = Plugin.Instance?.Configuration;
-        var apiKey = ResolveApiKey(config?.TmdbApiKey);
+        var apiKey = TmdbDefaults.ResolveApiKey(config?.TmdbApiKey);
 
         var lookup = ResolveTmdbLookup(item);
         if (lookup is null)
@@ -652,14 +646,6 @@ public class CreditsService
             : null;
     }
 
-    /// <summary>
-    /// Uses a configured key when set; otherwise Jellyfin's shared TMDB provider key.
-    /// </summary>
-    private static string ResolveApiKey(string? configuredKey)
-    {
-        var trimmed = configuredKey?.Trim();
-        return string.IsNullOrWhiteSpace(trimmed) ? JellyfinSharedTmdbApiKey : trimmed;
-    }
 
     private sealed record TmdbLookup(string TmdbId, TmdbMediaKind MediaKind, int? SeasonNumber = null);
 

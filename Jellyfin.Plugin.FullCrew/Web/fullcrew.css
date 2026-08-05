@@ -1,7 +1,46 @@
-/* Full Crew — Jellyfin Web accordion styles */
+/* Full Crew — Jellyfin Web client styles
+ *
+ * Design tokens align with Jellyfin chrome (--background-color, --primary-color).
+ * Shared page shell (.fullCrewPage) is used by Stats + Studio overlays.
+ */
+
+:root {
+    --fc-space-1: 0.35rem;
+    --fc-space-2: 0.65rem;
+    --fc-space-3: 1rem;
+    --fc-space-4: 1.5rem;
+    --fc-space-5: 2.5rem;
+    --fc-radius: 0.35rem;
+    --fc-radius-lg: 1rem;
+    --fc-muted: 0.55;
+    --fc-muted-soft: 0.7;
+    --fc-surface: rgba(255, 255, 255, 0.06);
+    --fc-surface-strong: rgba(255, 255, 255, 0.08);
+    --fc-border: rgba(255, 255, 255, 0.12);
+    --fc-accent: var(--primary-color, #00a4dc);
+    --fc-accent-soft: rgba(0, 164, 220, 0.18);
+    --fc-page-bg: var(--background-color, #101010);
+    --fc-danger: #e57373;
+    --fc-font-sm: 0.82rem;
+    --fc-font-md: 0.92rem;
+    --fc-font-lg: 1.25rem;
+    --fc-font-xl: 2rem;
+}
 
 .fullCrewHideNative {
     display: none !important;
+}
+
+/* Shared absolute overlay page (Stats + Studio) */
+.fullCrewPage {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    overflow: auto;
+    box-sizing: border-box;
+    padding: var(--fc-space-3) var(--fc-space-4) var(--fc-space-5);
+    background: var(--fc-page-bg);
+    color: inherit;
 }
 
 .fullCrewSection {
@@ -39,7 +78,7 @@
 
 .fullCrewStatus--error {
     opacity: 0.9;
-    color: #e57373;
+    color: var(--fc-danger);
 }
 
 .fullCrewAccordion {
@@ -353,14 +392,8 @@ body.fullCrewStudioActive .mainAnimatedPages > .mainAnimatedPage {
 }
 
 .fullCrewStatsPage {
-    position: absolute;
-    inset: 0;
-    z-index: 20;
-    overflow: auto;
-    box-sizing: border-box;
-    padding: 1.25rem 1.5rem 2.5rem;
-    background: var(--background-color, #101010);
-    color: inherit;
+    /* Shell layout from .fullCrewPage; keep slightly roomier padding for charts. */
+    padding: 1.25rem var(--fc-space-4) var(--fc-space-5);
 }
 
 .fullCrewStatsHeader {
@@ -854,25 +887,15 @@ a.fullCrewStatsItemLink:focus,
 }
 
 /* Studio detail page — person-page profile layout */
-.fullCrewStudioPage {
-    position: absolute;
-    inset: 0;
-    z-index: 20;
-    overflow: auto;
-    box-sizing: border-box;
-    padding: 1rem 1.5rem 2.5rem;
-    background: var(--background-color, #101010);
-    color: inherit;
-}
 
 .fullCrewStudioHeader {
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--fc-space-1);
 }
 
 .fullCrewStudioBack {
     display: inline-block;
     font-size: 0.85rem;
-    opacity: 0.55;
+    opacity: var(--fc-muted);
     color: inherit;
     text-decoration: none;
     cursor: pointer;
@@ -881,7 +904,7 @@ a.fullCrewStatsItemLink:focus,
 .fullCrewStudioBack:hover,
 .fullCrewStudioBack:focus-visible {
     opacity: 0.9;
-    color: var(--primary-color, #00a4dc);
+    color: var(--fc-accent);
 }
 
 .fullCrewStudioProfile {
@@ -897,8 +920,8 @@ a.fullCrewStatsItemLink:focus,
     width: 12.5rem;
     height: 12.5rem;
     object-fit: contain;
-    background: rgba(255, 255, 255, 0.06);
-    border-radius: 1rem;
+    background: var(--fc-surface);
+    border-radius: var(--fc-radius-lg);
     padding: 1.1rem;
     box-sizing: border-box;
 }
@@ -906,19 +929,19 @@ a.fullCrewStatsItemLink:focus,
 .fullCrewStudioLogoFallback {
     width: 12.5rem;
     height: 12.5rem;
-    border-radius: 1rem;
+    border-radius: var(--fc-radius-lg);
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 3.4rem;
     font-weight: 600;
-    background: rgba(0, 164, 220, 0.18);
-    color: var(--primary-color, #00a4dc);
+    background: var(--fc-accent-soft);
+    color: var(--fc-accent);
 }
 
 .fullCrewStudioName {
-    margin: 1rem 0 0;
-    font-size: 2rem;
+    margin: var(--fc-space-3) 0 0;
+    font-size: var(--fc-font-xl);
     font-weight: 600;
     letter-spacing: 0.01em;
     line-height: 1.15;
@@ -967,9 +990,9 @@ a.fullCrewStatsItemLink:focus,
     justify-content: center;
     min-width: 4.5rem;
     padding: 0.4rem 0.85rem;
-    border-radius: 0.35rem;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--fc-radius);
+    background: var(--fc-surface-strong);
+    border: 1px solid var(--fc-border);
     color: inherit;
     text-decoration: none;
     font-size: 0.88rem;
@@ -980,9 +1003,9 @@ a.fullCrewStatsItemLink:focus,
 
 .fullCrewStudioBadge:hover,
 .fullCrewStudioBadge:focus-visible {
-    background: rgba(0, 164, 220, 0.18);
+    background: var(--fc-accent-soft);
     border-color: rgba(0, 164, 220, 0.45);
-    color: var(--primary-color, #00a4dc);
+    color: var(--fc-accent);
 }
 
 .fullCrewStudioCoCredit {
@@ -994,7 +1017,7 @@ a.fullCrewStatsItemLink:focus,
 }
 
 .fullCrewStudioCoCreditLink {
-    color: var(--primary-color, #00a4dc);
+    color: var(--fc-accent);
     text-decoration: none;
     cursor: pointer;
 }
@@ -1058,7 +1081,7 @@ a.fullCrewStatsItemLink:focus,
 
 .fullCrewStudioVariantLink:hover,
 .fullCrewStudioVariantLink:focus-visible {
-    color: var(--primary-color, #00a4dc);
+    color: var(--fc-accent);
     opacity: 1;
 }
 
@@ -1114,14 +1137,14 @@ a.fullCrewStatsItemLink:focus,
 
 .fullCrewStudioCard:hover .fullCrewStudioCardName,
 .fullCrewStudioCard:focus-visible .fullCrewStudioCardName {
-    color: var(--primary-color, #00a4dc);
+    color: var(--fc-accent);
 }
 
 .fullCrewStudioPoster {
     aspect-ratio: 2 / 3;
-    border-radius: 0.35rem;
+    border-radius: var(--fc-radius);
     overflow: hidden;
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--fc-surface);
 }
 
 .fullCrewStudioPosterImg {
