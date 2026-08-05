@@ -196,6 +196,17 @@ public class LibraryStatsBucket
     /// Gets or sets the share of the library total (0–100).
     /// </summary>
     public double Percent { get; set; }
+
+    /// <summary>
+    /// Gets or sets the Jellyfin library item id when this bucket maps to a real entity
+    /// (Person, Genre, Studio, BoxSet, …). Null when there is no resolvable page.
+    /// </summary>
+    public string? ItemId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the Jellyfin item type for <see cref="ItemId"/> (e.g. Person, Genre, Studio, BoxSet).
+    /// </summary>
+    public string? ItemType { get; set; }
 }
 
 /// <summary>

@@ -25,10 +25,12 @@ public class LibraryStatsService
     private const int MaxPeoplePerItem = 40;
     private const int MaxCategoryBuckets = 2000;
     private const int SeriesEpisodeSampleLimit = 12;
+    /// <summary>Episodes sampled when a Series has empty/thin people at series level.</summary>
+    private const int SeriesPeopleEpisodeSampleLimit = 24;
     private const int MaxInsights = 14;
     /// <summary>When Other would exceed this share on overview charts, omit it (detail page still has full list).</summary>
     private const double OmitOtherPercentThreshold = 40.0;
-    private const string CacheKeyPrefix = "fullcrew:library-stats:v5:";
+    private const string CacheKeyPrefix = "fullcrew:library-stats:v6:";
     private const string AnimationGenre = "Animation";
     private const string OtherBucketName = "Other";
     private const string UnknownBucketName = "Unknown";
@@ -202,7 +204,7 @@ public class LibraryStatsService
             SeriesSpanFact? longestSeries = null;
 
             var libraryItemIds = items.Select(i => i.Id).ToHashSet();
-            var (collectionCounts, collectionMemberships) = BuildCollectionData(user, libraryItemIds);
+            var (collectionCounts, collectionItemIds, collectionMemberships) = BuildCollectionData(user, libraryItemIds);
             var actorCollectionSets = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var item in items)
@@ -281,14 +283,14 @@ public class LibraryStatsService
                     TrackLongestSeries(item, ref longestSeries);
                 }
 
-                if (item.SupportsPeople)
+                if (item.SupportsPeople || kind is BaseItemKind.Movie or BaseItemKind.Series)
                 {
-                    AggregatePeople(item, peopleByKind);
+                    AggregatePeople(item, user, peopleByKind);
 
                     if (collectionMemberships.TryGetValue(item.Id, out var memberOf)
                         && memberOf.Count > 0)
                     {
-                        AggregateActorCollections(item, memberOf, actorCollectionSets);
+                        AggregateActorCollections(item, user, memberOf, actorCollectionSets);
                     }
                 }
 
@@ -311,6 +313,11 @@ public class LibraryStatsService
                 .OrderByDescending(x => x.Count)
                 .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
                 .FirstOrDefault();
+
+            var personNames = peopleByKind.Values
+                .SelectMany(m => m.Keys)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
             var aggregate = new LibraryStatsAggregate
             {
@@ -341,6 +348,12 @@ public class LibraryStatsService
                 AudioCodecCounts = audioCodecCounts,
                 CollectionCounts = collectionCounts,
                 PeopleByKind = peopleByKind,
+                PersonItemIds = BuildPersonItemIdMap(personNames),
+                GenreItemIds = BuildNamedItemIdMap(genreCounts.Keys, BaseItemKind.Genre),
+                StudioItemIds = BuildNamedItemIdMap(studioCounts.Keys, BaseItemKind.Studio),
+                // Jellyfin has no Tag BaseItemKind / detail page — leave unlinked.
+                TagItemIds = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase),
+                CollectionItemIds = collectionItemIds,
                 MedianProductionYear = MedianYear(productionYears),
                 OldestMovie = oldestMovie,
                 NewestMovie = newestMovie,
@@ -374,17 +387,17 @@ public class LibraryStatsService
         var types = BuildTypeBuckets(agg.MovieCount, agg.SeriesCount, total);
         // Rule B — multi-label: percent of total assignments (not title count).
         // Overview: top 25 named; omit Other when it would dominate (>40%).
-        var genres = ToTopBuckets(agg.GenreCounts, SumCounts(agg.GenreCounts), TopBucketLimit, omitDominantOther: true);
-        var studios = ToTopBuckets(agg.StudioCounts, SumCounts(agg.StudioCounts), TopBucketLimit, omitDominantOther: true);
-        var tags = ToTopBuckets(agg.TagCounts, SumCounts(agg.TagCounts), TopBucketLimit, omitDominantOther: true);
+        var genres = ToTopBuckets(agg.GenreCounts, SumCounts(agg.GenreCounts), TopBucketLimit, omitDominantOther: true, itemIds: agg.GenreItemIds, itemType: "Genre");
+        var studios = ToTopBuckets(agg.StudioCounts, SumCounts(agg.StudioCounts), TopBucketLimit, omitDominantOther: true, itemIds: agg.StudioItemIds, itemType: "Studio");
+        var tags = ToTopBuckets(agg.TagCounts, SumCounts(agg.TagCounts), TopBucketLimit, omitDominantOther: true, itemIds: agg.TagItemIds, itemType: "Tag");
         // Rule A — exclusive single-value: percent of titles (or media samples).
         var ratings = ToTopBuckets(agg.RatingCounts, total, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
         var decades = ToDecadeBuckets(agg.DecadeCounts, total);
         var communityRatings = ToOrderedBuckets(agg.CommunityCounts, total, CommunityRatingBucketOrder);
         var languages = ToTopBuckets(agg.LanguageCounts, total, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
-        var collections = ToTopBuckets(agg.CollectionCounts, SumCounts(agg.CollectionCounts), TopBucketLimit, foldUnknown: false, omitDominantOther: true);
+        var collections = ToTopBuckets(agg.CollectionCounts, SumCounts(agg.CollectionCounts), TopBucketLimit, foldUnknown: false, omitDominantOther: true, itemIds: agg.CollectionItemIds, itemType: "BoxSet");
         // Rule C — people: percent of credits within that role (see BuildPeopleGroups).
-        var peopleByRole = BuildPeopleGroups(agg.PeopleByKind);
+        var peopleByRole = BuildPeopleGroups(agg.PeopleByKind, agg.PersonItemIds);
         var mediaDenom = agg.MediaInfoSampleCount;
         var resolutions = ToOrderedBuckets(agg.ResolutionCounts, mediaDenom, ResolutionBucketOrder);
         var videoRanges = ToOrderedBuckets(agg.VideoRangeCounts, mediaDenom, VideoRangeBucketOrder);
@@ -743,18 +756,19 @@ public class LibraryStatsService
            && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Builds collection size counts and per-item membership from Jellyfin BoxSets.
+    /// Builds collection size counts, BoxSet item ids, and per-item membership from Jellyfin BoxSets.
     /// Count = Movie/Series members visible in the scoped library.
     /// </summary>
-    private (Dictionary<string, int> Counts, Dictionary<Guid, HashSet<string>> Memberships) BuildCollectionData(
+    private (Dictionary<string, int> Counts, Dictionary<string, Guid> ItemIds, Dictionary<Guid, HashSet<string>> Memberships) BuildCollectionData(
         User? user,
         HashSet<Guid> libraryItemIds)
     {
         var emptyCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var emptyIds = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
         var emptyMemberships = new Dictionary<Guid, HashSet<string>>();
         if (libraryItemIds.Count == 0)
         {
-            return (emptyCounts, emptyMemberships);
+            return (emptyCounts, emptyIds, emptyMemberships);
         }
 
         try
@@ -773,10 +787,11 @@ public class LibraryStatsService
 
             if (boxSets.Count == 0)
             {
-                return (emptyCounts, emptyMemberships);
+                return (emptyCounts, emptyIds, emptyMemberships);
             }
 
             var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var itemIds = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
             var memberships = new Dictionary<Guid, HashSet<string>>();
             foreach (var boxSet in boxSets)
             {
@@ -796,6 +811,12 @@ public class LibraryStatsService
                     counts[name] = memberIds.Count;
                 }
 
+                // Prefer first BoxSet id when duplicate names collide.
+                if (!itemIds.ContainsKey(name) && boxSet.Id != Guid.Empty)
+                {
+                    itemIds[name] = boxSet.Id;
+                }
+
                 foreach (var id in memberIds)
                 {
                     if (!memberships.TryGetValue(id, out var set))
@@ -808,12 +829,12 @@ public class LibraryStatsService
                 }
             }
 
-            return (counts, memberships);
+            return (counts, itemIds, memberships);
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Skipping collection stats");
-            return (emptyCounts, emptyMemberships);
+            return (emptyCounts, emptyIds, emptyMemberships);
         }
     }
 
@@ -869,13 +890,14 @@ public class LibraryStatsService
 
     private void AggregateActorCollections(
         BaseItem item,
+        User? user,
         IReadOnlyCollection<string> collectionNames,
         IDictionary<string, HashSet<string>> actorCollectionSets)
     {
         IReadOnlyList<PersonInfo> people;
         try
         {
-            people = _libraryManager.GetPeople(item);
+            people = GetPeopleForStatsItem(item, user);
         }
         catch (Exception ex)
         {
@@ -883,7 +905,7 @@ public class LibraryStatsService
             return;
         }
 
-        if (people is null || people.Count == 0)
+        if (people.Count == 0)
         {
             return;
         }
@@ -911,12 +933,13 @@ public class LibraryStatsService
 
     private void AggregatePeople(
         BaseItem item,
+        User? user,
         IDictionary<PersonKind, Dictionary<string, int>> peopleByKind)
     {
         IReadOnlyList<PersonInfo> people;
         try
         {
-            people = _libraryManager.GetPeople(item);
+            people = GetPeopleForStatsItem(item, user);
         }
         catch (Exception ex)
         {
@@ -924,12 +947,13 @@ public class LibraryStatsService
             return;
         }
 
-        if (people is null || people.Count == 0)
+        if (people.Count == 0)
         {
             return;
         }
 
-        // Cap per item so huge cast lists (and GuestStar spam) don't dominate runtime.
+        // Cap per title so huge cast lists (and GuestStar spam) don't dominate runtime.
+        // For series, GetPeopleForStatsItem already de-duped to once-per-person-per-kind.
         foreach (var person in people.Take(MaxPeoplePerItem))
         {
             if (string.IsNullOrWhiteSpace(person.Name))
@@ -948,8 +972,261 @@ public class LibraryStatsService
         }
     }
 
+    /// <summary>
+    /// People for one Movie/Series title. Movies use attached people.
+    /// Series: prefer series-level people; when empty, sample early episodes and
+    /// credit each distinct person at most once for that series (not per episode).
+    /// When series-level people exist but are thin, also merge distinct episode people.
+    /// </summary>
+    private IReadOnlyList<PersonInfo> GetPeopleForStatsItem(BaseItem item, User? user)
+    {
+        var kind = item.GetBaseItemKind();
+        if (kind == BaseItemKind.Series)
+        {
+            return GetSeriesPeopleDistinct(item, user);
+        }
+
+        return SafeGetPeople(item);
+    }
+
+    private IReadOnlyList<PersonInfo> GetSeriesPeopleDistinct(BaseItem series, User? user)
+    {
+        var byKey = new Dictionary<(string Name, PersonKind Kind), PersonInfo>();
+
+        void AddPeople(IEnumerable<PersonInfo> list)
+        {
+            foreach (var person in list)
+            {
+                if (string.IsNullOrWhiteSpace(person.Name))
+                {
+                    continue;
+                }
+
+                var name = person.Name.Trim();
+                var key = (name.ToLowerInvariant(), person.Type);
+                if (!byKey.ContainsKey(key))
+                {
+                    byKey[key] = person;
+                }
+            }
+        }
+
+        var seriesPeople = SafeGetPeople(series);
+        AddPeople(seriesPeople);
+
+        // Empty series people (common for shows like The Office): pull from episodes.
+        // Thin series people: merge carefully so episode-only cast still counts once.
+        var shouldSampleEpisodes = seriesPeople.Count == 0
+            || !seriesPeople.Any(p => p.Type is PersonKind.Actor or PersonKind.GuestStar);
+
+        if (shouldSampleEpisodes)
+        {
+            foreach (var episode in SampleSeriesEpisodes(series, user, SeriesPeopleEpisodeSampleLimit))
+            {
+                AddPeople(SafeGetPeople(episode));
+                if (byKey.Count >= MaxPeoplePerItem * 4)
+                {
+                    break;
+                }
+            }
+        }
+
+        return byKey.Values.ToList();
+    }
+
+    private List<BaseItem> SampleSeriesEpisodes(BaseItem series, User? user, int limit)
+    {
+        var query = user is null
+            ? new InternalItemsQuery()
+            : new InternalItemsQuery(user);
+
+        query.ParentId = series.Id;
+        query.Recursive = true;
+        query.IncludeItemTypes = [BaseItemKind.Episode];
+        query.IsVirtualItem = false;
+        query.Limit = limit;
+        query.OrderBy =
+        [
+            (ItemSortBy.ParentIndexNumber, SortOrder.Ascending),
+            (ItemSortBy.IndexNumber, SortOrder.Ascending)
+        ];
+
+        try
+        {
+            return _libraryManager.GetItemList(query)
+                .Where(e => e is not null && !e.IsVirtualItem)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Skipping episode people sample for series {SeriesId}", series.Id);
+            return [];
+        }
+    }
+
+    private IReadOnlyList<PersonInfo> SafeGetPeople(BaseItem item)
+    {
+        try
+        {
+            return _libraryManager.GetPeople(item) ?? [];
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "GetPeople failed for item {ItemId}", item.Id);
+            return [];
+        }
+    }
+
+    private Dictionary<string, Guid> BuildPersonItemIdMap(IReadOnlyCollection<string> names)
+    {
+        var map = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        if (names.Count == 0)
+        {
+            return map;
+        }
+
+        // Prefer a single Person library query over per-name GetPerson lookups.
+        try
+        {
+            var query = new InternalItemsQuery
+            {
+                Recursive = true,
+                IncludeItemTypes = [BaseItemKind.Person],
+                IsVirtualItem = false
+            };
+
+            var wanted = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
+            foreach (var person in _libraryManager.GetItemList(query))
+            {
+                if (person is null || string.IsNullOrWhiteSpace(person.Name) || person.Id == Guid.Empty)
+                {
+                    continue;
+                }
+
+                var name = person.Name.Trim();
+                if (wanted.Contains(name) && !map.ContainsKey(name))
+                {
+                    map[name] = person.Id;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to build person item id map");
+        }
+
+        // Fill gaps via GetPerson for names still missing (path-based Person items).
+        foreach (var name in names)
+        {
+            if (string.IsNullOrWhiteSpace(name) || map.ContainsKey(name))
+            {
+                continue;
+            }
+
+            try
+            {
+                var person = _libraryManager.GetPerson(name.Trim());
+                if (person is not null && person.Id != Guid.Empty)
+                {
+                    map[name.Trim()] = person.Id;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "GetPerson failed for {Name}", name);
+            }
+        }
+
+        return map;
+    }
+
+    private Dictionary<string, Guid> BuildNamedItemIdMap(IEnumerable<string> names, BaseItemKind itemKind)
+    {
+        var map = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        var wanted = new HashSet<string>(
+            names.Where(n => !string.IsNullOrWhiteSpace(n)),
+            StringComparer.OrdinalIgnoreCase);
+        if (wanted.Count == 0)
+        {
+            return map;
+        }
+
+        try
+        {
+            if (itemKind == BaseItemKind.Genre)
+            {
+                foreach (var name in wanted)
+                {
+                    try
+                    {
+                        var genre = _libraryManager.GetGenre(name);
+                        if (genre is not null && genre.Id != Guid.Empty)
+                        {
+                            map[name] = genre.Id;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "GetGenre failed for {Name}", name);
+                    }
+                }
+
+                return map;
+            }
+
+            if (itemKind == BaseItemKind.Studio)
+            {
+                foreach (var name in wanted)
+                {
+                    try
+                    {
+                        var studio = _libraryManager.GetStudio(name);
+                        if (studio is not null && studio.Id != Guid.Empty)
+                        {
+                            map[name] = studio.Id;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "GetStudio failed for {Name}", name);
+                    }
+                }
+
+                return map;
+            }
+
+            var query = new InternalItemsQuery
+            {
+                Recursive = true,
+                IncludeItemTypes = [itemKind],
+                IsVirtualItem = false
+            };
+
+            foreach (var item in _libraryManager.GetItemList(query))
+            {
+                if (item is null || string.IsNullOrWhiteSpace(item.Name) || item.Id == Guid.Empty)
+                {
+                    continue;
+                }
+
+                var name = item.Name.Trim();
+                if (wanted.Contains(name) && !map.ContainsKey(name))
+                {
+                    map[name] = item.Id;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to build item id map for {ItemKind}", itemKind);
+        }
+
+        return map;
+    }
+
     private static IReadOnlyList<LibraryStatsPeopleGroup> BuildPeopleGroups(
-        IReadOnlyDictionary<PersonKind, Dictionary<string, int>> peopleByKind)
+        IReadOnlyDictionary<PersonKind, Dictionary<string, int>> peopleByKind,
+        IReadOnlyDictionary<string, Guid>? personItemIds)
     {
         if (peopleByKind.Count == 0)
         {
@@ -980,7 +1257,14 @@ public class LibraryStatsService
             }
 
             // Top N named; omit Other when it would dominate overview (>40%).
-            var buckets = ToTopBuckets(map, roleTotal, TopPeopleLimit, foldUnknown: false, omitDominantOther: true);
+            var buckets = ToTopBuckets(
+                map,
+                roleTotal,
+                TopPeopleLimit,
+                foldUnknown: false,
+                omitDominantOther: true,
+                itemIds: personItemIds,
+                itemType: "Person");
             if (buckets.Count == 0)
             {
                 continue;
@@ -1105,7 +1389,9 @@ public class LibraryStatsService
         int total,
         int limit,
         bool foldUnknown = true,
-        bool omitDominantOther = false)
+        bool omitDominantOther = false,
+        IReadOnlyDictionary<string, Guid>? itemIds = null,
+        string? itemType = null)
     {
         if (counts.Count == 0 || total <= 0)
         {
@@ -1131,12 +1417,7 @@ public class LibraryStatsService
         }
 
         var buckets = top
-            .Select(kv => new LibraryStatsBucket
-            {
-                Name = kv.Key,
-                Count = kv.Value,
-                Percent = Percent(kv.Value, total)
-            })
+            .Select(kv => MakeBucket(kv.Key, kv.Value, total, itemIds, itemType))
             .ToList();
 
         if (otherCount > 0)
@@ -1156,6 +1437,33 @@ public class LibraryStatsService
         }
 
         return buckets;
+    }
+
+    private static LibraryStatsBucket MakeBucket(
+        string name,
+        int count,
+        int total,
+        IReadOnlyDictionary<string, Guid>? itemIds,
+        string? itemType)
+    {
+        string? id = null;
+        string? type = null;
+        if (itemIds is not null
+            && itemIds.TryGetValue(name, out var guid)
+            && guid != Guid.Empty)
+        {
+            id = guid.ToString("N", CultureInfo.InvariantCulture);
+            type = itemType;
+        }
+
+        return new LibraryStatsBucket
+        {
+            Name = name,
+            Count = count,
+            Percent = Percent(count, total),
+            ItemId = id,
+            ItemType = type
+        };
     }
 
     private static IReadOnlyList<LibraryStatsBucket> ToOrderedBuckets(
@@ -1708,28 +2016,36 @@ public class LibraryStatsService
                 "Share of genre tags",
                 agg.GenreCounts,
                 SumCounts(agg.GenreCounts),
-                agg.GeneratedAt),
+                agg.GeneratedAt,
+                agg.GenreItemIds,
+                "Genre"),
             "studios" => CategoryFromCounts(
                 "studios",
                 "Studios",
                 "Share of studio credits",
                 agg.StudioCounts,
                 SumCounts(agg.StudioCounts),
-                agg.GeneratedAt),
+                agg.GeneratedAt,
+                agg.StudioItemIds,
+                "Studio"),
             "tags" => CategoryFromCounts(
                 "tags",
                 "Tags",
                 "Share of tag assignments",
                 agg.TagCounts,
                 SumCounts(agg.TagCounts),
-                agg.GeneratedAt),
+                agg.GeneratedAt,
+                agg.TagItemIds,
+                "Tag"),
             "collections" => CategoryFromCounts(
                 "collections",
                 "Collections",
                 "Share of collection memberships",
                 agg.CollectionCounts,
                 SumCounts(agg.CollectionCounts),
-                agg.GeneratedAt),
+                agg.GeneratedAt,
+                agg.CollectionItemIds,
+                "BoxSet"),
             "decades" or "years" => CategoryFromBuckets(
                 "decades",
                 "Years",
@@ -1824,7 +2140,7 @@ public class LibraryStatsService
         }
 
         var roleTotal = map.Values.Sum();
-        var (buckets, truncated, totalBuckets) = ToAllBuckets(map, roleTotal);
+        var (buckets, truncated, totalBuckets) = ToAllBuckets(map, roleTotal, agg.PersonItemIds, "Person");
         result = new LibraryStatsCategoryResponse
         {
             Category = canonical,
@@ -1907,9 +2223,11 @@ public class LibraryStatsService
         string hint,
         IReadOnlyDictionary<string, int> counts,
         int denominator,
-        DateTime generatedAt)
+        DateTime generatedAt,
+        IReadOnlyDictionary<string, Guid>? itemIds = null,
+        string? itemType = null)
     {
-        var (buckets, truncated, totalBuckets) = ToAllBuckets(counts, denominator);
+        var (buckets, truncated, totalBuckets) = ToAllBuckets(counts, denominator, itemIds, itemType);
         return new LibraryStatsCategoryResponse
         {
             Category = category,
@@ -1946,7 +2264,9 @@ public class LibraryStatsService
 
     private static (IReadOnlyList<LibraryStatsBucket> Buckets, bool Truncated, int TotalBuckets) ToAllBuckets(
         IReadOnlyDictionary<string, int> counts,
-        int total)
+        int total,
+        IReadOnlyDictionary<string, Guid>? itemIds = null,
+        string? itemType = null)
     {
         if (counts.Count == 0 || total <= 0)
         {
@@ -1967,12 +2287,7 @@ public class LibraryStatsService
         }
 
         var buckets = ordered
-            .Select(kv => new LibraryStatsBucket
-            {
-                Name = kv.Key,
-                Count = kv.Value,
-                Percent = Percent(kv.Value, total)
-            })
+            .Select(kv => MakeBucket(kv.Key, kv.Value, total, itemIds, itemType))
             .ToList();
 
         return (buckets, truncated, totalBuckets);
@@ -2036,6 +2351,16 @@ public class LibraryStatsService
         public Dictionary<string, int> CollectionCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
         public Dictionary<PersonKind, Dictionary<string, int>> PeopleByKind { get; set; } = new();
+
+        public Dictionary<string, Guid> PersonItemIds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, Guid> GenreItemIds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, Guid> StudioItemIds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, Guid> TagItemIds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, Guid> CollectionItemIds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
         public int? MedianProductionYear { get; set; }
 

@@ -831,8 +831,24 @@
             return;
         }
 
-        var trailer = mountTrailerButton(row, itemId);
-        mountBumperButton(row, itemId, trailer);
+        getItemPromise(itemId).then(function (item) {
+            if (!document.body.contains(row)) {
+                return;
+            }
+
+            var type = item && (item.Type || item.type);
+            // Bumper/Trailer only belong on playable media — not Person/Genre/etc.
+            if (!isBumperTrailerItemType(type)) {
+                return;
+            }
+
+            var trailer = mountTrailerButton(row, itemId);
+            mountBumperButton(row, itemId, trailer);
+        });
+    }
+
+    function isBumperTrailerItemType(type) {
+        return /^(Movie|Series|Season|Episode)$/i.test(String(type || ''));
     }
 
     function scan() {
@@ -985,7 +1001,9 @@
             return {
                 name: prop(item, 'Name', 'name') || 'Unknown',
                 count: Number(prop(item, 'Count', 'count')) || 0,
-                percent: Number(prop(item, 'Percent', 'percent')) || 0
+                percent: Number(prop(item, 'Percent', 'percent')) || 0,
+                itemId: prop(item, 'ItemId', 'itemId') || null,
+                itemType: prop(item, 'ItemType', 'itemType') || null
             };
         }).filter(function (item) {
             return item.count > 0 || item.percent > 0;
@@ -999,6 +1017,83 @@
             return text;
         }
         return text.slice(0, 39) + '\u2026';
+    }
+
+    function detailsHashForItem(itemId) {
+        return '#/details?id=' + encodeURIComponent(String(itemId));
+    }
+
+    /**
+     * Navigate to a Jellyfin entity page (Person, Genre, Studio, BoxSet, …).
+     * Prefer in-app router; fall back to hash navigation.
+     */
+    function navigateToItem(itemId) {
+        if (!itemId) {
+            return false;
+        }
+
+        try {
+            if (window.Emby && window.Emby.Page && typeof window.Emby.Page.showItem === 'function') {
+                window.Emby.Page.showItem(String(itemId));
+                return true;
+            }
+        } catch (e) {
+            /* ignore */
+        }
+
+        try {
+            if (window.appRouter && typeof window.appRouter.showItem === 'function') {
+                var client = apiClient();
+                var userId = client && client.getCurrentUserId && client.getCurrentUserId();
+                if (client && userId && typeof client.getItem === 'function') {
+                    Promise.resolve(client.getItem(userId, String(itemId)))
+                        .then(function (item) {
+                            if (item) {
+                                window.appRouter.showItem(item);
+                            } else {
+                                window.location.hash = detailsHashForItem(itemId);
+                            }
+                        })
+                        .catch(function () {
+                            window.location.hash = detailsHashForItem(itemId);
+                        });
+                    return true;
+                }
+
+                window.appRouter.showItem(String(itemId));
+                return true;
+            }
+        } catch (e2) {
+            /* ignore */
+        }
+
+        window.location.hash = detailsHashForItem(itemId);
+        return true;
+    }
+
+    function createBucketNameEl(tagName, className, bucket) {
+        var label = displayBucketName(bucket.name);
+        var itemId = bucket.itemId;
+        var el;
+        if (itemId) {
+            el = createElement('a', className + ' fullCrewStatsItemLink', label);
+            el.href = detailsHashForItem(itemId);
+            el.setAttribute('title', bucket.name + ' — open in Jellyfin');
+            el.addEventListener('click', function (ev) {
+                if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) {
+                    return;
+                }
+                if (navigateToItem(itemId)) {
+                    ev.preventDefault();
+                }
+            });
+        } else {
+            el = createElement(tagName, className, label);
+            if (label !== bucket.name) {
+                el.title = bucket.name;
+            }
+        }
+        return el;
     }
 
     function fetchPluginConfig() {
@@ -1669,11 +1764,7 @@
             var list = createElement('ol', 'fullCrewStatsRankList');
             items.forEach(function (bucket) {
                 var li = createElement('li', 'fullCrewStatsRankItem');
-                var label = displayBucketName(bucket.name);
-                var name = createElement('span', 'fullCrewStatsRankName', label);
-                if (label !== bucket.name) {
-                    name.title = bucket.name;
-                }
+                var name = createBucketNameEl('span', 'fullCrewStatsRankName', bucket);
                 var meta = createElement(
                     'span',
                     'fullCrewStatsRankMeta',
@@ -1697,11 +1788,7 @@
             var bars = createElement('div', 'fullCrewStatsBars');
             items.forEach(function (bucket, index) {
                 var row = createElement('div', 'fullCrewStatsBarRow');
-                var barLabel = displayBucketName(bucket.name);
-                var labelEl = createElement('div', 'fullCrewStatsBarLabel', barLabel);
-                if (barLabel !== bucket.name) {
-                    labelEl.title = bucket.name;
-                }
+                var labelEl = createBucketNameEl('div', 'fullCrewStatsBarLabel', bucket);
                 row.appendChild(labelEl);
                 var track = createElement('div', 'fullCrewStatsBarTrack');
                 var fill = createElement('div', 'fullCrewStatsBarFill');
@@ -1735,12 +1822,7 @@
             var swatch = createElement('span', 'fullCrewStatsSwatch');
             swatch.style.background = CHART_COLORS[index % CHART_COLORS.length];
             li.appendChild(swatch);
-            var legendLabel = displayBucketName(bucket.name);
-            var nameEl = createElement('span', 'fullCrewStatsLegendName', legendLabel);
-            if (legendLabel !== bucket.name) {
-                nameEl.title = bucket.name;
-            }
-            li.appendChild(nameEl);
+            li.appendChild(createBucketNameEl('span', 'fullCrewStatsLegendName', bucket));
             li.appendChild(
                 createElement(
                     'span',
