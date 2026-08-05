@@ -345,7 +345,9 @@ a.fullCrewPerson:focus-visible .fullCrewPersonName {
 }
 
 body.fullCrewStatsActive .mainAnimatedPages > .page,
-body.fullCrewStatsActive .mainAnimatedPages > .mainAnimatedPage {
+body.fullCrewStatsActive .mainAnimatedPages > .mainAnimatedPage,
+body.fullCrewStudioActive .mainAnimatedPages > .page,
+body.fullCrewStudioActive .mainAnimatedPages > .mainAnimatedPage {
     visibility: hidden !important;
     pointer-events: none !important;
 }
@@ -851,9 +853,190 @@ a.fullCrewStatsItemLink:focus,
     opacity: 0.45;
 }
 
+/* Studio detail page */
+.fullCrewStudioPage {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    overflow: auto;
+    box-sizing: border-box;
+    padding: 1.25rem 1.5rem 2.5rem;
+    background: var(--background-color, #101010);
+    color: inherit;
+}
+
+.fullCrewStudioHeader {
+    margin-bottom: 1rem;
+}
+
+.fullCrewStudioTitle {
+    margin: 0.35rem 0 0;
+    font-size: 1.55rem;
+    font-weight: 600;
+}
+
+.fullCrewStudioHero {
+    display: flex;
+    gap: 1.25rem;
+    align-items: flex-start;
+    margin: 0 0 1.25rem;
+}
+
+.fullCrewStudioLogo {
+    width: 7.5rem;
+    height: 7.5rem;
+    object-fit: contain;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 0.5rem;
+    padding: 0.65rem;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+.fullCrewStudioLogoFallback {
+    width: 7.5rem;
+    height: 7.5rem;
+    border-radius: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.4rem;
+    font-weight: 600;
+    background: rgba(0, 164, 220, 0.18);
+    color: var(--primary-color, #00a4dc);
+    flex-shrink: 0;
+}
+
+.fullCrewStudioMeta {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.fullCrewStudioName {
+    margin: 0 0 0.35rem;
+    font-size: 1.35rem;
+    font-weight: 600;
+}
+
+.fullCrewStudioSub {
+    opacity: 0.65;
+    font-size: 0.9rem;
+    margin-bottom: 0.65rem;
+}
+
+.fullCrewStudioLinks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.fullCrewStudioExtLink {
+    color: var(--primary-color, #00a4dc);
+    text-decoration: underline;
+    text-underline-offset: 0.12em;
+    cursor: pointer;
+}
+
+.fullCrewStudioOverview {
+    margin: 0 0 1.25rem;
+    max-width: 48rem;
+    line-height: 1.5;
+    opacity: 0.88;
+}
+
+.fullCrewStudioSection {
+    margin: 0 0 1.5rem;
+}
+
+.fullCrewStudioSectionTitle {
+    margin: 0 0 0.75rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+.fullCrewStudioBranches {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+}
+
+.fullCrewStudioGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+    gap: 1rem 0.85rem;
+}
+
+.fullCrewStudioCard {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    min-width: 0;
+}
+
+.fullCrewStudioCard:hover .fullCrewStudioCardName,
+.fullCrewStudioCard:focus-visible .fullCrewStudioCardName {
+    color: var(--primary-color, #00a4dc);
+    text-decoration: underline;
+}
+
+.fullCrewStudioPoster {
+    aspect-ratio: 2 / 3;
+    border-radius: 0.35rem;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.fullCrewStudioPosterImg {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.fullCrewStudioPosterFallback {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.6rem;
+    opacity: 0.45;
+}
+
+.fullCrewStudioCardName {
+    font-size: 0.88rem;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+.fullCrewStudioCardMeta {
+    font-size: 0.78rem;
+    opacity: 0.55;
+}
+
 @media (max-width: 42em) {
     .fullCrewStatsPage {
         padding: 1rem 0.85rem 2rem;
+    }
+
+    .fullCrewStudioPage {
+        padding: 1rem 0.85rem 2rem;
+    }
+
+    .fullCrewStudioHero {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+    }
+
+    .fullCrewStudioLinks {
+        justify-content: center;
     }
 
     .fullCrewStatsGrid {

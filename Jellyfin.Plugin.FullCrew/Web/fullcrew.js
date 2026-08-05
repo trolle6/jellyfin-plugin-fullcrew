@@ -1026,6 +1026,37 @@
         return '#/details?id=' + encodeURIComponent(String(itemId));
     }
 
+    function studioPageHash(bucket) {
+        var name = encodeURIComponent(String(bucket.name || 'studio'));
+        var parts = [];
+        if (bucket.itemId) {
+            parts.push('id=' + encodeURIComponent(String(bucket.itemId)));
+        }
+        if (bucket.children && bucket.children.length) {
+            parts.push(
+                'branches=' +
+                    bucket.children
+                        .map(function (c) {
+                            return encodeURIComponent(String(c.name || ''));
+                        })
+                        .filter(Boolean)
+                        .join(',')
+            );
+        }
+        return '#/fullcrew/studio/' + name + (parts.length ? '?' + parts.join('&') : '');
+    }
+
+    function isStudioBucket(bucket) {
+        if (!bucket) {
+            return false;
+        }
+        if (String(bucket.itemType || '') === 'Studio') {
+            return true;
+        }
+        // Clustered parents always carry children (studios-only for now).
+        return !!(bucket.children && bucket.children.length);
+    }
+
     /**
      * Navigate to a Jellyfin entity page (Person, Genre, Studio, BoxSet, …).
      * Prefer in-app router; fall back to hash navigation.
@@ -1076,8 +1107,23 @@
 
     function createBucketNameEl(tagName, className, bucket) {
         var label = displayBucketName(bucket.name);
-        var itemId = bucket.itemId;
         var el;
+
+        if (isStudioBucket(bucket)) {
+            el = createElement('a', className + ' fullCrewStatsItemLink', label);
+            el.href = studioPageHash(bucket);
+            el.setAttribute('title', bucket.name + ' — studio page');
+            el.addEventListener('click', function (ev) {
+                if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) {
+                    return;
+                }
+                ev.preventDefault();
+                window.location.hash = studioPageHash(bucket);
+            });
+            return el;
+        }
+
+        var itemId = bucket.itemId;
         if (itemId) {
             el = createElement('a', className + ' fullCrewStatsItemLink', label);
             el.href = detailsHashForItem(itemId);
@@ -2406,9 +2452,18 @@
 
         if (!statsEnabled) {
             tearDownStatsPage();
+            tearDownStudioPage();
             removeStatsTab();
             return;
         }
+
+        if (isStudioRoute()) {
+            tearDownStatsPage();
+            mountStudioPage();
+            return;
+        }
+
+        tearDownStudioPage();
 
         if (isStatsRoute()) {
             mountStatsPage();
@@ -2418,6 +2473,333 @@
         tearDownStatsPage();
         injectStatsTab();
         maybeOpenFavoritesFromFlag();
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Studio detail page                                                 */
+    /* ------------------------------------------------------------------ */
+
+    var STUDIO_PAGE_ID = 'fullCrewStudioPage';
+
+    function parseStudioRoute() {
+        var raw = window.location.hash || '';
+        var qIndex = raw.indexOf('?');
+        var path = normalizeStatsHash(qIndex >= 0 ? raw.slice(0, qIndex) : raw);
+        var query = qIndex >= 0 ? raw.slice(qIndex + 1) : '';
+        var match = /^#\/fullcrew\/studio\/(.+)$/.exec(path);
+        if (!match) {
+            return null;
+        }
+
+        var name;
+        try {
+            name = decodeURIComponent(match[1]);
+        } catch (e) {
+            name = match[1];
+        }
+
+        var params = {};
+        if (query) {
+            query.split('&').forEach(function (pair) {
+                var i = pair.indexOf('=');
+                if (i < 0) {
+                    return;
+                }
+                var k = decodeURIComponent(pair.slice(0, i));
+                var v = decodeURIComponent(pair.slice(i + 1));
+                params[k] = v;
+            });
+        }
+
+        var branches = [];
+        if (params.branches) {
+            branches = params.branches.split(/[|,]/).map(function (s) {
+                return s.trim();
+            }).filter(Boolean);
+        }
+
+        return {
+            name: name,
+            id: params.id || null,
+            branches: branches
+        };
+    }
+
+    function isStudioRoute() {
+        return parseStudioRoute() != null;
+    }
+
+    function tearDownStudioPage() {
+        document.body.classList.remove('fullCrewStudioActive');
+        var page = document.getElementById(STUDIO_PAGE_ID);
+        if (page && page.parentNode) {
+            page.parentNode.removeChild(page);
+        }
+    }
+
+    function fetchStudioPage(route) {
+        var client = apiClient();
+        var path = 'FullCrew/studio/' + encodeURIComponent(route.name);
+        var query = [];
+        if (route.id) {
+            query.push('id=' + encodeURIComponent(route.id));
+        }
+        if (route.branches && route.branches.length) {
+            query.push('branches=' + route.branches.map(encodeURIComponent).join(','));
+        }
+        if (query.length) {
+            path += '?' + query.join('&');
+        }
+
+        if (client && typeof client.getJSON === 'function') {
+            return client.getJSON(client.getUrl(path));
+        }
+        return fetch('/' + path, { credentials: 'same-origin' }).then(function (r) {
+            if (!r.ok) {
+                throw new Error('studio ' + r.status);
+            }
+            return r.json();
+        });
+    }
+
+    function primaryImageUrl(itemId) {
+        if (!itemId) {
+            return null;
+        }
+        var client = apiClient();
+        try {
+            if (client && typeof client.getImageUrl === 'function') {
+                return client.getImageUrl(itemId, { type: 'Primary', maxHeight: 360 });
+            }
+        } catch (e) {
+            /* ignore */
+        }
+        var base = client && typeof client.getUrl === 'function'
+            ? client.getUrl('Items/' + itemId + '/Images/Primary')
+            : '/Items/' + encodeURIComponent(itemId) + '/Images/Primary';
+        return base + (base.indexOf('?') >= 0 ? '&' : '?') + 'maxHeight=360&quality=90';
+    }
+
+    function renderStudioPageContent(page, data) {
+        var body = page.querySelector('.fullCrewStudioBody');
+        if (!body) {
+            return;
+        }
+        body.innerHTML = '';
+
+        var name = prop(data, 'Name', 'name') || 'Studio';
+        var titleEl = page.querySelector('.fullCrewStudioTitle');
+        if (titleEl) {
+            titleEl.textContent = name;
+        }
+
+        var hero = createElement('div', 'fullCrewStudioHero');
+        var logoUrl = prop(data, 'LogoUrl', 'logoUrl');
+        if (logoUrl) {
+            var logo = createElement('img', 'fullCrewStudioLogo');
+            logo.src = logoUrl;
+            logo.alt = name;
+            hero.appendChild(logo);
+        } else {
+            hero.appendChild(createElement('div', 'fullCrewStudioLogoFallback', name.charAt(0) || '?'));
+        }
+
+        var meta = createElement('div', 'fullCrewStudioMeta');
+        meta.appendChild(createElement('h2', 'fullCrewStudioName', name));
+
+        var bits = [];
+        var hq = prop(data, 'Headquarters', 'headquarters');
+        var country = prop(data, 'OriginCountry', 'originCountry');
+        if (hq) {
+            bits.push(hq);
+        }
+        if (country) {
+            bits.push(country);
+        }
+        if (bits.length) {
+            meta.appendChild(createElement('div', 'fullCrewStudioSub', bits.join(' · ')));
+        }
+
+        var links = createElement('div', 'fullCrewStudioLinks');
+        var homepage = prop(data, 'Homepage', 'homepage');
+        var tmdbUrl = prop(data, 'TmdbUrl', 'tmdbUrl');
+        if (tmdbUrl) {
+            var tmdb = createElement('a', 'fullCrewStudioExtLink', 'TMDB');
+            tmdb.href = tmdbUrl;
+            tmdb.target = '_blank';
+            tmdb.rel = 'noopener noreferrer';
+            links.appendChild(tmdb);
+        }
+        if (homepage) {
+            var home = createElement('a', 'fullCrewStudioExtLink', 'Homepage');
+            home.href = homepage;
+            home.target = '_blank';
+            home.rel = 'noopener noreferrer';
+            links.appendChild(home);
+        }
+        if (links.childNodes.length) {
+            meta.appendChild(links);
+        }
+
+        hero.appendChild(meta);
+        body.appendChild(hero);
+
+        var overview = prop(data, 'Overview', 'overview');
+        if (overview) {
+            body.appendChild(createElement('p', 'fullCrewStudioOverview', overview));
+        }
+
+        var branches = prop(data, 'Branches', 'branches') || [];
+        if (branches.length > 1) {
+            var branchSection = createElement('section', 'fullCrewStudioSection');
+            branchSection.appendChild(createElement('h3', 'fullCrewStudioSectionTitle', 'Studio variants'));
+            var branchList = createElement('ul', 'fullCrewStudioBranches');
+            branches.forEach(function (b) {
+                var li = createElement('li');
+                var a = createElement('a', 'fullCrewStatsItemLink', String(b));
+                a.href = studioPageHash({ name: b, itemType: 'Studio' });
+                a.addEventListener('click', function (ev) {
+                    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) {
+                        return;
+                    }
+                    ev.preventDefault();
+                    window.location.hash = studioPageHash({ name: b, itemType: 'Studio' });
+                });
+                li.appendChild(a);
+                branchList.appendChild(li);
+            });
+            branchSection.appendChild(branchList);
+            body.appendChild(branchSection);
+        }
+
+        var titles = prop(data, 'Titles', 'titles') || [];
+        var gridSection = createElement('section', 'fullCrewStudioSection');
+        gridSection.appendChild(
+            createElement(
+                'h3',
+                'fullCrewStudioSectionTitle',
+                'In your library (' + titles.length + ')'
+            )
+        );
+
+        if (!titles.length) {
+            gridSection.appendChild(
+                createElement('div', 'fullCrewStatsEmpty', 'No movies or series credited to this studio in your library.')
+            );
+        } else {
+            var grid = createElement('div', 'fullCrewStudioGrid');
+            titles.forEach(function (t) {
+                var id = prop(t, 'Id', 'id');
+                var card = createElement('a', 'fullCrewStudioCard');
+                card.href = detailsHashForItem(id);
+                card.addEventListener('click', function (ev) {
+                    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) {
+                        return;
+                    }
+                    if (navigateToItem(id)) {
+                        ev.preventDefault();
+                    }
+                });
+
+                var poster = createElement('div', 'fullCrewStudioPoster');
+                var imgUrl = primaryImageUrl(id);
+                if (imgUrl && prop(t, 'ImageTag', 'imageTag')) {
+                    var img = createElement('img', 'fullCrewStudioPosterImg');
+                    img.src = imgUrl;
+                    img.alt = prop(t, 'Name', 'name') || '';
+                    img.loading = 'lazy';
+                    poster.appendChild(img);
+                } else {
+                    poster.appendChild(
+                        createElement(
+                            'div',
+                            'fullCrewStudioPosterFallback',
+                            (prop(t, 'Type', 'type') || 'Title').charAt(0)
+                        )
+                    );
+                }
+                card.appendChild(poster);
+
+                var caption = createElement('div', 'fullCrewStudioCardCaption');
+                caption.appendChild(createElement('div', 'fullCrewStudioCardName', prop(t, 'Name', 'name') || 'Untitled'));
+                var year = prop(t, 'ProductionYear', 'productionYear');
+                var type = prop(t, 'Type', 'type');
+                var line = [];
+                if (type) {
+                    line.push(type);
+                }
+                if (year) {
+                    line.push(String(year));
+                }
+                if (line.length) {
+                    caption.appendChild(createElement('div', 'fullCrewStudioCardMeta', line.join(' · ')));
+                }
+                card.appendChild(caption);
+                grid.appendChild(card);
+            });
+            gridSection.appendChild(grid);
+        }
+
+        body.appendChild(gridSection);
+    }
+
+    function mountStudioPage() {
+        var route = parseStudioRoute();
+        if (!route) {
+            tearDownStudioPage();
+            return;
+        }
+
+        ensureStyles();
+        ensureHeaderTabsVisible();
+        injectStatsTab();
+
+        var mount = findStatsMountPoint();
+        var existing = document.getElementById(STUDIO_PAGE_ID);
+        var routeKey = route.name + '|' + (route.id || '') + '|' + (route.branches || []).join(',');
+        if (existing && existing.getAttribute('data-route') === routeKey && existing.getAttribute('data-loaded') === '1') {
+            document.body.classList.add('fullCrewStudioActive');
+            setStatsTabSelected(false);
+            return;
+        }
+
+        tearDownStudioPage();
+        tearDownStatsPage();
+
+        var page = createElement('div', 'fullCrewStudioPage');
+        page.id = STUDIO_PAGE_ID;
+        page.setAttribute('role', 'main');
+        page.setAttribute('data-route', routeKey);
+
+        var header = createElement('div', 'fullCrewStudioHeader');
+        var titleWrap = createElement('div', 'fullCrewStatsTitleWrap');
+        var back = createElement('a', 'fullCrewStatsBack', '← Stats · Studios');
+        back.href = statsDetailHash('studios');
+        titleWrap.appendChild(back);
+        titleWrap.appendChild(createElement('h1', 'fullCrewStudioTitle', 'Loading…'));
+        header.appendChild(titleWrap);
+        page.appendChild(header);
+
+        var body = createElement('div', 'fullCrewStudioBody');
+        body.appendChild(createElement('div', 'fullCrewStatsStatus', 'Loading studio…'));
+        page.appendChild(body);
+
+        mount.appendChild(page);
+        document.body.classList.add('fullCrewStudioActive');
+        setStatsTabSelected(false);
+
+        fetchStudioPage(route)
+            .then(function (data) {
+                page.setAttribute('data-loaded', '1');
+                renderStudioPageContent(page, data);
+            })
+            .catch(function (err) {
+                console.warn('[FullCrew] studio page failed', err);
+                body.innerHTML = '';
+                body.appendChild(
+                    createElement('div', 'fullCrewStatsStatus', 'Could not load studio details.')
+                );
+            });
     }
 
     function scanAll() {

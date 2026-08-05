@@ -26,6 +26,7 @@ public class FullCrewController : ControllerBase
     private readonly CreditsService _creditsService;
     private readonly BumperService _bumperService;
     private readonly LibraryStatsService _libraryStatsService;
+    private readonly StudioPageService _studioPageService;
     private readonly IUserManager _userManager;
     private readonly ILogger<FullCrewController> _logger;
 
@@ -36,12 +37,14 @@ public class FullCrewController : ControllerBase
         CreditsService creditsService,
         BumperService bumperService,
         LibraryStatsService libraryStatsService,
+        StudioPageService studioPageService,
         IUserManager userManager,
         ILogger<FullCrewController> logger)
     {
         _creditsService = creditsService;
         _bumperService = bumperService;
         _libraryStatsService = libraryStatsService;
+        _studioPageService = studioPageService;
         _userManager = userManager;
         _logger = logger;
     }
@@ -122,6 +125,66 @@ public class FullCrewController : ControllerBase
         }
 
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Studio detail page: TMDB company metadata + library titles for a studio / name-root cluster.
+    /// </summary>
+    /// <param name="name">Studio or cluster display name (route key).</param>
+    /// <param name="id">Optional Jellyfin Studio item id.</param>
+    /// <param name="branches">Optional comma/pipe-separated exact studio credit names for clusters.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [HttpGet("studio/{name}")]
+    [Authorize]
+    [ProducesResponseType(typeof(StudioPageResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<StudioPageResponse>> GetStudioPage(
+        [FromRoute] string name,
+        [FromQuery] string? id,
+        [FromQuery] string? branches,
+        CancellationToken cancellationToken)
+    {
+        Guid? itemId = null;
+        if (!string.IsNullOrWhiteSpace(id) && Guid.TryParse(id, out var parsed) && parsed != Guid.Empty)
+        {
+            itemId = parsed;
+        }
+
+        var branchList = ParseBranchList(branches);
+        var decodedName = Uri.UnescapeDataString(name ?? string.Empty);
+        var user = TryGetCurrentUser();
+        var result = await _studioPageService
+            .GetStudioPageAsync(user, itemId, decodedName, branchList, cancellationToken)
+            .ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Studio detail by Jellyfin item id only.
+    /// </summary>
+    [HttpGet("studio/item/{itemId:guid}")]
+    [Authorize]
+    [ProducesResponseType(typeof(StudioPageResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<StudioPageResponse>> GetStudioPageByItem(
+        [FromRoute] Guid itemId,
+        [FromQuery] string? branches,
+        CancellationToken cancellationToken)
+    {
+        var user = TryGetCurrentUser();
+        var result = await _studioPageService
+            .GetStudioPageAsync(user, itemId, null, ParseBranchList(branches), cancellationToken)
+            .ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    private static IReadOnlyList<string>? ParseBranchList(string? branches)
+    {
+        if (string.IsNullOrWhiteSpace(branches))
+        {
+            return null;
+        }
+
+        var parts = branches.Split(['|', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length == 0 ? null : parts;
     }
 
     /// <summary>

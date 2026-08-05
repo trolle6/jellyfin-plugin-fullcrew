@@ -17,6 +17,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<CreditsService>();
         serviceCollection.AddSingleton<BumperService>();
         serviceCollection.AddSingleton<LibraryStatsService>();
+        serviceCollection.AddSingleton<StudioPageService>();
         serviceCollection.AddSingleton<IStartupFilter, ScriptInjectionStartupFilter>();
         serviceCollection.AddHostedService<ScriptInjectionService>();
     }

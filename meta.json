@@ -1,12 +1,12 @@
 {
   "category": "Metadata",
-  "changelog": "Stats names link via PersonInfo.Id; studios cluster by shared name root with expand/collapse; clearer link affordance.",
-  "description": "Fetches complete TMDB cast and crew for movies and series, groups people by department, and shows them in a polished accordion on Jellyfin Web item detail pages. Includes a nostalgia Break Bumper action and a Library Stats page.",
+  "changelog": "Studio detail pages (TMDB + library grid). Stats name-root studio clustering and ItemId links.",
+  "description": "Fetches complete TMDB cast and crew for movies and series, groups people by department, and shows them in a polished accordion on Jellyfin Web item detail pages. Includes a nostalgia Break Bumper action, Library Stats, and studio detail pages.",
   "guid": "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f",
   "name": "Full Crew",
-  "overview": "Full cast and crew by department, break bumpers, and library stats",
+  "overview": "Full cast and crew by department, break bumpers, library stats, and studio pages",
   "owner": "trolle6",
   "targetAbi": "10.11.0.0",
   "timestamp": "2026-08-05T00:00:00Z",
-  "version": "1.2.9.0"
+  "version": "1.3.0.0"
 }
