@@ -22,15 +22,18 @@ public class LibraryStatsService
     private const int CacheMinutes = 5;
     private const int TopBucketLimit = 25;
     private const int TopPeopleLimit = 25;
-    private const int MaxPeoplePerItem = 40;
+    /// <summary>Per-title people cap for movies (keeps guest lists from exploding).</summary>
+    private const int MaxPeoplePerMovie = 60;
+    /// <summary>Per-series people cap after series+episode merge (once per person/kind).</summary>
+    private const int MaxPeoplePerSeries = 200;
     private const int MaxCategoryBuckets = 2000;
     private const int SeriesEpisodeSampleLimit = 12;
-    /// <summary>Episodes sampled when a Series has empty/thin people at series level.</summary>
-    private const int SeriesPeopleEpisodeSampleLimit = 24;
+    /// <summary>Episodes sampled to fill series cast (always merged, still once per series).</summary>
+    private const int SeriesPeopleEpisodeSampleLimit = 48;
     private const int MaxInsights = 14;
     /// <summary>When Other would exceed this share on overview charts, omit it (detail page still has full list).</summary>
     private const double OmitOtherPercentThreshold = 40.0;
-    private const string CacheKeyPrefix = "fullcrew:library-stats:v7:";
+    private const string CacheKeyPrefix = "fullcrew:library-stats:v8:";
     private const string AnimationGenre = "Animation";
     private const string OtherBucketName = "Other";
     private const string UnknownBucketName = "Unknown";
@@ -922,7 +925,7 @@ public class LibraryStatsService
             return;
         }
 
-        foreach (var person in people.Take(MaxPeoplePerItem))
+        foreach (var person in PrioritizePeople(people, MaxPeoplePerSeries))
         {
             if (person.Type != PersonKind.Actor || string.IsNullOrWhiteSpace(person.Name))
             {
@@ -965,9 +968,10 @@ public class LibraryStatsService
             return;
         }
 
-        // Cap per title so huge cast lists (and GuestStar spam) don't dominate runtime.
-        // For series, GetPeopleForStatsItem already de-duped to once-per-person-per-kind.
-        foreach (var person in people.Take(MaxPeoplePerItem))
+        // Cap per title; prioritize leads so partial series cast + Take() cannot drop Carell-style
+        // episode-only actors. Series people are already de-duped once-per-person-per-kind.
+        var cap = item.GetBaseItemKind() == BaseItemKind.Series ? MaxPeoplePerSeries : MaxPeoplePerMovie;
+        foreach (var person in PrioritizePeople(people, cap))
         {
             if (string.IsNullOrWhiteSpace(person.Name))
             {
@@ -993,10 +997,36 @@ public class LibraryStatsService
     }
 
     /// <summary>
+    /// Prefer billed cast/crew when applying a per-title cap (Actors before deep GuestStar lists).
+    /// </summary>
+    private static IEnumerable<PersonInfo> PrioritizePeople(IReadOnlyList<PersonInfo> people, int cap)
+    {
+        return people
+            .OrderBy(p => PersonKindPriority(p.Type))
+            .ThenBy(p => p.SortOrder ?? int.MaxValue)
+            .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(cap);
+    }
+
+    private static int PersonKindPriority(PersonKind kind)
+        => kind switch
+        {
+            PersonKind.Actor => 0,
+            PersonKind.GuestStar => 1,
+            PersonKind.Director => 2,
+            PersonKind.Creator => 3,
+            PersonKind.Writer => 4,
+            PersonKind.Producer => 5,
+            PersonKind.Composer => 6,
+            PersonKind.Editor => 7,
+            _ => 20
+        };
+
+    /// <summary>
     /// People for one Movie/Series title. Movies use attached people.
-    /// Series: prefer series-level people; when empty, sample early episodes and
-    /// credit each distinct person at most once for that series (not per episode).
-    /// When series-level people exist but are thin, also merge distinct episode people.
+    /// Series: series-level people merged with a bounded episode sample — each person
+    /// counted at most once for that series (not per episode). Episode merge is always on
+    /// so partial series cast cannot hide episode-only leads (e.g. Steve Carell on The Office).
     /// </summary>
     private IReadOnlyList<PersonInfo> GetPeopleForStatsItem(BaseItem item, User? user)
     {
@@ -1031,27 +1061,101 @@ public class LibraryStatsService
             }
         }
 
-        var seriesPeople = SafeGetPeople(series);
-        AddPeople(seriesPeople);
+        AddPeople(SafeGetPeople(series));
 
-        // Empty series people (common for shows like The Office): pull from episodes.
-        // Thin series people: merge carefully so episode-only cast still counts once.
-        var shouldSampleEpisodes = seriesPeople.Count == 0
-            || !seriesPeople.Any(p => p.Type is PersonKind.Actor or PersonKind.GuestStar);
-
-        if (shouldSampleEpisodes)
+        // Always merge episode people (distinct). Series-level lists are often incomplete —
+        // Rainn Wilson may be present while Steve Carell only appears on episode credits.
+        foreach (var episode in SampleSeriesEpisodesForPeople(series, user, SeriesPeopleEpisodeSampleLimit))
         {
-            foreach (var episode in SampleSeriesEpisodes(series, user, SeriesPeopleEpisodeSampleLimit))
+            AddPeople(SafeGetPeople(episode));
+            if (byKey.Count >= MaxPeoplePerSeries * 2)
             {
-                AddPeople(SafeGetPeople(episode));
-                if (byKey.Count >= MaxPeoplePerItem * 4)
-                {
-                    break;
-                }
+                break;
             }
         }
 
         return byKey.Values.ToList();
+    }
+
+    /// <summary>
+    /// Sample early episodes plus the first episode of later seasons for better cast coverage.
+    /// </summary>
+    private List<BaseItem> SampleSeriesEpisodesForPeople(BaseItem series, User? user, int limit)
+    {
+        var query = user is null
+            ? new InternalItemsQuery()
+            : new InternalItemsQuery(user);
+
+        query.ParentId = series.Id;
+        query.Recursive = true;
+        query.IncludeItemTypes = [BaseItemKind.Episode];
+        query.IsVirtualItem = false;
+        query.Limit = Math.Max(limit * 3, 80);
+        query.OrderBy =
+        [
+            (ItemSortBy.ParentIndexNumber, SortOrder.Ascending),
+            (ItemSortBy.IndexNumber, SortOrder.Ascending)
+        ];
+
+        try
+        {
+            var all = _libraryManager.GetItemList(query)
+                .Where(e => e is not null && !e.IsVirtualItem)
+                .ToList();
+
+            if (all.Count <= limit)
+            {
+                return all;
+            }
+
+            // First ~half from the start (S01 early eps), then first episode of each later season.
+            var picked = new List<BaseItem>();
+            var seen = new HashSet<Guid>();
+            var early = Math.Max(limit / 2, 12);
+
+            foreach (var ep in all.Take(early))
+            {
+                if (seen.Add(ep.Id))
+                {
+                    picked.Add(ep);
+                }
+            }
+
+            foreach (var seasonGroup in all.GroupBy(e => e.ParentIndexNumber ?? 0).OrderBy(g => g.Key))
+            {
+                if (picked.Count >= limit)
+                {
+                    break;
+                }
+
+                var first = seasonGroup.OrderBy(e => e.IndexNumber ?? 0).FirstOrDefault();
+                if (first is not null && seen.Add(first.Id))
+                {
+                    picked.Add(first);
+                }
+            }
+
+            // Fill remaining from chronological order.
+            foreach (var ep in all)
+            {
+                if (picked.Count >= limit)
+                {
+                    break;
+                }
+
+                if (seen.Add(ep.Id))
+                {
+                    picked.Add(ep);
+                }
+            }
+
+            return picked;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Skipping episode people sample for series {SeriesId}", series.Id);
+            return [];
+        }
     }
 
     private List<BaseItem> SampleSeriesEpisodes(BaseItem series, User? user, int limit)
