@@ -146,21 +146,30 @@ public partial class BumperService
             };
         }
 
-        var youtube = await TryFindYouTubeTrailerAsync(showTitle, cancellationToken).ConfigureAwait(false);
-        if (youtube is not null)
+        var query = $"\"{showTitle}\" official trailer";
+        var searchUrl = "https://www.youtube.com/results?search_query=" + Uri.EscapeDataString(query);
+        var config = Plugin.Instance?.Configuration;
+
+        // Honour the same YouTube gate as bumpers so disabling lookups stops outbound requests.
+        if (config is null or { EnableYouTubeBumpers: true })
         {
-            youtube.ItemId = item.Id.ToString("N", CultureInfo.InvariantCulture);
-            return youtube;
+            var youtube = await TryFindYouTubeTrailerAsync(showTitle, cancellationToken).ConfigureAwait(false);
+            if (youtube is not null)
+            {
+                youtube.ItemId = item.Id.ToString("N", CultureInfo.InvariantCulture);
+                return youtube;
+            }
         }
 
-        var query = $"\"{showTitle}\" official trailer";
         return new BumperResponse
         {
             ItemId = item.Id.ToString("N", CultureInfo.InvariantCulture),
             Source = "Search",
             Title = query,
-            SearchUrl = "https://www.youtube.com/results?search_query=" + Uri.EscapeDataString(query),
-            Error = "Couldn't find a trailer automatically. Open search to pick one."
+            SearchUrl = searchUrl,
+            Error = config is { EnableYouTubeBumpers: false }
+                ? "YouTube lookups are disabled in Full Crew settings. Open search to pick a trailer."
+                : "Couldn't find a trailer automatically. Open search to pick one."
         };
     }
 
@@ -176,10 +185,19 @@ public partial class BumperService
 
         var queries = BuildShowBumperQueries(showTitle, hints);
 
+        using var budgetCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        budgetCts.CancelAfter(TimeSpan.FromSeconds(20));
+        var budgetToken = budgetCts.Token;
+
         var candidates = new List<(string Id, string Title, int Seconds)>();
         foreach (var query in queries)
         {
-            var found = await SearchYouTubeShortAsync(query, showTitle, MaxBumperSeconds, cancellationToken).ConfigureAwait(false);
+            if (budgetToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            var found = await SearchYouTubeShortAsync(query, showTitle, MaxBumperSeconds, budgetToken).ConfigureAwait(false);
             candidates.AddRange(found);
             // Stop once we have a healthy shortlist; later queries are lower-confidence synonyms.
             if (candidates.Count >= 10)
@@ -227,10 +245,19 @@ public partial class BumperService
             $"\"{showTitle}\" trailer"
         };
 
+        using var budgetCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        budgetCts.CancelAfter(TimeSpan.FromSeconds(15));
+        var budgetToken = budgetCts.Token;
+
         var candidates = new List<(string Id, string Title, int Seconds)>();
         foreach (var query in queries)
         {
-            var found = await SearchYouTubeShortAsync(query, showTitle, MaxTrailerSeconds, cancellationToken).ConfigureAwait(false);
+            if (budgetToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            var found = await SearchYouTubeShortAsync(query, showTitle, MaxTrailerSeconds, budgetToken).ConfigureAwait(false);
             candidates.AddRange(found);
             if (candidates.Count >= 8)
             {
@@ -276,7 +303,8 @@ public partial class BumperService
         try
         {
             var client = _httpClientFactory.CreateClient();
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("Jellyfin-Plugin-FullCrew/1.1.3");
+            client.Timeout = TimeSpan.FromSeconds(8);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Jellyfin-Plugin-FullCrew/1.4.0");
 
             var payload = new Dictionary<string, object>
             {

@@ -274,6 +274,7 @@ public class CreditsService
                 // Aggregate credits can list several characters for one person.
                 if (member.Roles is { Count: > 0 } && string.IsNullOrWhiteSpace(member.Character))
                 {
+                    var addedFromRoles = false;
                     foreach (var character in member.Roles
                                  .Select(r => r.Character)
                                  .Where(c => !string.IsNullOrWhiteSpace(c))
@@ -289,9 +290,13 @@ public class CreditsService
                                 ProfileUrl = ToProfileUrl(member.ProfilePath),
                                 Order = member.Order
                             });
+                        addedFromRoles = true;
                     }
 
-                    continue;
+                    if (addedFromRoles)
+                    {
+                        continue;
+                    }
                 }
 
                 AddRaw(
@@ -615,20 +620,21 @@ public class CreditsService
         }
 
         // Fallback: treat as movie if only Tmdb is present, else TV if TmdbSeries
+        int? seasonNumber = item is Season s ? s.IndexNumber
+            : item is Episode e ? e.ParentIndexNumber
+            : null;
+
         var tmdb = GetProviderId(item, "Tmdb");
         if (!string.IsNullOrWhiteSpace(tmdb))
         {
             var kind = item is Series or Season or Episode ? TmdbMediaKind.Tv : TmdbMediaKind.Movie;
-            int? seasonNumber = item is Season s ? s.IndexNumber
-                : item is Episode e ? e.ParentIndexNumber
-                : null;
             return new TmdbLookup(tmdb, kind, seasonNumber);
         }
 
         var tmdbSeries = GetProviderId(item, "TmdbSeries");
         if (!string.IsNullOrWhiteSpace(tmdbSeries))
         {
-            return new TmdbLookup(tmdbSeries, TmdbMediaKind.Tv);
+            return new TmdbLookup(tmdbSeries, TmdbMediaKind.Tv, seasonNumber);
         }
 
         return null;

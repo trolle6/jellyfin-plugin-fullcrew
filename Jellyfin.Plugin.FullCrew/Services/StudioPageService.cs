@@ -266,19 +266,15 @@ public class StudioPageService
 
                     coCounts[other] = coCounts.TryGetValue(other, out var n) ? n + 1 : 1;
                 }
-
-                if (results.Count >= MaxTitles)
-                {
-                    break;
-                }
             }
 
             var ordered = results
                 .OrderByDescending(t => t.ProductionYear ?? 0)
                 .ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
+                .Take(MaxTitles)
                 .ToList();
 
-            return (ordered, BuildCoCreditHint(ordered.Count, coCounts));
+            return (ordered, BuildCoCreditHint(results.Count, coCounts));
         }
         catch (Exception ex)
         {

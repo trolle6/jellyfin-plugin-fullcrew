@@ -666,7 +666,6 @@ a.fullCrewStatsSectionTitleLink:focus-visible {
     overflow: visible;
     white-space: normal;
     overflow-wrap: anywhere;
-    word-break: break-word;
     min-width: 0;
 }
 
@@ -769,7 +768,6 @@ a.fullCrewStatsItemLink:focus,
 .fullCrewStatsRankName {
     min-width: 0;
     overflow-wrap: anywhere;
-    word-break: break-word;
 }
 
 .fullCrewStatsRankName::before {
@@ -803,7 +801,6 @@ a.fullCrewStatsItemLink:focus,
     overflow: visible;
     white-space: normal;
     overflow-wrap: anywhere;
-    word-break: break-word;
     line-height: 1.3;
     min-width: 0;
 }

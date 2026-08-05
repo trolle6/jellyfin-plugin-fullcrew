@@ -75,7 +75,9 @@ internal static class StudioNameClustering
 
         foreach (var root in BrandRoots)
         {
-            if (MatchesRoot(normalized, root))
+            // Normalize brand roots the same way as studio names so "20th century"
+            // matches the digit/letter-split form "20 th century".
+            if (MatchesRoot(normalized, Normalize(root)))
             {
                 return CanonicalRoot(root);
             }
@@ -158,8 +160,13 @@ internal static class StudioNameClustering
 
         var rootCompact = root.Replace(" ", string.Empty, StringComparison.Ordinal);
         var compact = normalized.Replace(" ", string.Empty, StringComparison.Ordinal);
-        if (compact.StartsWith(rootCompact, StringComparison.Ordinal)
-            && compact.Length > rootCompact.Length)
+        // Require a minimum compact root length so short roots (e.g. "toei") do not
+        // over-match unrelated names (e.g. "Toeic Media"), and accept exact compact
+        // equality so digit-split roots like "20 th century" still match "20th Century".
+        if (rootCompact.Length >= 5
+            && (compact.Equals(rootCompact, StringComparison.Ordinal)
+                || (compact.StartsWith(rootCompact, StringComparison.Ordinal)
+                    && compact.Length > rootCompact.Length)))
         {
             return true;
         }

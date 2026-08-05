@@ -319,6 +319,12 @@
                     img.src = imgUrl;
                     img.alt = opts.name || '';
                     img.loading = 'lazy';
+                    img.onerror = function () {
+                        var fallback = el('div', 'fullCrewStudioPosterFallback', (opts.type || 'Title').charAt(0));
+                        if (img.parentNode) {
+                            img.parentNode.replaceChild(fallback, img);
+                        }
+                    };
                     poster.appendChild(img);
                 } else {
                     poster.appendChild(el('div', 'fullCrewStudioPosterFallback', (opts.type || 'Title').charAt(0)));
@@ -789,6 +795,7 @@
 
     var BUMPER_BTN_ID = 'fullCrewBumperButton';
     var TRAILER_BTN_ID = 'fullCrewTrailerButton';
+    var itemPromiseCache = Object.create(null);
 
     function fetchBumper(itemId) {
         return Core.getJson('FullCrew/' + encodeURIComponent(itemId) + '/bumper');
@@ -807,19 +814,34 @@
     }
 
     function getItemPromise(itemId) {
+        if (!itemId) {
+            return Promise.resolve(null);
+        }
+
+        if (Object.prototype.hasOwnProperty.call(itemPromiseCache, itemId)) {
+            return itemPromiseCache[itemId];
+        }
+
         var client = apiClient();
         if (!client || typeof client.getItem !== 'function') {
-            return Promise.resolve(null);
+            itemPromiseCache[itemId] = Promise.resolve(null);
+            return itemPromiseCache[itemId];
         }
 
         try {
             var userId = client.getCurrentUserId && client.getCurrentUserId();
             if (!userId) {
-                return Promise.resolve(null);
+                itemPromiseCache[itemId] = Promise.resolve(null);
+                return itemPromiseCache[itemId];
             }
-            return Promise.resolve(client.getItem(userId, itemId));
+            itemPromiseCache[itemId] = Promise.resolve(client.getItem(userId, itemId)).catch(function () {
+                delete itemPromiseCache[itemId];
+                return null;
+            });
+            return itemPromiseCache[itemId];
         } catch (e) {
-            return Promise.resolve(null);
+            itemPromiseCache[itemId] = Promise.resolve(null);
+            return itemPromiseCache[itemId];
         }
     }
 
@@ -926,17 +948,63 @@
         window.open(url, '_blank', 'noopener,noreferrer');
     }
 
+    var bumperOverlayReturnFocus = null;
+
     function closeBumperOverlay() {
         var overlay = document.getElementById('fullCrewBumperOverlay');
         if (overlay && overlay.parentNode) {
             overlay.parentNode.removeChild(overlay);
         }
         document.removeEventListener('keydown', onBumperOverlayKeydown, true);
+        var restore = bumperOverlayReturnFocus;
+        bumperOverlayReturnFocus = null;
+        if (restore && typeof restore.focus === 'function' && document.contains(restore)) {
+            try {
+                restore.focus();
+            } catch (e) {
+                /* ignore */
+            }
+        }
     }
 
     function onBumperOverlayKeydown(e) {
-        if (e && (e.key === 'Escape' || e.keyCode === 27)) {
+        if (!e) {
+            return;
+        }
+        if (e.key === 'Escape' || e.keyCode === 27) {
             closeBumperOverlay();
+            return;
+        }
+
+        if (e.key !== 'Tab' && e.keyCode !== 9) {
+            return;
+        }
+
+        var overlay = document.getElementById('fullCrewBumperOverlay');
+        if (!overlay) {
+            return;
+        }
+
+        var nodes = overlay.querySelectorAll('button, [href], iframe, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+        var list = Array.prototype.filter.call(nodes, function (el) {
+            return !el.disabled && el.getAttribute('tabindex') !== '-1';
+        });
+        if (!list.length) {
+            e.preventDefault();
+            return;
+        }
+
+        var first = list[0];
+        var last = list[list.length - 1];
+        var active = document.activeElement;
+        if (e.shiftKey) {
+            if (active === first || !overlay.contains(active)) {
+                e.preventDefault();
+                last.focus();
+            }
+        } else if (active === last || !overlay.contains(active)) {
+            e.preventDefault();
+            first.focus();
         }
     }
 
@@ -945,7 +1013,11 @@
             return false;
         }
 
+        var returnFocus = document.activeElement;
+        // Drop any prior overlay without restoring focus; we keep returnFocus for this open.
+        bumperOverlayReturnFocus = null;
         closeBumperOverlay();
+        bumperOverlayReturnFocus = returnFocus;
 
         var overlay = document.createElement('div');
         overlay.id = 'fullCrewBumperOverlay';

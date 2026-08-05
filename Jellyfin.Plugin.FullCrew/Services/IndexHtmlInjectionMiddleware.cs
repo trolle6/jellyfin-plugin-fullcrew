@@ -82,9 +82,10 @@ public sealed class IndexHtmlInjectionMiddleware
         }
 
         var path = request.Path.Value ?? string.Empty;
-        return path.EndsWith("index.html", StringComparison.OrdinalIgnoreCase)
-               || path.Equals("/web/", StringComparison.OrdinalIgnoreCase)
+        // Only jellyfin-web entry points — not every path that happens to end in index.html.
+        return path.Equals("/web/", StringComparison.OrdinalIgnoreCase)
                || path.Equals("/web", StringComparison.OrdinalIgnoreCase)
+               || path.Equals("/web/index.html", StringComparison.OrdinalIgnoreCase)
                || path.EndsWith("/web/index.html", StringComparison.OrdinalIgnoreCase);
     }
 
