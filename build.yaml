@@ -1,7 +1,7 @@
 ---
 name: "Full Crew"
 guid: "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f"
-version: "1.2.4.0"
+version: "1.2.5.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Full cast and crew by department, break bumpers, and library stats"
@@ -15,7 +15,7 @@ owner: "trolle6"
 artifacts:
 - "Jellyfin.Plugin.FullCrew.dll"
 changelog: >
-  Library Stats: resolution (480p–8K), HDR/range, video/audio codec & channel
-  buckets from MediaStreams; series sample one early episode; insights for
-  most common resolution and HDR share. Also collections, people-by-role,
-  and Break Bumper.
+  Library Stats: coherent percent model — exclusive dims use title count;
+  genres/tags/studios use assignment share; people use role-credit share.
+  Top 20 + mandatory Other sum to ~100%. Fixed UI truncating Other; chart
+  hints for multi-label/people denominators.

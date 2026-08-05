@@ -1,6 +1,6 @@
 {
   "category": "Metadata",
-  "changelog": "Library Stats: resolution (480p–8K), HDR/range (SDR/HDR10/HDR10+/HLG/Dolby Vision), video/audio codec & channel buckets from MediaStreams; series sample one early episode; insights for most common resolution and HDR share.",
+  "changelog": "Library Stats: coherent percent model — exclusive dims use title count; genres/tags/studios use assignment share; people use role-credit share. Top 20 + mandatory Other sum to ~100%. Fixed UI truncating Other; chart hints for multi-label/people denominators.",
   "description": "Fetches complete TMDB cast and crew for movies and series, groups people by department, and shows them in a polished accordion on Jellyfin Web item detail pages. Includes a nostalgia Break Bumper action and a Library Stats page.",
   "guid": "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f",
   "name": "Full Crew",
@@ -8,5 +8,5 @@
   "owner": "trolle6",
   "targetAbi": "10.11.0.0",
   "timestamp": "2026-08-05T00:00:00Z",
-  "version": "1.2.4.0"
+  "version": "1.2.5.0"
 }

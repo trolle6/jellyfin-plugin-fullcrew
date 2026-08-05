@@ -75,11 +75,13 @@ public class LibraryStatsResponse
 
     /// <summary>
     /// Gets or sets genre frequency buckets.
+    /// Percent is share of all genre-tag assignments (multi-label), not titles.
     /// </summary>
     public IReadOnlyList<LibraryStatsBucket> Genres { get; set; } = [];
 
     /// <summary>
     /// Gets or sets studio / network frequency buckets.
+    /// Percent is share of all studio credits (multi-label), not titles.
     /// </summary>
     public IReadOnlyList<LibraryStatsBucket> Studios { get; set; } = [];
 
@@ -100,6 +102,7 @@ public class LibraryStatsResponse
 
     /// <summary>
     /// Gets or sets top tag frequency buckets.
+    /// Percent is share of all tag assignments (multi-label), not titles.
     /// </summary>
     public IReadOnlyList<LibraryStatsBucket> Tags { get; set; } = [];
 

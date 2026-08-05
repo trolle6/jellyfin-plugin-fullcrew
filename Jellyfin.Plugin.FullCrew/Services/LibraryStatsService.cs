@@ -19,11 +19,12 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 /// </summary>
 public class LibraryStatsService
 {
-    private const int CacheMinutes = 30;
-    private const int TopBucketLimit = 12;
-    private const int TopPeopleLimit = 15;
+    private const int CacheMinutes = 5;
+    private const int TopBucketLimit = 20;
+    private const int TopPeopleLimit = 20;
     private const int MaxPeoplePerItem = 40;
     private const int SeriesEpisodeSampleLimit = 12;
+    private const string CacheKeyPrefix = "fullcrew:library-stats:v3:";
     private const string AnimationGenre = "Animation";
     private const string OtherBucketName = "Other";
     private const string UnknownBucketName = "Unknown";
@@ -107,7 +108,7 @@ public class LibraryStatsService
             return EmptyResponse();
         }
 
-        var cacheKey = "fullcrew:library-stats:" + (user?.Id.ToString("N", CultureInfo.InvariantCulture) ?? "all");
+        var cacheKey = CacheKeyPrefix + (user?.Id.ToString("N", CultureInfo.InvariantCulture) ?? "all");
         if (_memoryCache.TryGetValue(cacheKey, out LibraryStatsResponse? cached) && cached is not null)
         {
             return cached;
@@ -243,15 +244,18 @@ public class LibraryStatsService
 
             var animationPercent = Percent(animationCount, total);
             var types = BuildTypeBuckets(movieCount, seriesCount, total);
-            var genres = ToTopBuckets(genreCounts, total, TopBucketLimit);
-            var studios = ToTopBuckets(studioCounts, total, TopBucketLimit);
+            // Rule B — multi-label: percent of total assignments (not title count).
+            var genres = ToTopBuckets(genreCounts, SumCounts(genreCounts), TopBucketLimit);
+            var studios = ToTopBuckets(studioCounts, SumCounts(studioCounts), TopBucketLimit);
+            var tags = ToTopBuckets(tagCounts, SumCounts(tagCounts), TopBucketLimit);
+            // Rule A — exclusive single-value: percent of titles (or media samples).
             var ratings = ToTopBuckets(ratingCounts, total, TopBucketLimit, foldUnknown: false);
             var decades = ToDecadeBuckets(decadeCounts, total);
             var communityRatings = ToOrderedBuckets(communityCounts, total, CommunityRatingBucketOrder);
-            var tags = ToTopBuckets(tagCounts, total, TopBucketLimit);
             var languages = ToTopBuckets(languageCounts, total, TopBucketLimit, foldUnknown: false);
             var libraryItemIds = items.Select(i => i.Id).ToHashSet();
             var collections = BuildCollectionBuckets(user, libraryItemIds);
+            // Rule C — people: percent of credits within that role (see BuildPeopleGroups).
             var peopleByRole = BuildPeopleGroups(peopleByKind);
             var mediaDenom = mediaInfoSampleCount;
             var resolutions = ToOrderedBuckets(resolutionCounts, mediaDenom, ResolutionBucketOrder);
@@ -902,6 +906,9 @@ public class LibraryStatsService
         }
     }
 
+    private static int SumCounts(IReadOnlyDictionary<string, int> counts)
+        => counts.Count == 0 ? 0 : counts.Values.Sum();
+
     private static double Percent(int count, int total)
     {
         if (total <= 0 || count <= 0)
@@ -1159,7 +1166,7 @@ public class LibraryStatsService
         {
             insights.Add(string.Format(
                 CultureInfo.InvariantCulture,
-                "Most common genre is {0} ({1}%).",
+                "Most common genre tag is {0} ({1}% of genre tags).",
                 topGenre.Name,
                 topGenre.Percent));
         }
@@ -1169,7 +1176,7 @@ public class LibraryStatsService
         {
             insights.Add(string.Format(
                 CultureInfo.InvariantCulture,
-                "{0}% of titles are from {1}.",
+                "{0}% of studio credits are {1}.",
                 topStudio.Percent,
                 topStudio.Name));
         }
@@ -1226,9 +1233,9 @@ public class LibraryStatsService
         {
             insights.Add(string.Format(
                 CultureInfo.InvariantCulture,
-                "Most used tag is {0} ({1} titles).",
+                "Most used tag is {0} ({1}% of tag assignments).",
                 topTag.Name,
-                topTag.Count));
+                topTag.Percent));
         }
 
         var topLanguage = FirstNamed(languages);
@@ -1292,7 +1299,7 @@ public class LibraryStatsService
         var roleLabel = string.IsNullOrWhiteSpace(group!.Role) ? role.ToLowerInvariant() : group.Role.ToLowerInvariant();
         insights.Add(string.Format(
             CultureInfo.InvariantCulture,
-            "{0} is {1}% of {2} credits ({3} titles).",
+            "{0} is {1}% of {2} credits ({3}).",
             top.Name,
             top.Percent,
             roleLabel,

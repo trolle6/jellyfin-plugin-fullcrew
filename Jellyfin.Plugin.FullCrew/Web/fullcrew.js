@@ -1451,13 +1451,13 @@
             { title: 'Video codecs', keyPascal: 'VideoCodecs', keyCamel: 'videoCodecs' },
             { title: 'Audio channels', keyPascal: 'AudioChannels', keyCamel: 'audioChannels' },
             { title: 'Audio codecs', keyPascal: 'AudioCodecs', keyCamel: 'audioCodecs' },
-            { title: 'Genres', keyPascal: 'Genres', keyCamel: 'genres' },
-            { title: 'Studios', keyPascal: 'Studios', keyCamel: 'studios' },
-            { title: 'Collections', keyPascal: 'Collections', keyCamel: 'collections' },
+            { title: 'Genres', keyPascal: 'Genres', keyCamel: 'genres', hint: 'Share of genre tags' },
+            { title: 'Studios', keyPascal: 'Studios', keyCamel: 'studios', hint: 'Share of studio credits' },
+            { title: 'Collections', keyPascal: 'Collections', keyCamel: 'collections', hint: 'Share of collection memberships' },
             { title: 'Years', keyPascal: 'Decades', keyCamel: 'decades' },
             { title: 'Official ratings', keyPascal: 'OfficialRatings', keyCamel: 'officialRatings' },
             { title: 'Community scores', keyPascal: 'CommunityRatings', keyCamel: 'communityRatings' },
-            { title: 'Tags', keyPascal: 'Tags', keyCamel: 'tags' },
+            { title: 'Tags', keyPascal: 'Tags', keyCamel: 'tags', hint: 'Share of tag assignments' },
             { title: 'Languages', keyPascal: 'Languages', keyCamel: 'languages' }
         ];
 
@@ -1472,11 +1472,17 @@
             sections.push({
                 title: 'Top ' + role,
                 buckets: people,
-                keyPascal: 'People:' + kind
+                keyPascal: 'People:' + kind,
+                hint: 'Share of ' + String(role).toLowerCase() + ' credits'
             });
         });
 
         return sections;
+    }
+
+    /** Keep every API bucket (top N + Other). Never drop Other via a hard slice. */
+    function chartDisplayBuckets(buckets) {
+        return (buckets || []).slice();
     }
 
     function drawPieChart(canvas, buckets) {
@@ -1522,7 +1528,7 @@
 
     function renderChartInto(container, buckets, mode) {
         container.innerHTML = '';
-        var items = (buckets || []).slice(0, 15);
+        var items = chartDisplayBuckets(buckets);
         if (!items.length) {
             container.appendChild(createElement('div', 'fullCrewStatsEmpty', 'No data'));
             return;
@@ -1681,6 +1687,9 @@
             }
             var card = createElement('section', 'fullCrewStatsSection fullCrewStatsChartSection');
             card.appendChild(createElement('h3', 'fullCrewStatsSectionTitle', section.title));
+            if (section.hint) {
+                card.appendChild(createElement('p', 'fullCrewStatsSectionHint', section.hint));
+            }
             var chartHost = createElement('div', 'fullCrewStatsChartHost');
             chartHost.setAttribute('data-section', section.keyPascal);
             renderChartInto(chartHost, buckets, mode);
