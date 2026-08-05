@@ -197,3 +197,50 @@ public class LibraryStatsBucket
     /// </summary>
     public double Percent { get; set; }
 }
+
+/// <summary>
+/// Full ranked list for a single library-stats category (detail page).
+/// Overview keeps Top N + Other; this endpoint returns the uncapped (or high-cap) list.
+/// </summary>
+public class LibraryStatsCategoryResponse
+{
+    /// <summary>
+    /// Gets or sets the canonical category key (e.g. actors, genres, hdr).
+    /// </summary>
+    public string Category { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the display title (e.g. Top Actor, Genres).
+    /// </summary>
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets a short hint describing the percent denominator.
+    /// </summary>
+    public string? DenominatorHint { get; set; }
+
+    /// <summary>
+    /// Gets or sets the denominator used for Percent (titles, assignments, role credits, …).
+    /// </summary>
+    public int Denominator { get; set; }
+
+    /// <summary>
+    /// Gets or sets when these stats were generated (UTC).
+    /// </summary>
+    public DateTime GeneratedAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the list was capped (see <see cref="TotalBuckets"/>).
+    /// </summary>
+    public bool Truncated { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many distinct buckets existed before any safety cap.
+    /// </summary>
+    public int TotalBuckets { get; set; }
+
+    /// <summary>
+    /// Gets or sets the full ranked buckets for this category.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> Buckets { get; set; } = [];
+}

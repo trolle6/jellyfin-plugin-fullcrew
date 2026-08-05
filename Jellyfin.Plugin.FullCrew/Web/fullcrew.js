@@ -861,6 +861,7 @@
     var STATS_PAGE_ID = 'fullCrewStatsPage';
     var STATS_HASH = '#/fullcrew/stats';
     var STATS_VIEW_KEY = 'fullCrew.statsViewMode';
+    var STATS_DETAIL_VIEW_KEY = 'fullCrew.statsDetailViewMode';
     var PLUGIN_UNIQUE_ID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
     var CHART_COLORS = [
         '#00a4dc',
@@ -875,36 +876,94 @@
         '#ffa726'
     ];
 
+    var PEOPLE_CATEGORY_KEYS = {
+        Actor: 'actors',
+        Director: 'directors',
+        Writer: 'writers',
+        Creator: 'creators',
+        Producer: 'producers',
+        GuestStar: 'guestStars',
+        Composer: 'composers',
+        Editor: 'editors',
+        Artist: 'artists',
+        Author: 'authors',
+        AlbumArtist: 'albumArtists',
+        CoverArtist: 'coverArtists',
+        Unknown: 'unknown'
+    };
+
     var statsEnabled = true;
     var statsConfigLoaded = false;
     var statsConfigPromise = null;
     var statsFetchInFlight = null;
     var statsCachedData = null;
+    var statsCategoryCache = {};
+    var statsCategoryFetchInFlight = {};
+    var statsDetailBuckets = null;
 
-    function isStatsRoute() {
-        var hash = (window.location.hash || '').split('?')[0];
-        return hash === STATS_HASH || hash === '#!/fullcrew/stats';
+    function normalizeStatsHash(hash) {
+        var raw = (hash || '').split('?')[0];
+        if (raw.indexOf('#!/') === 0) {
+            return '#' + raw.slice(2);
+        }
+        return raw;
     }
 
-    function getStatsViewMode() {
+    function parseStatsRoute() {
+        var hash = normalizeStatsHash(window.location.hash || '');
+        if (hash === STATS_HASH) {
+            return { kind: 'overview' };
+        }
+        var match = /^#\/fullcrew\/stats\/([^/]+)$/.exec(hash);
+        if (match) {
+            try {
+                return { kind: 'detail', category: decodeURIComponent(match[1]) };
+            } catch (e) {
+                return { kind: 'detail', category: match[1] };
+            }
+        }
+        return null;
+    }
+
+    function isStatsRoute() {
+        return parseStatsRoute() != null;
+    }
+
+    function statsDetailHash(categoryKey) {
+        return STATS_HASH + '/' + encodeURIComponent(categoryKey);
+    }
+
+    function peopleCategoryKey(kind) {
+        if (!kind) {
+            return null;
+        }
+        if (PEOPLE_CATEGORY_KEYS[kind]) {
+            return PEOPLE_CATEGORY_KEYS[kind];
+        }
+        var lower = String(kind).charAt(0).toLowerCase() + String(kind).slice(1);
+        return lower + (lower.charAt(lower.length - 1) === 's' ? '' : 's');
+    }
+
+    function getStatsViewMode(forDetail) {
+        var key = forDetail ? STATS_DETAIL_VIEW_KEY : STATS_VIEW_KEY;
         try {
-            var stored = window.localStorage.getItem(STATS_VIEW_KEY);
+            var stored = window.localStorage.getItem(key);
             if (stored === 'pie' || stored === 'bar' || stored === 'list') {
                 return stored;
             }
         } catch (e) {
             /* ignore */
         }
-        // Bar shows full labels by default; cramped pie legends used to clip to one character.
-        return 'bar';
+        // Detail defaults to list for long rankings; overview prefers labeled bars.
+        return forDetail ? 'list' : 'bar';
     }
 
-    function setStatsViewMode(mode) {
+    function setStatsViewMode(mode, forDetail) {
         if (mode !== 'pie' && mode !== 'bar' && mode !== 'list') {
-            mode = 'bar';
+            mode = forDetail ? 'list' : 'bar';
         }
         try {
-            window.localStorage.setItem(STATS_VIEW_KEY, mode);
+            window.localStorage.setItem(forDetail ? STATS_DETAIL_VIEW_KEY : STATS_VIEW_KEY, mode);
         } catch (e) {
             /* ignore */
         }
@@ -1009,6 +1068,50 @@
             });
 
         return statsFetchInFlight;
+    }
+
+    function fetchStatsCategory(category) {
+        var key = String(category || '');
+        if (statsCategoryCache[key]) {
+            return Promise.resolve(statsCategoryCache[key]);
+        }
+        if (statsCategoryFetchInFlight[key]) {
+            return statsCategoryFetchInFlight[key];
+        }
+
+        var client = apiClient();
+        var path = 'FullCrew/stats/' + encodeURIComponent(key);
+        var request;
+
+        if (client && typeof client.ajax === 'function') {
+            request = client.ajax({
+                url: client.getUrl(path),
+                type: 'GET',
+                dataType: 'json'
+            });
+        } else if (client && typeof client.getJSON === 'function') {
+            request = client.getJSON(client.getUrl(path));
+        } else {
+            request = fetch('/' + path, { credentials: 'same-origin' }).then(function (res) {
+                if (!res.ok) {
+                    throw new Error('HTTP ' + res.status);
+                }
+                return res.json();
+            });
+        }
+
+        statsCategoryFetchInFlight[key] = Promise.resolve(request)
+            .then(function (data) {
+                statsCategoryCache[key] = data;
+                delete statsCategoryFetchInFlight[key];
+                return data;
+            })
+            .catch(function (err) {
+                delete statsCategoryFetchInFlight[key];
+                throw err;
+            });
+
+        return statsCategoryFetchInFlight[key];
     }
 
     function findFavouritesTab(root) {
@@ -1409,6 +1512,7 @@
         if (page && page.parentNode) {
             page.parentNode.removeChild(page);
         }
+        statsDetailBuckets = null;
         setStatsTabSelected(false);
         setStatsDocumentTitle(false);
     }
@@ -1445,20 +1549,20 @@
 
     function collectStatsSections(data) {
         var sections = [
-            { title: 'Types', keyPascal: 'Types', keyCamel: 'types' },
-            { title: 'Resolutions', keyPascal: 'Resolutions', keyCamel: 'resolutions' },
-            { title: 'HDR / range', keyPascal: 'VideoRanges', keyCamel: 'videoRanges' },
-            { title: 'Video codecs', keyPascal: 'VideoCodecs', keyCamel: 'videoCodecs' },
-            { title: 'Audio channels', keyPascal: 'AudioChannels', keyCamel: 'audioChannels' },
-            { title: 'Audio codecs', keyPascal: 'AudioCodecs', keyCamel: 'audioCodecs' },
-            { title: 'Genres', keyPascal: 'Genres', keyCamel: 'genres', hint: 'Share of genre tags' },
-            { title: 'Studios', keyPascal: 'Studios', keyCamel: 'studios', hint: 'Share of studio credits' },
-            { title: 'Collections', keyPascal: 'Collections', keyCamel: 'collections', hint: 'Share of collection memberships' },
-            { title: 'Years', keyPascal: 'Decades', keyCamel: 'decades' },
-            { title: 'Official ratings', keyPascal: 'OfficialRatings', keyCamel: 'officialRatings' },
-            { title: 'Community scores', keyPascal: 'CommunityRatings', keyCamel: 'communityRatings' },
-            { title: 'Tags', keyPascal: 'Tags', keyCamel: 'tags', hint: 'Share of tag assignments' },
-            { title: 'Languages', keyPascal: 'Languages', keyCamel: 'languages' }
+            { title: 'Types', categoryKey: 'types', keyPascal: 'Types', keyCamel: 'types' },
+            { title: 'Resolutions', categoryKey: 'resolutions', keyPascal: 'Resolutions', keyCamel: 'resolutions' },
+            { title: 'HDR / range', categoryKey: 'hdr', keyPascal: 'VideoRanges', keyCamel: 'videoRanges' },
+            { title: 'Video codecs', categoryKey: 'videoCodecs', keyPascal: 'VideoCodecs', keyCamel: 'videoCodecs' },
+            { title: 'Audio channels', categoryKey: 'audioChannels', keyPascal: 'AudioChannels', keyCamel: 'audioChannels' },
+            { title: 'Audio codecs', categoryKey: 'audioCodecs', keyPascal: 'AudioCodecs', keyCamel: 'audioCodecs' },
+            { title: 'Genres', categoryKey: 'genres', keyPascal: 'Genres', keyCamel: 'genres', hint: 'Share of genre tags' },
+            { title: 'Studios', categoryKey: 'studios', keyPascal: 'Studios', keyCamel: 'studios', hint: 'Share of studio credits' },
+            { title: 'Collections', categoryKey: 'collections', keyPascal: 'Collections', keyCamel: 'collections', hint: 'Share of collection memberships' },
+            { title: 'Years', categoryKey: 'decades', keyPascal: 'Decades', keyCamel: 'decades' },
+            { title: 'Official ratings', categoryKey: 'ratings', keyPascal: 'OfficialRatings', keyCamel: 'officialRatings' },
+            { title: 'Community scores', categoryKey: 'community', keyPascal: 'CommunityRatings', keyCamel: 'communityRatings' },
+            { title: 'Tags', categoryKey: 'tags', keyPascal: 'Tags', keyCamel: 'tags', hint: 'Share of tag assignments' },
+            { title: 'Languages', categoryKey: 'languages', keyPascal: 'Languages', keyCamel: 'languages' }
         ];
 
         var peopleGroups = prop(data, 'PeopleByRole', 'peopleByRole') || [];
@@ -1473,6 +1577,7 @@
                 title: 'Top ' + role,
                 buckets: people,
                 keyPascal: 'People:' + kind,
+                categoryKey: peopleCategoryKey(kind),
                 hint: 'Share of ' + String(role).toLowerCase() + ' credits'
             });
         });
@@ -1636,12 +1741,12 @@
         var totalCount = Number(prop(data, 'TotalCount', 'totalCount')) || movieCount + seriesCount;
         var animationPercent = Number(prop(data, 'AnimationPercent', 'animationPercent')) || 0;
         var insights = prop(data, 'Insights', 'insights') || [];
-        var mode = getStatsViewMode();
         var movieAvgRuntime = formatRuntimeTicks(prop(data, 'MovieRuntimeTicksAverage', 'movieRuntimeTicksAverage'));
         var movieRuntimeSamples = Number(prop(data, 'MovieRuntimeSampleCount', 'movieRuntimeSampleCount')) || 0;
         var seriesAvgRuntime = formatRuntimeTicks(prop(data, 'SeriesRuntimeTicksAverage', 'seriesRuntimeTicksAverage'));
         var seriesRuntimeSamples = Number(prop(data, 'SeriesRuntimeSampleCount', 'seriesRuntimeSampleCount')) || 0;
         var mediaInfoSampleCount = Number(prop(data, 'MediaInfoSampleCount', 'mediaInfoSampleCount')) || 0;
+        var mode = getStatsViewMode(false);
 
         var summary = createElement('div', 'fullCrewStatsSummary');
         var chips = [
@@ -1686,7 +1791,15 @@
                 return;
             }
             var card = createElement('section', 'fullCrewStatsSection fullCrewStatsChartSection');
-            card.appendChild(createElement('h3', 'fullCrewStatsSectionTitle', section.title));
+            if (section.categoryKey) {
+                var titleLink = createElement('a', 'fullCrewStatsSectionTitle fullCrewStatsSectionTitleLink', section.title);
+                titleLink.href = statsDetailHash(section.categoryKey);
+                titleLink.setAttribute('aria-label', 'View all ' + section.title);
+                titleLink.title = 'View full list';
+                card.appendChild(titleLink);
+            } else {
+                card.appendChild(createElement('h3', 'fullCrewStatsSectionTitle', section.title));
+            }
             if (section.hint) {
                 card.appendChild(createElement('p', 'fullCrewStatsSectionHint', section.hint));
             }
@@ -1714,11 +1827,31 @@
         }
     }
 
-    function reRenderStatsCharts(page) {
-        if (!page || !statsCachedData) {
+    function reRenderStatsCharts(page, forDetail) {
+        if (!page) {
             return;
         }
-        var mode = getStatsViewMode();
+        var mode = getStatsViewMode(!!forDetail);
+        if (forDetail) {
+            var detailHost = page.querySelector('.fullCrewStatsChartHost');
+            if (!detailHost) {
+                return;
+            }
+            var filterInput = page.querySelector('.fullCrewStatsSearch');
+            var query = filterInput ? String(filterInput.value || '').trim().toLowerCase() : '';
+            var buckets = statsDetailBuckets || [];
+            if (query) {
+                buckets = buckets.filter(function (b) {
+                    return String(b.name || '').toLowerCase().indexOf(query) !== -1;
+                });
+            }
+            renderChartInto(detailHost, buckets, mode);
+            return;
+        }
+
+        if (!statsCachedData) {
+            return;
+        }
         var hosts = page.querySelectorAll('.fullCrewStatsChartHost');
         Array.prototype.forEach.call(hosts, function (host) {
             var section = host.closest('.fullCrewStatsChartSection');
@@ -1759,14 +1892,7 @@
         });
     }
 
-    function createStatsPageShell() {
-        var page = createElement('div', 'fullCrewStatsPage');
-        page.id = STATS_PAGE_ID;
-        page.setAttribute('role', 'main');
-
-        var header = createElement('div', 'fullCrewStatsHeader');
-        header.appendChild(createElement('h1', 'fullCrewStatsTitle', 'Library Stats'));
-
+    function createStatsViewToggle(page, forDetail) {
         var toggle = createElement('div', 'fullCrewStatsToggle');
         toggle.setAttribute('role', 'group');
         toggle.setAttribute('aria-label', 'Chart view');
@@ -1775,20 +1901,30 @@
             var btn = createElement('button', 'fullCrewStatsToggleBtn', mode.charAt(0).toUpperCase() + mode.slice(1));
             btn.type = 'button';
             btn.setAttribute('data-mode', mode);
-            if (mode === getStatsViewMode()) {
+            if (mode === getStatsViewMode(forDetail)) {
                 btn.classList.add('is-active');
             }
             btn.addEventListener('click', function () {
-                setStatsViewMode(mode);
+                setStatsViewMode(mode, forDetail);
                 Array.prototype.forEach.call(toggle.querySelectorAll('.fullCrewStatsToggleBtn'), function (el) {
                     el.classList.toggle('is-active', el.getAttribute('data-mode') === mode);
                 });
-                reRenderStatsCharts(page);
+                reRenderStatsCharts(page, forDetail);
             });
             toggle.appendChild(btn);
         });
+        return toggle;
+    }
 
-        header.appendChild(toggle);
+    function createStatsPageShell() {
+        var page = createElement('div', 'fullCrewStatsPage');
+        page.id = STATS_PAGE_ID;
+        page.setAttribute('role', 'main');
+        page.setAttribute('data-route', 'overview');
+
+        var header = createElement('div', 'fullCrewStatsHeader');
+        header.appendChild(createElement('h1', 'fullCrewStatsTitle', 'Library Stats'));
+        header.appendChild(createStatsViewToggle(page, false));
         page.appendChild(header);
 
         var body = createElement('div', 'fullCrewStatsBody');
@@ -1797,10 +1933,100 @@
         return page;
     }
 
+    function createStatsDetailShell(category) {
+        var page = createElement('div', 'fullCrewStatsPage fullCrewStatsPage--detail');
+        page.id = STATS_PAGE_ID;
+        page.setAttribute('role', 'main');
+        page.setAttribute('data-route', 'detail:' + category);
+        page.setAttribute('data-category', category);
+
+        var header = createElement('div', 'fullCrewStatsHeader');
+        var titleWrap = createElement('div', 'fullCrewStatsTitleWrap');
+        var back = createElement('a', 'fullCrewStatsBack', '← Stats');
+        back.href = STATS_HASH;
+        titleWrap.appendChild(back);
+        titleWrap.appendChild(createElement('h1', 'fullCrewStatsTitle', 'Loading…'));
+        header.appendChild(titleWrap);
+        header.appendChild(createStatsViewToggle(page, true));
+        page.appendChild(header);
+
+        var body = createElement('div', 'fullCrewStatsBody');
+        body.appendChild(createElement('div', 'fullCrewStatsStatus', 'Loading full ranking…'));
+        page.appendChild(body);
+        return page;
+    }
+
+    function renderStatsDetailContent(page, data) {
+        var body = page.querySelector('.fullCrewStatsBody');
+        if (!body) {
+            return;
+        }
+        body.innerHTML = '';
+
+        var title = prop(data, 'Title', 'title') || prop(data, 'Category', 'category') || 'Category';
+        var hint = prop(data, 'DenominatorHint', 'denominatorHint');
+        var truncated = !!(prop(data, 'Truncated', 'truncated'));
+        var totalBuckets = Number(prop(data, 'TotalBuckets', 'totalBuckets')) || 0;
+        var buckets = normalizeBuckets(prop(data, 'Buckets', 'buckets'));
+        statsDetailBuckets = buckets;
+
+        var titleEl = page.querySelector('.fullCrewStatsTitle');
+        if (titleEl) {
+            titleEl.textContent = title;
+        }
+
+        if (hint) {
+            body.appendChild(createElement('p', 'fullCrewStatsSectionHint', hint));
+        }
+
+        var toolbar = createElement('div', 'fullCrewStatsDetailToolbar');
+        var search = createElement('input', 'fullCrewStatsSearch');
+        search.type = 'search';
+        search.placeholder = 'Filter…';
+        search.setAttribute('aria-label', 'Filter ranking');
+        search.addEventListener('input', function () {
+            reRenderStatsCharts(page, true);
+        });
+        toolbar.appendChild(search);
+
+        var countLabel = createElement(
+            'div',
+            'fullCrewStatsDetailCount',
+            buckets.length + (truncated ? ' of ' + totalBuckets : '') + ' entries'
+        );
+        toolbar.appendChild(countLabel);
+        body.appendChild(toolbar);
+
+        if (truncated) {
+            body.appendChild(
+                createElement(
+                    'p',
+                    'fullCrewStatsSectionHint',
+                    'Showing top 2000 of ' + totalBuckets + ' for safety.'
+                )
+            );
+        }
+
+        var chartHost = createElement('div', 'fullCrewStatsChartHost fullCrewStatsChartHost--detail');
+        body.appendChild(chartHost);
+        renderChartInto(chartHost, buckets, getStatsViewMode(true));
+
+        var generatedAt = prop(data, 'GeneratedAt', 'generatedAt');
+        if (generatedAt) {
+            body.appendChild(createElement('div', 'fullCrewStatsFooter', 'Updated ' + String(generatedAt)));
+        }
+    }
+
     function mountStatsPage() {
         if (!statsEnabled) {
             tearDownStatsPage();
             removeStatsTab();
+            return;
+        }
+
+        var route = parseStatsRoute();
+        if (!route) {
+            tearDownStatsPage();
             return;
         }
 
@@ -1812,16 +2038,56 @@
 
         document.body.classList.add('fullCrewStatsActive');
 
+        var routeKey = route.kind === 'detail' ? 'detail:' + route.category : 'overview';
         var mount = findStatsMountPoint();
         var page = document.getElementById(STATS_PAGE_ID);
-        if (page && page.getAttribute('data-loaded') === '1') {
+        if (page && page.getAttribute('data-route') === routeKey && page.getAttribute('data-loaded') === '1') {
             return;
         }
 
-        if (!page) {
-            page = createStatsPageShell();
-            mount.appendChild(page);
+        if (page && page.parentNode) {
+            page.parentNode.removeChild(page);
+            page = null;
         }
+        statsDetailBuckets = null;
+
+        if (route.kind === 'detail') {
+            page = createStatsDetailShell(route.category);
+            mount.appendChild(page);
+            fetchStatsCategory(route.category)
+                .then(function (data) {
+                    if (!document.body.contains(page) || !isStatsRoute()) {
+                        return;
+                    }
+                    renderStatsDetailContent(page, data);
+                    page.setAttribute('data-loaded', '1');
+                })
+                .catch(function (err) {
+                    if (!document.body.contains(page)) {
+                        return;
+                    }
+                    console.warn('[FullCrew] failed to load stats category', route.category, err);
+                    var body = page.querySelector('.fullCrewStatsBody');
+                    if (body) {
+                        body.innerHTML = '';
+                        body.appendChild(
+                            createElement(
+                                'div',
+                                'fullCrewStatsStatus fullCrewStatsStatus--error',
+                                'Could not load this category. It may be unknown or the plugin API is unavailable.'
+                            )
+                        );
+                    }
+                    var titleEl = page.querySelector('.fullCrewStatsTitle');
+                    if (titleEl) {
+                        titleEl.textContent = route.category;
+                    }
+                });
+            return;
+        }
+
+        page = createStatsPageShell();
+        mount.appendChild(page);
 
         fetchStats()
             .then(function (data) {

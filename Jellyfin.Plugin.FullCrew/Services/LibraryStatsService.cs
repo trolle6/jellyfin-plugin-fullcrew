@@ -23,8 +23,9 @@ public class LibraryStatsService
     private const int TopBucketLimit = 20;
     private const int TopPeopleLimit = 20;
     private const int MaxPeoplePerItem = 40;
+    private const int MaxCategoryBuckets = 2000;
     private const int SeriesEpisodeSampleLimit = 12;
-    private const string CacheKeyPrefix = "fullcrew:library-stats:v3:";
+    private const string CacheKeyPrefix = "fullcrew:library-stats:v4:";
     private const string AnimationGenre = "Animation";
     private const string OtherBucketName = "Other";
     private const string UnknownBucketName = "Unknown";
@@ -108,18 +109,47 @@ public class LibraryStatsService
             return EmptyResponse();
         }
 
+        var aggregate = GetOrBuildAggregate(user);
+        return ProjectOverview(aggregate);
+    }
+
+    /// <summary>
+    /// Gets the full ranked list for one stats category (detail page).
+    /// </summary>
+    /// <param name="user">The requesting user when available; otherwise library-wide.</param>
+    /// <param name="category">Category key such as actors, genres, hdr.</param>
+    /// <returns>Category detail DTO, or null when the key is unknown.</returns>
+    public LibraryStatsCategoryResponse? GetCategoryStats(User? user, string category)
+    {
+        var config = Plugin.Instance?.Configuration;
+        if (config is { EnableLibraryStats: false })
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(category))
+        {
+            return null;
+        }
+
+        var aggregate = GetOrBuildAggregate(user);
+        return ProjectCategory(aggregate, category);
+    }
+
+    private LibraryStatsAggregate GetOrBuildAggregate(User? user)
+    {
         var cacheKey = CacheKeyPrefix + (user?.Id.ToString("N", CultureInfo.InvariantCulture) ?? "all");
-        if (_memoryCache.TryGetValue(cacheKey, out LibraryStatsResponse? cached) && cached is not null)
+        if (_memoryCache.TryGetValue(cacheKey, out LibraryStatsAggregate? cached) && cached is not null)
         {
             return cached;
         }
 
-        var response = BuildStats(user);
-        _memoryCache.Set(cacheKey, response, TimeSpan.FromMinutes(CacheMinutes));
-        return response;
+        var aggregate = BuildAggregate(user);
+        _memoryCache.Set(cacheKey, aggregate, TimeSpan.FromMinutes(CacheMinutes));
+        return aggregate;
     }
 
-    private LibraryStatsResponse BuildStats(User? user)
+    private LibraryStatsAggregate BuildAggregate(User? user)
     {
         try
         {
@@ -242,95 +272,130 @@ public class LibraryStatsService
                 }
             }
 
-            var animationPercent = Percent(animationCount, total);
-            var types = BuildTypeBuckets(movieCount, seriesCount, total);
-            // Rule B — multi-label: percent of total assignments (not title count).
-            var genres = ToTopBuckets(genreCounts, SumCounts(genreCounts), TopBucketLimit);
-            var studios = ToTopBuckets(studioCounts, SumCounts(studioCounts), TopBucketLimit);
-            var tags = ToTopBuckets(tagCounts, SumCounts(tagCounts), TopBucketLimit);
-            // Rule A — exclusive single-value: percent of titles (or media samples).
-            var ratings = ToTopBuckets(ratingCounts, total, TopBucketLimit, foldUnknown: false);
-            var decades = ToDecadeBuckets(decadeCounts, total);
-            var communityRatings = ToOrderedBuckets(communityCounts, total, CommunityRatingBucketOrder);
-            var languages = ToTopBuckets(languageCounts, total, TopBucketLimit, foldUnknown: false);
             var libraryItemIds = items.Select(i => i.Id).ToHashSet();
-            var collections = BuildCollectionBuckets(user, libraryItemIds);
-            // Rule C — people: percent of credits within that role (see BuildPeopleGroups).
-            var peopleByRole = BuildPeopleGroups(peopleByKind);
-            var mediaDenom = mediaInfoSampleCount;
-            var resolutions = ToOrderedBuckets(resolutionCounts, mediaDenom, ResolutionBucketOrder);
-            var videoRanges = ToOrderedBuckets(videoRangeCounts, mediaDenom, VideoRangeBucketOrder);
-            var videoCodecs = ToTopBuckets(videoCodecCounts, mediaDenom, TopBucketLimit, foldUnknown: false);
-            var audioChannels = ToTopBuckets(audioChannelCounts, mediaDenom, TopBucketLimit, foldUnknown: false);
-            var audioCodecs = ToTopBuckets(audioCodecCounts, mediaDenom, TopBucketLimit, foldUnknown: false);
+            var collectionCounts = BuildCollectionCounts(user, libraryItemIds);
 
-            var response = new LibraryStatsResponse
+            var aggregate = new LibraryStatsAggregate
             {
                 GeneratedAt = DateTime.UtcNow,
                 MovieCount = movieCount,
                 SeriesCount = seriesCount,
                 TotalCount = total,
-                AnimationPercent = animationPercent,
+                AnimationPercent = Percent(animationCount, total),
                 MovieRuntimeTicksTotal = movieRuntimeTotal,
                 MovieRuntimeTicksAverage = movieRuntimeSamples > 0 ? movieRuntimeTotal / movieRuntimeSamples : 0,
                 MovieRuntimeSampleCount = movieRuntimeSamples,
                 SeriesRuntimeTicksTotal = seriesRuntimeTotal,
                 SeriesRuntimeTicksAverage = seriesRuntimeSamples > 0 ? seriesRuntimeTotal / seriesRuntimeSamples : 0,
                 SeriesRuntimeSampleCount = seriesRuntimeSamples,
-                Types = types,
-                Genres = genres,
-                Studios = studios,
-                OfficialRatings = ratings,
-                Decades = decades,
-                CommunityRatings = communityRatings,
-                Tags = tags,
-                Languages = languages,
-                Collections = collections,
                 MediaInfoSampleCount = mediaInfoSampleCount,
-                Resolutions = resolutions,
-                VideoRanges = videoRanges,
-                VideoCodecs = videoCodecs,
-                AudioChannels = audioChannels,
-                AudioCodecs = audioCodecs,
-                PeopleByRole = peopleByRole,
-                Insights = BuildInsights(
-                    movieCount,
-                    seriesCount,
-                    total,
-                    animationPercent,
-                    genres,
-                    studios,
-                    ratings,
-                    decades,
-                    communityRatings,
-                    peopleByRole,
-                    movieRuntimeSamples,
-                    movieRuntimeTotal,
-                    tags,
-                    languages,
-                    collections,
-                    mediaInfoSampleCount,
-                    resolutions,
-                    videoRanges,
-                    videoCodecs)
+                GenreCounts = genreCounts,
+                StudioCounts = studioCounts,
+                RatingCounts = ratingCounts,
+                DecadeCounts = decadeCounts,
+                TagCounts = tagCounts,
+                LanguageCounts = languageCounts,
+                CommunityCounts = communityCounts,
+                ResolutionCounts = resolutionCounts,
+                VideoRangeCounts = videoRangeCounts,
+                VideoCodecCounts = videoCodecCounts,
+                AudioChannelCounts = audioChannelCounts,
+                AudioCodecCounts = audioCodecCounts,
+                CollectionCounts = collectionCounts,
+                PeopleByKind = peopleByKind
             };
 
             _logger.LogDebug(
-                "Library stats built for user {UserId}: {Total} items ({Movies} movies, {Series} series, {Roles} people roles, {MediaSamples} media samples)",
+                "Library stats aggregate built for user {UserId}: {Total} items ({Movies} movies, {Series} series, {Roles} people roles, {MediaSamples} media samples)",
                 user?.Id,
                 total,
                 movieCount,
                 seriesCount,
-                peopleByRole.Count,
+                peopleByKind.Count,
                 mediaInfoSampleCount);
 
-            return response;
+            return aggregate;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to build library stats");
-            return EmptyResponse();
+            return new LibraryStatsAggregate { GeneratedAt = DateTime.UtcNow };
         }
+    }
+
+    private static LibraryStatsResponse ProjectOverview(LibraryStatsAggregate agg)
+    {
+        var total = agg.TotalCount;
+        var types = BuildTypeBuckets(agg.MovieCount, agg.SeriesCount, total);
+        // Rule B — multi-label: percent of total assignments (not title count).
+        var genres = ToTopBuckets(agg.GenreCounts, SumCounts(agg.GenreCounts), TopBucketLimit);
+        var studios = ToTopBuckets(agg.StudioCounts, SumCounts(agg.StudioCounts), TopBucketLimit);
+        var tags = ToTopBuckets(agg.TagCounts, SumCounts(agg.TagCounts), TopBucketLimit);
+        // Rule A — exclusive single-value: percent of titles (or media samples).
+        var ratings = ToTopBuckets(agg.RatingCounts, total, TopBucketLimit, foldUnknown: false);
+        var decades = ToDecadeBuckets(agg.DecadeCounts, total);
+        var communityRatings = ToOrderedBuckets(agg.CommunityCounts, total, CommunityRatingBucketOrder);
+        var languages = ToTopBuckets(agg.LanguageCounts, total, TopBucketLimit, foldUnknown: false);
+        var collections = ToTopBuckets(agg.CollectionCounts, SumCounts(agg.CollectionCounts), TopBucketLimit, foldUnknown: false);
+        // Rule C — people: percent of credits within that role (see BuildPeopleGroups).
+        var peopleByRole = BuildPeopleGroups(agg.PeopleByKind);
+        var mediaDenom = agg.MediaInfoSampleCount;
+        var resolutions = ToOrderedBuckets(agg.ResolutionCounts, mediaDenom, ResolutionBucketOrder);
+        var videoRanges = ToOrderedBuckets(agg.VideoRangeCounts, mediaDenom, VideoRangeBucketOrder);
+        var videoCodecs = ToTopBuckets(agg.VideoCodecCounts, mediaDenom, TopBucketLimit, foldUnknown: false);
+        var audioChannels = ToTopBuckets(agg.AudioChannelCounts, mediaDenom, TopBucketLimit, foldUnknown: false);
+        var audioCodecs = ToTopBuckets(agg.AudioCodecCounts, mediaDenom, TopBucketLimit, foldUnknown: false);
+
+        return new LibraryStatsResponse
+        {
+            GeneratedAt = agg.GeneratedAt,
+            MovieCount = agg.MovieCount,
+            SeriesCount = agg.SeriesCount,
+            TotalCount = total,
+            AnimationPercent = agg.AnimationPercent,
+            MovieRuntimeTicksTotal = agg.MovieRuntimeTicksTotal,
+            MovieRuntimeTicksAverage = agg.MovieRuntimeTicksAverage,
+            MovieRuntimeSampleCount = agg.MovieRuntimeSampleCount,
+            SeriesRuntimeTicksTotal = agg.SeriesRuntimeTicksTotal,
+            SeriesRuntimeTicksAverage = agg.SeriesRuntimeTicksAverage,
+            SeriesRuntimeSampleCount = agg.SeriesRuntimeSampleCount,
+            Types = types,
+            Genres = genres,
+            Studios = studios,
+            OfficialRatings = ratings,
+            Decades = decades,
+            CommunityRatings = communityRatings,
+            Tags = tags,
+            Languages = languages,
+            Collections = collections,
+            MediaInfoSampleCount = mediaDenom,
+            Resolutions = resolutions,
+            VideoRanges = videoRanges,
+            VideoCodecs = videoCodecs,
+            AudioChannels = audioChannels,
+            AudioCodecs = audioCodecs,
+            PeopleByRole = peopleByRole,
+            Insights = BuildInsights(
+                agg.MovieCount,
+                agg.SeriesCount,
+                total,
+                agg.AnimationPercent,
+                genres,
+                studios,
+                ratings,
+                decades,
+                communityRatings,
+                peopleByRole,
+                agg.MovieRuntimeSampleCount,
+                agg.MovieRuntimeTicksTotal,
+                tags,
+                languages,
+                collections,
+                mediaDenom,
+                resolutions,
+                videoRanges,
+                videoCodecs)
+        };
     }
 
     /// <summary>
@@ -651,15 +716,14 @@ public class LibraryStatsService
            && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Builds collection size buckets from Jellyfin BoxSets (native collections).
-    /// Count = Movie/Series members visible in the scoped library; Percent = share of
-    /// all such memberships across collections (not library TotalCount).
+    /// Builds collection size counts from Jellyfin BoxSets (native collections).
+    /// Count = Movie/Series members visible in the scoped library.
     /// </summary>
-    private IReadOnlyList<LibraryStatsBucket> BuildCollectionBuckets(User? user, HashSet<Guid> libraryItemIds)
+    private Dictionary<string, int> BuildCollectionCounts(User? user, HashSet<Guid> libraryItemIds)
     {
         if (libraryItemIds.Count == 0)
         {
-            return [];
+            return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         }
 
         try
@@ -678,7 +742,7 @@ public class LibraryStatsService
 
             if (boxSets.Count == 0)
             {
-                return [];
+                return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             }
 
             var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -701,13 +765,12 @@ public class LibraryStatsService
                 }
             }
 
-            var membershipTotal = counts.Values.Sum();
-            return ToTopBuckets(counts, membershipTotal, TopBucketLimit, foldUnknown: false);
+            return counts;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Skipping collection stats");
-            return [];
+            return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         }
     }
 
@@ -1313,5 +1376,369 @@ public class LibraryStatsService
         return buckets.FirstOrDefault(b =>
             !b.Name.Equals(OtherBucketName, StringComparison.OrdinalIgnoreCase)
             && (allowUnknown || !b.Name.Equals(UnknownBucketName, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static LibraryStatsCategoryResponse? ProjectCategory(LibraryStatsAggregate agg, string category)
+    {
+        var key = NormalizeCategoryKey(category);
+        if (string.IsNullOrEmpty(key))
+        {
+            return null;
+        }
+
+        // Accept People:Actor / peopleActor after alphanumeric normalize → peopleactor.
+        if (key.StartsWith("people", StringComparison.Ordinal) && key.Length > "people".Length)
+        {
+            var kindKey = key["people".Length..];
+            if (TryProjectPeopleCategory(agg, kindKey, out var prefixedPeople))
+            {
+                return prefixedPeople;
+            }
+        }
+
+        if (TryProjectPeopleCategory(agg, key, out var peopleResult))
+        {
+            return peopleResult;
+        }
+
+        return key switch
+        {
+            "types" => CategoryFromBuckets(
+                "types",
+                "Types",
+                "Share of titles",
+                BuildTypeBuckets(agg.MovieCount, agg.SeriesCount, agg.TotalCount),
+                agg.TotalCount,
+                agg.GeneratedAt),
+            "genres" => CategoryFromCounts(
+                "genres",
+                "Genres",
+                "Share of genre tags",
+                agg.GenreCounts,
+                SumCounts(agg.GenreCounts),
+                agg.GeneratedAt),
+            "studios" => CategoryFromCounts(
+                "studios",
+                "Studios",
+                "Share of studio credits",
+                agg.StudioCounts,
+                SumCounts(agg.StudioCounts),
+                agg.GeneratedAt),
+            "tags" => CategoryFromCounts(
+                "tags",
+                "Tags",
+                "Share of tag assignments",
+                agg.TagCounts,
+                SumCounts(agg.TagCounts),
+                agg.GeneratedAt),
+            "collections" => CategoryFromCounts(
+                "collections",
+                "Collections",
+                "Share of collection memberships",
+                agg.CollectionCounts,
+                SumCounts(agg.CollectionCounts),
+                agg.GeneratedAt),
+            "decades" or "years" => CategoryFromBuckets(
+                "decades",
+                "Years",
+                "Share of titles",
+                ToDecadeBuckets(agg.DecadeCounts, agg.TotalCount),
+                agg.TotalCount,
+                agg.GeneratedAt),
+            "ratings" or "officialratings" => CategoryFromCounts(
+                "ratings",
+                "Official ratings",
+                "Share of titles",
+                agg.RatingCounts,
+                agg.TotalCount,
+                agg.GeneratedAt),
+            "community" or "communityratings" => CategoryFromBuckets(
+                "community",
+                "Community scores",
+                "Share of titles",
+                ToOrderedBuckets(agg.CommunityCounts, agg.TotalCount, CommunityRatingBucketOrder),
+                agg.TotalCount,
+                agg.GeneratedAt),
+            "languages" => CategoryFromCounts(
+                "languages",
+                "Languages",
+                "Share of titles",
+                agg.LanguageCounts,
+                agg.TotalCount,
+                agg.GeneratedAt),
+            "resolutions" => CategoryFromBuckets(
+                "resolutions",
+                "Resolutions",
+                "Share of titles with media info",
+                ToOrderedBuckets(agg.ResolutionCounts, agg.MediaInfoSampleCount, ResolutionBucketOrder),
+                agg.MediaInfoSampleCount,
+                agg.GeneratedAt),
+            "hdr" or "videoranges" => CategoryFromBuckets(
+                "hdr",
+                "HDR / range",
+                "Share of titles with media info",
+                ToOrderedBuckets(agg.VideoRangeCounts, agg.MediaInfoSampleCount, VideoRangeBucketOrder),
+                agg.MediaInfoSampleCount,
+                agg.GeneratedAt),
+            "videocodecs" => CategoryFromCounts(
+                "videoCodecs",
+                "Video codecs",
+                "Share of titles with media info",
+                agg.VideoCodecCounts,
+                agg.MediaInfoSampleCount,
+                agg.GeneratedAt),
+            "audio" or "audiochannels" => CategoryFromCounts(
+                "audioChannels",
+                "Audio channels",
+                "Share of titles with media info",
+                agg.AudioChannelCounts,
+                agg.MediaInfoSampleCount,
+                agg.GeneratedAt),
+            "audiocodecs" => CategoryFromCounts(
+                "audioCodecs",
+                "Audio codecs",
+                "Share of titles with media info",
+                agg.AudioCodecCounts,
+                agg.MediaInfoSampleCount,
+                agg.GeneratedAt),
+            _ => null
+        };
+    }
+
+    private static bool TryProjectPeopleCategory(
+        LibraryStatsAggregate agg,
+        string key,
+        out LibraryStatsCategoryResponse? result)
+    {
+        result = null;
+        if (!TryResolvePersonKind(key, out var kind, out var canonical, out var title))
+        {
+            return false;
+        }
+
+        if (!agg.PeopleByKind.TryGetValue(kind, out var map) || map.Count == 0)
+        {
+            result = new LibraryStatsCategoryResponse
+            {
+                Category = canonical,
+                Title = title,
+                DenominatorHint = "Share of " + FormatPersonKind(kind).ToLowerInvariant() + " credits",
+                Denominator = 0,
+                GeneratedAt = agg.GeneratedAt,
+                Buckets = []
+            };
+            return true;
+        }
+
+        var roleTotal = map.Values.Sum();
+        var (buckets, truncated, totalBuckets) = ToAllBuckets(map, roleTotal);
+        result = new LibraryStatsCategoryResponse
+        {
+            Category = canonical,
+            Title = title,
+            DenominatorHint = "Share of " + FormatPersonKind(kind).ToLowerInvariant() + " credits",
+            Denominator = roleTotal,
+            GeneratedAt = agg.GeneratedAt,
+            Truncated = truncated,
+            TotalBuckets = totalBuckets,
+            Buckets = buckets
+        };
+        return true;
+    }
+
+    private static bool TryResolvePersonKind(
+        string key,
+        out PersonKind kind,
+        out string canonical,
+        out string title)
+    {
+        kind = PersonKind.Unknown;
+        canonical = string.Empty;
+        title = string.Empty;
+
+        (PersonKind Kind, string Canonical, string Title)? match = key switch
+        {
+            "actors" or "actor" => (PersonKind.Actor, "actors", "Top Actor"),
+            "directors" or "director" => (PersonKind.Director, "directors", "Top Director"),
+            "writers" or "writer" => (PersonKind.Writer, "writers", "Top Writer"),
+            "creators" or "creator" => (PersonKind.Creator, "creators", "Top Creator"),
+            "producers" or "producer" => (PersonKind.Producer, "producers", "Top Producer"),
+            "gueststars" or "gueststar" => (PersonKind.GuestStar, "guestStars", "Top Guest Star"),
+            "composers" or "composer" => (PersonKind.Composer, "composers", "Top Composer"),
+            "editors" or "editor" => (PersonKind.Editor, "editors", "Top Editor"),
+            "artists" or "artist" => (PersonKind.Artist, "artists", "Top Artist"),
+            "authors" or "author" => (PersonKind.Author, "authors", "Top Author"),
+            "albumartists" or "albumartist" => (PersonKind.AlbumArtist, "albumArtists", "Top Album Artist"),
+            "coverartists" or "coverartist" => (PersonKind.CoverArtist, "coverArtists", "Top Cover Artist"),
+            "unknown" => (PersonKind.Unknown, "unknown", "Top Unknown"),
+            _ => null
+        };
+
+        if (match is null)
+        {
+            return false;
+        }
+
+        kind = match.Value.Kind;
+        canonical = match.Value.Canonical;
+        title = match.Value.Title;
+        return true;
+    }
+
+    private static string NormalizeCategoryKey(string category)
+    {
+        var trimmed = category.Trim();
+        if (trimmed.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        // Keep a compact alphanumeric key: actors, videoCodecs, guestStars, people:Actor → peopleactor
+        var buffer = new char[trimmed.Length];
+        var n = 0;
+        foreach (var ch in trimmed)
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                buffer[n++] = char.ToLowerInvariant(ch);
+            }
+        }
+
+        return n == 0 ? string.Empty : new string(buffer, 0, n);
+    }
+
+    private static LibraryStatsCategoryResponse CategoryFromCounts(
+        string category,
+        string title,
+        string hint,
+        IReadOnlyDictionary<string, int> counts,
+        int denominator,
+        DateTime generatedAt)
+    {
+        var (buckets, truncated, totalBuckets) = ToAllBuckets(counts, denominator);
+        return new LibraryStatsCategoryResponse
+        {
+            Category = category,
+            Title = title,
+            DenominatorHint = hint,
+            Denominator = denominator,
+            GeneratedAt = generatedAt,
+            Truncated = truncated,
+            TotalBuckets = totalBuckets,
+            Buckets = buckets
+        };
+    }
+
+    private static LibraryStatsCategoryResponse CategoryFromBuckets(
+        string category,
+        string title,
+        string hint,
+        IReadOnlyList<LibraryStatsBucket> buckets,
+        int denominator,
+        DateTime generatedAt)
+    {
+        return new LibraryStatsCategoryResponse
+        {
+            Category = category,
+            Title = title,
+            DenominatorHint = hint,
+            Denominator = denominator,
+            GeneratedAt = generatedAt,
+            Truncated = false,
+            TotalBuckets = buckets.Count,
+            Buckets = buckets
+        };
+    }
+
+    private static (IReadOnlyList<LibraryStatsBucket> Buckets, bool Truncated, int TotalBuckets) ToAllBuckets(
+        IReadOnlyDictionary<string, int> counts,
+        int total)
+    {
+        if (counts.Count == 0 || total <= 0)
+        {
+            return ([], false, 0);
+        }
+
+        var ordered = counts
+            .Where(kv => kv.Value > 0)
+            .OrderByDescending(kv => kv.Value)
+            .ThenBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var totalBuckets = ordered.Count;
+        var truncated = totalBuckets > MaxCategoryBuckets;
+        if (truncated)
+        {
+            ordered = ordered.Take(MaxCategoryBuckets).ToList();
+        }
+
+        var buckets = ordered
+            .Select(kv => new LibraryStatsBucket
+            {
+                Name = kv.Key,
+                Count = kv.Value,
+                Percent = Percent(kv.Value, total)
+            })
+            .ToList();
+
+        return (buckets, truncated, totalBuckets);
+    }
+
+    /// <summary>
+    /// Raw count maps shared by overview (Top N + Other) and category detail (full list).
+    /// </summary>
+    private sealed class LibraryStatsAggregate
+    {
+        public DateTime GeneratedAt { get; set; }
+
+        public int MovieCount { get; set; }
+
+        public int SeriesCount { get; set; }
+
+        public int TotalCount { get; set; }
+
+        public double AnimationPercent { get; set; }
+
+        public long MovieRuntimeTicksTotal { get; set; }
+
+        public long MovieRuntimeTicksAverage { get; set; }
+
+        public int MovieRuntimeSampleCount { get; set; }
+
+        public long SeriesRuntimeTicksTotal { get; set; }
+
+        public long SeriesRuntimeTicksAverage { get; set; }
+
+        public int SeriesRuntimeSampleCount { get; set; }
+
+        public int MediaInfoSampleCount { get; set; }
+
+        public Dictionary<string, int> GenreCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, int> StudioCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, int> RatingCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, int> DecadeCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, int> TagCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, int> LanguageCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, int> CommunityCounts { get; set; } = new(StringComparer.Ordinal);
+
+        public Dictionary<string, int> ResolutionCounts { get; set; } = new(StringComparer.Ordinal);
+
+        public Dictionary<string, int> VideoRangeCounts { get; set; } = new(StringComparer.Ordinal);
+
+        public Dictionary<string, int> VideoCodecCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, int> AudioChannelCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, int> AudioCodecCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, int> CollectionCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<PersonKind, Dictionary<string, int>> PeopleByKind { get; set; } = new();
     }
 }

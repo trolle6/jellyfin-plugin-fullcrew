@@ -105,6 +105,26 @@ public class FullCrewController : ControllerBase
     }
 
     /// <summary>
+    /// Gets the full ranked bucket list for a single stats category (detail page).
+    /// </summary>
+    /// <param name="category">Category key such as actors, genres, hdr, videoCodecs.</param>
+    [HttpGet("stats/{category}")]
+    [Authorize]
+    [ProducesResponseType(typeof(LibraryStatsCategoryResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult<LibraryStatsCategoryResponse> GetLibraryStatsCategory([FromRoute] string category)
+    {
+        var user = TryGetCurrentUser();
+        var result = _libraryStatsService.GetCategoryStats(user, category);
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Serves the client JavaScript.
     /// </summary>
     [HttpGet("fullcrew.js")]
