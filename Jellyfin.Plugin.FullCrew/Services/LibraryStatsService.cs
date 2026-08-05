@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Database.Implementations.Enums;
@@ -30,7 +31,7 @@ public class LibraryStatsService
     private const int MaxInsights = 14;
     /// <summary>When Other would exceed this share on overview charts, omit it (detail page still has full list).</summary>
     private const double OmitOtherPercentThreshold = 40.0;
-    private const string CacheKeyPrefix = "fullcrew:library-stats:v6:";
+    private const string CacheKeyPrefix = "fullcrew:library-stats:v7:";
     private const string AnimationGenre = "Animation";
     private const string OtherBucketName = "Other";
     private const string UnknownBucketName = "Unknown";
@@ -186,6 +187,7 @@ public class LibraryStatsService
                 _ => 0,
                 StringComparer.Ordinal);
             var peopleByKind = new Dictionary<PersonKind, Dictionary<string, int>>();
+            var personIdsFromCredits = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
             var resolutionCounts = ResolutionBucketOrder.ToDictionary(name => name, _ => 0, StringComparer.Ordinal);
             var videoRangeCounts = VideoRangeBucketOrder.ToDictionary(name => name, _ => 0, StringComparer.Ordinal);
             var videoCodecCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -285,7 +287,7 @@ public class LibraryStatsService
 
                 if (item.SupportsPeople || kind is BaseItemKind.Movie or BaseItemKind.Series)
                 {
-                    AggregatePeople(item, user, peopleByKind);
+                    AggregatePeople(item, user, peopleByKind, personIdsFromCredits);
 
                     if (collectionMemberships.TryGetValue(item.Id, out var memberOf)
                         && memberOf.Count > 0)
@@ -319,6 +321,17 @@ public class LibraryStatsService
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
+            // PersonInfo.Id from credits is a strong default; library Person items overwrite
+            // when present so navigation targets the real BaseItem id Jellyfin Web expects.
+            var personItemIds = new Dictionary<string, Guid>(personIdsFromCredits, StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in BuildPersonItemIdMap(personNames))
+            {
+                if (kv.Value != Guid.Empty)
+                {
+                    personItemIds[kv.Key] = kv.Value;
+                }
+            }
+
             var aggregate = new LibraryStatsAggregate
             {
                 GeneratedAt = DateTime.UtcNow,
@@ -348,7 +361,7 @@ public class LibraryStatsService
                 AudioCodecCounts = audioCodecCounts,
                 CollectionCounts = collectionCounts,
                 PeopleByKind = peopleByKind,
-                PersonItemIds = BuildPersonItemIdMap(personNames),
+                PersonItemIds = personItemIds,
                 GenreItemIds = BuildNamedItemIdMap(genreCounts.Keys, BaseItemKind.Genre),
                 StudioItemIds = BuildNamedItemIdMap(studioCounts.Keys, BaseItemKind.Studio),
                 // Jellyfin has no Tag BaseItemKind / detail page — leave unlinked.
@@ -388,7 +401,7 @@ public class LibraryStatsService
         // Rule B — multi-label: percent of total assignments (not title count).
         // Overview: top 25 named; omit Other when it would dominate (>40%).
         var genres = ToTopBuckets(agg.GenreCounts, SumCounts(agg.GenreCounts), TopBucketLimit, omitDominantOther: true, itemIds: agg.GenreItemIds, itemType: "Genre");
-        var studios = ToTopBuckets(agg.StudioCounts, SumCounts(agg.StudioCounts), TopBucketLimit, omitDominantOther: true, itemIds: agg.StudioItemIds, itemType: "Studio");
+        var studios = ToTopStudioBuckets(agg.StudioCounts, SumCounts(agg.StudioCounts), TopBucketLimit, omitDominantOther: true, itemIds: agg.StudioItemIds);
         var tags = ToTopBuckets(agg.TagCounts, SumCounts(agg.TagCounts), TopBucketLimit, omitDominantOther: true, itemIds: agg.TagItemIds, itemType: "Tag");
         // Rule A — exclusive single-value: percent of titles (or media samples).
         var ratings = ToTopBuckets(agg.RatingCounts, total, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
@@ -934,7 +947,8 @@ public class LibraryStatsService
     private void AggregatePeople(
         BaseItem item,
         User? user,
-        IDictionary<PersonKind, Dictionary<string, int>> peopleByKind)
+        IDictionary<PersonKind, Dictionary<string, int>> peopleByKind,
+        IDictionary<string, Guid> personItemIds)
     {
         IReadOnlyList<PersonInfo> people;
         try
@@ -961,6 +975,7 @@ public class LibraryStatsService
                 continue;
             }
 
+            var name = person.Name.Trim();
             var type = person.Type;
             if (!peopleByKind.TryGetValue(type, out var map))
             {
@@ -968,7 +983,13 @@ public class LibraryStatsService
                 peopleByKind[type] = map;
             }
 
-            Increment(map, person.Name.Trim());
+            Increment(map, name);
+
+            // PersonInfo.Id is the People/Person entity id used by Jellyfin detail pages.
+            if (person.Id != Guid.Empty && !personItemIds.ContainsKey(name))
+            {
+                personItemIds[name] = person.Id;
+            }
         }
     }
 
@@ -1437,6 +1458,370 @@ public class LibraryStatsService
         }
 
         return buckets;
+    }
+
+    /// <summary>
+    /// Overview studios: cluster by shared name root, then take Top N (+ Other).
+    /// </summary>
+    private static IReadOnlyList<LibraryStatsBucket> ToTopStudioBuckets(
+        IReadOnlyDictionary<string, int> counts,
+        int total,
+        int limit,
+        bool omitDominantOther,
+        IReadOnlyDictionary<string, Guid>? itemIds)
+    {
+        var clustered = BuildClusteredStudioBuckets(counts, total, itemIds);
+        if (clustered.Count == 0 || total <= 0)
+        {
+            return [];
+        }
+
+        var top = clustered.Take(limit).ToList();
+        var otherCount = clustered.Skip(limit).Sum(b => b.Count);
+        if (otherCount > 0)
+        {
+            var otherPercent = Percent(otherCount, total);
+            if (otherPercent is > 0 and <= 100
+                && !(omitDominantOther && otherPercent > OmitOtherPercentThreshold))
+            {
+                top.Add(new LibraryStatsBucket
+                {
+                    Name = OtherBucketName,
+                    Count = otherCount,
+                    Percent = otherPercent
+                });
+            }
+        }
+
+        return top;
+    }
+
+    private static IReadOnlyList<LibraryStatsBucket> BuildAllStudioBuckets(
+        IReadOnlyDictionary<string, int> counts,
+        int total,
+        IReadOnlyDictionary<string, Guid>? itemIds)
+    {
+        var clustered = BuildClusteredStudioBuckets(counts, total, itemIds);
+        if (clustered.Count <= MaxCategoryBuckets)
+        {
+            return clustered;
+        }
+
+        // Safety cap: keep top clusters, fold the rest into Other (no children).
+        var kept = clustered.Take(MaxCategoryBuckets).ToList();
+        var otherCount = clustered.Skip(MaxCategoryBuckets).Sum(b => b.Count);
+        if (otherCount > 0)
+        {
+            kept.Add(new LibraryStatsBucket
+            {
+                Name = OtherBucketName,
+                Count = otherCount,
+                Percent = Percent(otherCount, total)
+            });
+        }
+
+        return kept;
+    }
+
+    /// <summary>
+    /// Groups studio credit strings by a shared brand/name root (prefix/token clustering).
+    /// Parents sum counts; Children hold each exact studio string.
+    /// </summary>
+    private static IReadOnlyList<LibraryStatsBucket> BuildClusteredStudioBuckets(
+        IReadOnlyDictionary<string, int> counts,
+        int total,
+        IReadOnlyDictionary<string, Guid>? itemIds)
+    {
+        if (counts.Count == 0 || total <= 0)
+        {
+            return [];
+        }
+
+        var groups = new Dictionary<string, List<(string Name, int Count)>>(StringComparer.OrdinalIgnoreCase);
+        var labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var kv in counts.Where(kv => kv.Value > 0))
+        {
+            var (rootKey, label) = ResolveStudioClusterRoot(kv.Key);
+            if (!groups.TryGetValue(rootKey, out var list))
+            {
+                list = [];
+                groups[rootKey] = list;
+                labels[rootKey] = label;
+            }
+
+            list.Add((kv.Key, kv.Value));
+        }
+
+        var buckets = new List<LibraryStatsBucket>(groups.Count);
+        foreach (var kv in groups)
+        {
+            var members = kv.Value
+                .OrderByDescending(m => m.Count)
+                .ThenBy(m => m.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var sum = members.Sum(m => m.Count);
+            if (sum <= 0)
+            {
+                continue;
+            }
+
+            // Singleton clusters stay as the exact studio name (linkable leaf).
+            if (members.Count == 1)
+            {
+                buckets.Add(MakeBucket(members[0].Name, members[0].Count, total, itemIds, "Studio"));
+                continue;
+            }
+
+            var children = members
+                .Select(m => MakeBucket(m.Name, m.Count, total, itemIds, "Studio"))
+                .ToList();
+
+            // Parent: display root label; link best-effort to the largest child's ItemId.
+            string? parentId = null;
+            foreach (var child in children)
+            {
+                if (!string.IsNullOrEmpty(child.ItemId))
+                {
+                    parentId = child.ItemId;
+                    break;
+                }
+            }
+
+            buckets.Add(new LibraryStatsBucket
+            {
+                Name = labels[kv.Key],
+                Count = sum,
+                Percent = Percent(sum, total),
+                ItemId = parentId,
+                ItemType = parentId is null ? null : "Studio",
+                Children = children
+            });
+        }
+
+        return buckets
+            .OrderByDescending(b => b.Count)
+            .ThenBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Seed brand roots (longest first) plus heuristic first significant token.
+    /// Returns (stable key, display label).
+    /// </summary>
+    private static readonly string[] StudioBrandRoots =
+    [
+        "cartoon network",
+        "adult swim",
+        "warner brothers",
+        "warner bros",
+        "walt disney",
+        "nickelodeon",
+        "nicktoons",
+        "nick jr",
+        "dreamworks",
+        "dream works",
+        "sony pictures",
+        "20th century",
+        "twentieth century",
+        "metro goldwyn",
+        "disney",
+        "pixar",
+        "marvel",
+        "lucasfilm",
+        "columbia",
+        "tristar",
+        "universal",
+        "illumination",
+        "paramount",
+        "lionsgate",
+        "miramax",
+        "netflix",
+        "amazon",
+        "hbo",
+        "bbc",
+        "toei",
+        "sunrise",
+        "bones",
+        "madhouse",
+        "kyoto"
+    ];
+
+    private static readonly HashSet<string> StudioRootFillers = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "a", "an", "the", "and", "of", "for",
+        "walt", "pictures", "picture", "studios", "studio",
+        "animation", "animations", "television", "tv",
+        "productions", "production", "entertainment", "media",
+        "films", "film", "company", "group", "channel",
+        "network", "video", "home", "interactive", "toon", "toons",
+        "bros", "brothers", "inc", "llc", "ltd", "co", "corp",
+        "corporation", "limited", "feature", "features", "shorts",
+        "short", "original", "originals", "plus", "xd"
+    };
+
+    private static (string Key, string Label) ResolveStudioClusterRoot(string rawName)
+    {
+        var normalized = NormalizeStudioName(rawName);
+        if (string.IsNullOrEmpty(normalized))
+        {
+            var fallback = rawName.Trim();
+            return (fallback.ToLowerInvariant(), fallback);
+        }
+
+        // 1) Seed brand roots — longest match wins (list is longest-first).
+        foreach (var root in StudioBrandRoots)
+        {
+            if (StudioNameMatchesRoot(normalized, root))
+            {
+                var (key, label) = CanonicalStudioRoot(root);
+                return (key, label);
+            }
+        }
+
+        // 2) Heuristic: first significant alphabetic token (len ≥ 5), shared later by grouping.
+        var tokens = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var token in tokens)
+        {
+            if (token.Length < 5 || StudioRootFillers.Contains(token))
+            {
+                continue;
+            }
+
+            return (token, ToTitleCaseRoot(token));
+        }
+
+        // Short unique names stay themselves.
+        var self = tokens.Length > 0 ? string.Join(' ', tokens) : normalized;
+        return (self, ToTitleCaseRoot(self));
+    }
+
+    private static (string Key, string Label) CanonicalStudioRoot(string matchedRoot)
+    {
+        // Collapse near-aliases that share a display brand (not corporate conglomerates).
+        return matchedRoot switch
+        {
+            "walt disney" => ("disney", "Disney"),
+            "warner brothers" => ("warner bros", "Warner Bros"),
+            "dream works" => ("dreamworks", "Dreamworks"),
+            "twentieth century" => ("20th century", "20th Century"),
+            "nick jr" => ("nickelodeon", "Nickelodeon"),
+            "nicktoons" => ("nickelodeon", "Nickelodeon"),
+            _ => (matchedRoot, ToTitleCaseRoot(matchedRoot))
+        };
+    }
+
+    private static bool StudioNameMatchesRoot(string normalized, string root)
+    {
+        if (normalized == root || normalized.StartsWith(root + " ", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // Contain as whole-token phrase: "… disney …"
+        if (normalized.Contains(" " + root + " ", StringComparison.Ordinal)
+            || normalized.EndsWith(" " + root, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // Prefix glued to more letters: "disneyxd", "disneyanimations"
+        var rootCompact = root.Replace(" ", string.Empty, StringComparison.Ordinal);
+        var compact = normalized.Replace(" ", string.Empty, StringComparison.Ordinal);
+        if (compact.StartsWith(rootCompact, StringComparison.Ordinal)
+            && compact.Length > rootCompact.Length)
+        {
+            return true;
+        }
+
+        // Any token starts with the root's first word when root is single-token and ≥5 chars
+        if (!root.Contains(' ', StringComparison.Ordinal) && root.Length >= 5)
+        {
+            foreach (var token in normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (token.StartsWith(root, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static string NormalizeStudioName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return string.Empty;
+        }
+
+        var sb = new StringBuilder(name.Length * 2);
+        char prev = '\0';
+        foreach (var ch in name.Trim())
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                // Split camelCase / DisneyXD → Disney XD
+                if (sb.Length > 0
+                    && char.IsUpper(ch)
+                    && char.IsLetter(prev)
+                    && !char.IsUpper(prev))
+                {
+                    sb.Append(' ');
+                }
+                else if (sb.Length > 0
+                         && char.IsLetter(ch)
+                         && char.IsDigit(prev))
+                {
+                    sb.Append(' ');
+                }
+                else if (sb.Length > 0
+                         && char.IsDigit(ch)
+                         && char.IsLetter(prev))
+                {
+                    sb.Append(' ');
+                }
+
+                sb.Append(char.ToLowerInvariant(ch));
+                prev = ch;
+            }
+            else if (sb.Length > 0 && sb[^1] != ' ')
+            {
+                sb.Append(' ');
+                prev = ' ';
+            }
+        }
+
+        return string.Join(
+            ' ',
+            sb.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static string ToTitleCaseRoot(string root)
+    {
+        var parts = root.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < parts.Length; i++)
+        {
+            var p = parts[i];
+            if (p.Equals("bros", StringComparison.OrdinalIgnoreCase))
+            {
+                parts[i] = "Bros";
+            }
+            else if (p.Equals("hbo", StringComparison.OrdinalIgnoreCase)
+                     || p.Equals("bbc", StringComparison.OrdinalIgnoreCase)
+                     || p.Equals("xd", StringComparison.OrdinalIgnoreCase)
+                     || p.Equals("tv", StringComparison.OrdinalIgnoreCase))
+            {
+                parts[i] = p.ToUpperInvariant();
+            }
+            else if (p.Length > 0)
+            {
+                parts[i] = char.ToUpperInvariant(p[0]) + p[1..];
+            }
+        }
+
+        return string.Join(' ', parts);
     }
 
     private static LibraryStatsBucket MakeBucket(
@@ -2019,15 +2404,13 @@ public class LibraryStatsService
                 agg.GeneratedAt,
                 agg.GenreItemIds,
                 "Genre"),
-            "studios" => CategoryFromCounts(
+            "studios" => CategoryFromBuckets(
                 "studios",
                 "Studios",
-                "Share of studio credits",
-                agg.StudioCounts,
+                "Share of studio credits (name-root clusters expand to exact studios)",
+                BuildAllStudioBuckets(agg.StudioCounts, SumCounts(agg.StudioCounts), agg.StudioItemIds),
                 SumCounts(agg.StudioCounts),
-                agg.GeneratedAt,
-                agg.StudioItemIds,
-                "Studio"),
+                agg.GeneratedAt),
             "tags" => CategoryFromCounts(
                 "tags",
                 "Tags",

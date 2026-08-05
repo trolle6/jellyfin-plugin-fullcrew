@@ -207,6 +207,12 @@ public class LibraryStatsBucket
     /// Gets or sets the Jellyfin item type for <see cref="ItemId"/> (e.g. Person, Genre, Studio, BoxSet).
     /// </summary>
     public string? ItemType { get; set; }
+
+    /// <summary>
+    /// Gets or sets child buckets when this row is a clustered parent (e.g. studio name-root group).
+    /// Null/empty for leaf rows.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket>? Children { get; set; }
 }
 
 /// <summary>

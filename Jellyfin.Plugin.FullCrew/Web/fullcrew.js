@@ -998,12 +998,15 @@
 
     function normalizeBuckets(list) {
         return (list || []).map(function (item) {
+            var childrenRaw = prop(item, 'Children', 'children') || prop(item, 'Branches', 'branches') || [];
+            var children = normalizeBuckets(childrenRaw);
             return {
                 name: prop(item, 'Name', 'name') || 'Unknown',
                 count: Number(prop(item, 'Count', 'count')) || 0,
                 percent: Number(prop(item, 'Percent', 'percent')) || 0,
-                itemId: prop(item, 'ItemId', 'itemId') || null,
-                itemType: prop(item, 'ItemType', 'itemType') || null
+                itemId: prop(item, 'ItemId', 'itemId') || prop(item, 'Id', 'id') || null,
+                itemType: prop(item, 'ItemType', 'itemType') || null,
+                children: children
             };
         }).filter(function (item) {
             return item.count > 0 || item.percent > 0;
@@ -1094,6 +1097,125 @@
             }
         }
         return el;
+    }
+
+    function bucketHasChildren(bucket) {
+        return !!(bucket && bucket.children && bucket.children.length);
+    }
+
+    function createClusterToggle(expanded) {
+        var btn = createElement('button', 'fullCrewStatsClusterToggle');
+        btn.type = 'button';
+        btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        btn.setAttribute('aria-label', expanded ? 'Collapse studio variants' : 'Expand studio variants');
+        btn.appendChild(createElement('span', 'fullCrewStatsClusterChevron', expanded ? '▾' : '▸'));
+        return btn;
+    }
+
+    function appendClusteredRankItem(list, bucket, depth) {
+        var hasKids = bucketHasChildren(bucket);
+        var li = createElement('li', 'fullCrewStatsRankItem' + (hasKids ? ' fullCrewStatsRankItem--cluster' : '') + (depth ? ' fullCrewStatsRankItem--child' : ''));
+        if (depth) {
+            li.style.paddingLeft = Math.min(1.5, depth * 1.1) + 'rem';
+        }
+
+        var row = createElement('div', 'fullCrewStatsRankRow');
+        var nameWrap = createElement('div', 'fullCrewStatsRankNameWrap');
+        var childList = null;
+        var toggle = null;
+
+        if (hasKids) {
+            toggle = createClusterToggle(false);
+            nameWrap.appendChild(toggle);
+        }
+
+        nameWrap.appendChild(createBucketNameEl('span', 'fullCrewStatsRankName', bucket));
+        row.appendChild(nameWrap);
+        row.appendChild(
+            createElement(
+                'span',
+                'fullCrewStatsRankMeta',
+                bucket.count + ' — ' + formatPercent(bucket.percent)
+                    + (hasKids ? ' · ' + bucket.children.length + ' variants' : '')
+            )
+        );
+        li.appendChild(row);
+
+        if (hasKids) {
+            childList = createElement('ol', 'fullCrewStatsRankList fullCrewStatsRankList--nested is-collapsed');
+            bucket.children.forEach(function (child) {
+                appendClusteredRankItem(childList, child, (depth || 0) + 1);
+            });
+            li.appendChild(childList);
+            toggle.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                var open = childList.classList.contains('is-collapsed');
+                childList.classList.toggle('is-collapsed', !open);
+                toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                toggle.setAttribute('aria-label', open ? 'Collapse studio variants' : 'Expand studio variants');
+                var chevron = toggle.querySelector('.fullCrewStatsClusterChevron');
+                if (chevron) {
+                    chevron.textContent = open ? '▾' : '▸';
+                }
+                li.classList.toggle('is-expanded', open);
+            });
+        }
+
+        list.appendChild(li);
+    }
+
+    function appendClusteredBarRow(bars, bucket, max, depth, colorIndex) {
+        var hasKids = bucketHasChildren(bucket);
+        var wrap = createElement('div', 'fullCrewStatsBarCluster' + (depth ? ' fullCrewStatsBarCluster--child' : ''));
+        var row = createElement('div', 'fullCrewStatsBarRow');
+        var labelWrap = createElement('div', 'fullCrewStatsBarLabelWrap');
+        var childHost = null;
+        var toggle = null;
+
+        if (hasKids) {
+            toggle = createClusterToggle(false);
+            labelWrap.appendChild(toggle);
+        }
+
+        labelWrap.appendChild(createBucketNameEl('div', 'fullCrewStatsBarLabel', bucket));
+        row.appendChild(labelWrap);
+
+        var track = createElement('div', 'fullCrewStatsBarTrack');
+        var fill = createElement('div', 'fullCrewStatsBarFill');
+        fill.style.width = Math.max(2, (bucket.count / max) * 100) + '%';
+        fill.style.background = CHART_COLORS[colorIndex % CHART_COLORS.length];
+        track.appendChild(fill);
+        row.appendChild(track);
+        row.appendChild(
+            createElement(
+                'div',
+                'fullCrewStatsBarValue',
+                bucket.count + ' — ' + formatPercent(bucket.percent)
+            )
+        );
+        wrap.appendChild(row);
+
+        if (hasKids) {
+            childHost = createElement('div', 'fullCrewStatsBarChildren is-collapsed');
+            bucket.children.forEach(function (child, idx) {
+                appendClusteredBarRow(childHost, child, max, (depth || 0) + 1, colorIndex);
+            });
+            wrap.appendChild(childHost);
+            toggle.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                var open = childHost.classList.contains('is-collapsed');
+                childHost.classList.toggle('is-collapsed', !open);
+                toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                var chevron = toggle.querySelector('.fullCrewStatsClusterChevron');
+                if (chevron) {
+                    chevron.textContent = open ? '▾' : '▸';
+                }
+            });
+        }
+
+        bars.appendChild(wrap);
     }
 
     function fetchPluginConfig() {
@@ -1763,16 +1885,7 @@
         if (mode === 'list') {
             var list = createElement('ol', 'fullCrewStatsRankList');
             items.forEach(function (bucket) {
-                var li = createElement('li', 'fullCrewStatsRankItem');
-                var name = createBucketNameEl('span', 'fullCrewStatsRankName', bucket);
-                var meta = createElement(
-                    'span',
-                    'fullCrewStatsRankMeta',
-                    bucket.count + ' — ' + formatPercent(bucket.percent)
-                );
-                li.appendChild(name);
-                li.appendChild(meta);
-                list.appendChild(li);
+                appendClusteredRankItem(list, bucket, 0);
             });
             container.appendChild(list);
             return;
@@ -1787,23 +1900,7 @@
             );
             var bars = createElement('div', 'fullCrewStatsBars');
             items.forEach(function (bucket, index) {
-                var row = createElement('div', 'fullCrewStatsBarRow');
-                var labelEl = createBucketNameEl('div', 'fullCrewStatsBarLabel', bucket);
-                row.appendChild(labelEl);
-                var track = createElement('div', 'fullCrewStatsBarTrack');
-                var fill = createElement('div', 'fullCrewStatsBarFill');
-                fill.style.width = Math.max(2, (bucket.count / max) * 100) + '%';
-                fill.style.background = CHART_COLORS[index % CHART_COLORS.length];
-                track.appendChild(fill);
-                row.appendChild(track);
-                row.appendChild(
-                    createElement(
-                        'div',
-                        'fullCrewStatsBarValue',
-                        bucket.count + ' — ' + formatPercent(bucket.percent)
-                    )
-                );
-                bars.appendChild(row);
+                appendClusteredBarRow(bars, bucket, max, 0, index);
             });
             container.appendChild(bars);
             return;
@@ -1818,18 +1915,59 @@
 
         var legend = createElement('ul', 'fullCrewStatsLegend');
         items.forEach(function (bucket, index) {
-            var li = createElement('li', 'fullCrewStatsLegendItem');
+            var li = createElement('li', 'fullCrewStatsLegendItem' + (bucketHasChildren(bucket) ? ' fullCrewStatsLegendItem--cluster' : ''));
             var swatch = createElement('span', 'fullCrewStatsSwatch');
             swatch.style.background = CHART_COLORS[index % CHART_COLORS.length];
-            li.appendChild(swatch);
-            li.appendChild(createBucketNameEl('span', 'fullCrewStatsLegendName', bucket));
-            li.appendChild(
-                createElement(
-                    'span',
-                    'fullCrewStatsLegendMeta',
-                    bucket.count + ' — ' + formatPercent(bucket.percent)
-                )
-            );
+            var nameRow = createElement('div', 'fullCrewStatsLegendNameRow');
+            if (bucketHasChildren(bucket)) {
+                var toggle = createClusterToggle(false);
+                nameRow.appendChild(toggle);
+                var nested = createElement('ul', 'fullCrewStatsLegendNested is-collapsed');
+                bucket.children.forEach(function (child) {
+                    var childLi = createElement('li', 'fullCrewStatsLegendItem fullCrewStatsLegendItem--child');
+                    childLi.appendChild(createBucketNameEl('span', 'fullCrewStatsLegendName', child));
+                    childLi.appendChild(
+                        createElement(
+                            'span',
+                            'fullCrewStatsLegendMeta',
+                            child.count + ' — ' + formatPercent(child.percent)
+                        )
+                    );
+                    nested.appendChild(childLi);
+                });
+                toggle.addEventListener('click', function (ev) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    var open = nested.classList.contains('is-collapsed');
+                    nested.classList.toggle('is-collapsed', !open);
+                    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                    var chevron = toggle.querySelector('.fullCrewStatsClusterChevron');
+                    if (chevron) {
+                        chevron.textContent = open ? '▾' : '▸';
+                    }
+                });
+                li.appendChild(swatch);
+                nameRow.appendChild(createBucketNameEl('span', 'fullCrewStatsLegendName', bucket));
+                li.appendChild(nameRow);
+                li.appendChild(
+                    createElement(
+                        'span',
+                        'fullCrewStatsLegendMeta',
+                        bucket.count + ' — ' + formatPercent(bucket.percent)
+                    )
+                );
+                li.appendChild(nested);
+            } else {
+                li.appendChild(swatch);
+                li.appendChild(createBucketNameEl('span', 'fullCrewStatsLegendName', bucket));
+                li.appendChild(
+                    createElement(
+                        'span',
+                        'fullCrewStatsLegendMeta',
+                        bucket.count + ' — ' + formatPercent(bucket.percent)
+                    )
+                );
+            }
             legend.appendChild(li);
         });
         wrap.appendChild(legend);
@@ -1950,9 +2088,26 @@
             var query = filterInput ? String(filterInput.value || '').trim().toLowerCase() : '';
             var buckets = statsDetailBuckets || [];
             if (query) {
-                buckets = buckets.filter(function (b) {
-                    return String(b.name || '').toLowerCase().indexOf(query) !== -1;
-                });
+                buckets = buckets.map(function (b) {
+                    var nameHit = String(b.name || '').toLowerCase().indexOf(query) !== -1;
+                    var childHits = (b.children || []).filter(function (c) {
+                        return String(c.name || '').toLowerCase().indexOf(query) !== -1;
+                    });
+                    if (nameHit) {
+                        return b;
+                    }
+                    if (childHits.length) {
+                        return {
+                            name: b.name,
+                            count: b.count,
+                            percent: b.percent,
+                            itemId: b.itemId,
+                            itemType: b.itemType,
+                            children: childHits
+                        };
+                    }
+                    return null;
+                }).filter(Boolean);
             }
             renderChartInto(detailHost, buckets, mode);
             return;

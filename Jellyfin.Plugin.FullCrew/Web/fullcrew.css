@@ -635,16 +635,112 @@ a.fullCrewStatsSectionTitleLink:focus-visible {
     min-width: 0;
 }
 
-a.fullCrewStatsItemLink {
-    color: #00a4dc;
-    text-decoration: none;
-    cursor: pointer;
+a.fullCrewStatsItemLink,
+.fullCrewStatsPage a.fullCrewStatsItemLink {
+    color: var(--primary-color, #00a4dc) !important;
+    text-decoration: underline !important;
+    text-decoration-color: rgba(0, 164, 220, 0.55) !important;
+    text-underline-offset: 0.12em;
+    cursor: pointer !important;
+    pointer-events: auto !important;
 }
 
 a.fullCrewStatsItemLink:hover,
-a.fullCrewStatsItemLink:focus {
-    text-decoration: underline;
-    color: #3ec1f0;
+a.fullCrewStatsItemLink:focus,
+.fullCrewStatsPage a.fullCrewStatsItemLink:hover,
+.fullCrewStatsPage a.fullCrewStatsItemLink:focus-visible {
+    text-decoration: underline !important;
+    text-decoration-color: #3ec1f0 !important;
+    color: #3ec1f0 !important;
+    outline: none;
+}
+
+.fullCrewStatsRankRow {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.85rem;
+}
+
+.fullCrewStatsRankNameWrap,
+.fullCrewStatsBarLabelWrap {
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.fullCrewStatsClusterToggle {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 0.05rem 0.25rem;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    opacity: 0.7;
+    cursor: pointer;
+    font: inherit;
+    line-height: 1;
+}
+
+.fullCrewStatsClusterToggle:hover,
+.fullCrewStatsClusterToggle:focus-visible {
+    opacity: 1;
+    outline: none;
+    color: var(--primary-color, #00a4dc);
+}
+
+.fullCrewStatsClusterChevron {
+    display: inline-block;
+    width: 0.85em;
+    text-align: center;
+}
+
+.fullCrewStatsRankList--nested {
+    list-style: none;
+    margin: 0.15rem 0 0.35rem;
+    padding: 0;
+    counter-reset: none;
+}
+
+.fullCrewStatsRankList--nested.is-collapsed,
+.fullCrewStatsBarChildren.is-collapsed {
+    display: none;
+}
+
+.fullCrewStatsRankItem--child {
+    opacity: 0.92;
+    border-bottom-color: rgba(255, 255, 255, 0.04);
+}
+
+.fullCrewStatsRankItem--child .fullCrewStatsRankName::before {
+    content: "";
+}
+
+.fullCrewStatsBarCluster--child {
+    margin-left: 1rem;
+}
+
+.fullCrewStatsBarChildren {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0.25rem 0 0.45rem 0.25rem;
+    padding-left: 0.75rem;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.fullCrewStatsRankName {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.fullCrewStatsRankName::before {
+    content: counter(fullcrew-rank) ". ";
+    opacity: 0.45;
+    font-variant-numeric: tabular-nums;
 }
 
 .fullCrewStatsLegendMeta {
@@ -706,9 +802,9 @@ a.fullCrewStatsItemLink:focus {
 
 .fullCrewStatsRankItem {
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.85rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.15rem;
     padding: 0.45rem 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     font-size: 0.92rem;
@@ -720,16 +816,8 @@ a.fullCrewStatsItemLink:focus {
     border-bottom: 0;
 }
 
-.fullCrewStatsRankName {
-    min-width: 0;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-}
-
-.fullCrewStatsRankName::before {
-    content: counter(fullcrew-rank) ". ";
-    opacity: 0.45;
-    font-variant-numeric: tabular-nums;
+.fullCrewStatsRankItem--child {
+    counter-increment: none;
 }
 
 .fullCrewStatsRankMeta {
@@ -737,6 +825,24 @@ a.fullCrewStatsItemLink:focus {
     opacity: 0.65;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+}
+
+.fullCrewStatsLegendNameRow {
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.fullCrewStatsLegendNested {
+    list-style: none;
+    margin: 0.25rem 0 0 1.4rem;
+    padding: 0;
+    grid-column: 1 / -1;
+}
+
+.fullCrewStatsLegendNested.is-collapsed {
+    display: none;
 }
 
 .fullCrewStatsFooter {
