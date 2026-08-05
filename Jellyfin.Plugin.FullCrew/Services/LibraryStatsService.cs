@@ -19,7 +19,7 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 /// </summary>
 public class LibraryStatsService
 {
-    private const int CacheMinutes = 5;
+    private const int CacheMinutes = 30;
     private const int TopBucketLimit = 25;
     private const int TopPeopleLimit = 25;
     /// <summary>Per-title people cap for movies (keeps guest lists from exploding).</summary>
