@@ -134,13 +134,7 @@ public class StudioPageService
 
         if (explicitBranches.Count > 0)
         {
-            if (!explicitBranches.Contains(seed, StringComparer.OrdinalIgnoreCase)
-                && !StudioNameClustering.ResolveRoot(seed).Label.Equals(seed, StringComparison.OrdinalIgnoreCase))
-            {
-                // seed may be cluster label ("Disney") — keep explicit branches only.
-            }
-
-            // Always ensure we search for every provided branch.
+            // Prefer caller-provided cluster branches (exact credit strings).
             return explicitBranches
                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
                 .ToList();

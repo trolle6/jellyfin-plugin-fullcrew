@@ -1593,7 +1593,7 @@ public class LibraryStatsService
                 Count = sum,
                 Percent = Percent(sum, total),
                 ItemId = parentId,
-                ItemType = parentId is null ? null : "Studio",
+                ItemType = "Studio",
                 Children = children
             });
         }
@@ -1612,13 +1612,11 @@ public class LibraryStatsService
         string? itemType)
     {
         string? id = null;
-        string? type = null;
         if (itemIds is not null
             && itemIds.TryGetValue(name, out var guid)
             && guid != Guid.Empty)
         {
             id = guid.ToString("N", CultureInfo.InvariantCulture);
-            type = itemType;
         }
 
         return new LibraryStatsBucket
@@ -1627,7 +1625,7 @@ public class LibraryStatsService
             Count = count,
             Percent = Percent(count, total),
             ItemId = id,
-            ItemType = type
+            ItemType = itemType
         };
     }
 
