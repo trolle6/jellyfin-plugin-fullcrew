@@ -944,6 +944,73 @@ a.fullCrewStatsItemLink:focus,
     opacity: 0.88;
 }
 
+.fullCrewStudioHint {
+    margin: 0 0 0.75rem;
+    font-size: 0.85em;
+    opacity: 0.65;
+    max-width: 48rem;
+}
+
+.fullCrewStudioStatChips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65em;
+    margin: 0 0 0.9em;
+}
+
+.fullCrewStudioStatChip {
+    min-width: 4.5em;
+    padding: 0.55em 0.75em;
+    border-radius: 0.45em;
+    background: rgba(255, 255, 255, 0.06);
+    text-align: center;
+}
+
+.fullCrewStudioStatChipValue {
+    font-size: 1.25em;
+    font-weight: 650;
+}
+
+.fullCrewStudioStatChipLabel {
+    font-size: 0.75em;
+    opacity: 0.65;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.fullCrewStudioStatFacts {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45em;
+}
+
+.fullCrewStudioStatFact {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35em 0.85em;
+    font-size: 0.95em;
+}
+
+.fullCrewStudioStatFactLabel {
+    opacity: 0.6;
+    min-width: 7.5em;
+}
+
+.fullCrewStudioStatFactValue {
+    opacity: 0.95;
+}
+
+.fullCrewStudioMissing {
+    margin: 0;
+    padding-left: 1.2em;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35em;
+}
+
 .fullCrewStudioSection {
     margin: 0 0 1.5rem;
 }

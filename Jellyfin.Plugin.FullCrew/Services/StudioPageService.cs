@@ -102,7 +102,11 @@ public class StudioPageService
         }
 
         var titles = FindLibraryTitles(user, matchNames);
+        var stats = BuildLibraryStats(titles);
         var tmdb = await TryFetchTmdbCompanyAsync(displayName, matchNames, cancellationToken).ConfigureAwait(false);
+        var missing = tmdb?.Id > 0
+            ? await TryFetchMissingPopularAsync(tmdb.Id, titles, cancellationToken).ConfigureAwait(false)
+            : [];
 
         return new StudioPageResponse
         {
@@ -119,8 +123,11 @@ public class StudioPageService
                 : null,
             Headquarters = NullIfEmpty(tmdb?.Headquarters),
             OriginCountry = NullIfEmpty(tmdb?.OriginCountry),
+            ParentCompany = NullIfEmpty(tmdb?.ParentCompany?.Name),
             Branches = matchNames,
-            Titles = titles
+            Titles = titles,
+            Stats = stats,
+            MissingPopular = missing
         };
     }
 
@@ -238,6 +245,7 @@ public class StudioPageService
                     Name = item.Name ?? string.Empty,
                     Type = kind == BaseItemKind.Series ? "Series" : "Movie",
                     ProductionYear = item.ProductionYear,
+                    CommunityRating = item.CommunityRating is > 0 ? item.CommunityRating : null,
                     ImageTag = item.HasImage(ImageType.Primary) ? "primary" : null
                 });
 
@@ -257,6 +265,47 @@ public class StudioPageService
             _logger.LogDebug(ex, "Failed to find library titles for studio page");
             return [];
         }
+    }
+
+    private static StudioLibraryStats BuildLibraryStats(IReadOnlyList<StudioLibraryTitle> titles)
+    {
+        var stats = new StudioLibraryStats
+        {
+            TotalCount = titles.Count,
+            MovieCount = titles.Count(t => string.Equals(t.Type, "Movie", StringComparison.OrdinalIgnoreCase)),
+            SeriesCount = titles.Count(t => string.Equals(t.Type, "Series", StringComparison.OrdinalIgnoreCase))
+        };
+
+        if (titles.Count == 0)
+        {
+            return stats;
+        }
+
+        var withYear = titles.Where(t => t.ProductionYear is > 0).ToList();
+        if (withYear.Count > 0)
+        {
+            var oldest = withYear.OrderBy(t => t.ProductionYear).ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase).First();
+            var newest = withYear.OrderByDescending(t => t.ProductionYear).ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase).First();
+            stats.FirstReleaseYear = oldest.ProductionYear;
+            stats.NewestReleaseYear = newest.ProductionYear;
+            stats.OldestTitle = oldest.Name;
+            stats.OldestTitleId = oldest.Id;
+            stats.NewestTitle = newest.Name;
+            stats.NewestTitleId = newest.Id;
+        }
+
+        var rated = titles.Where(t => t.CommunityRating is > 0).ToList();
+        if (rated.Count > 0)
+        {
+            stats.RatedTitleCount = rated.Count;
+            stats.AverageCommunityRating = Math.Round(rated.Average(t => t.CommunityRating!.Value), 1);
+            var best = rated.OrderByDescending(t => t.CommunityRating).ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase).First();
+            stats.HighestRatedTitle = best.Name;
+            stats.HighestRatedTitleId = best.Id;
+            stats.HighestRatedValue = Math.Round(best.CommunityRating!.Value, 1);
+        }
+
+        return stats;
     }
 
     private Guid[]? TryResolveStudioIds(IReadOnlyList<string> names)
@@ -358,10 +407,178 @@ public class StudioPageService
             return null;
         }
 
-        // Prefer exact (case-insensitive) name match, else first result.
+        // Prefer exact name; otherwise require a strong prefix/containment match.
+        // Avoid grabbing unrelated first hits (e.g. "Mitsubishi" → car company).
         var exact = results.FirstOrDefault(r =>
             string.Equals(r.Name, query, StringComparison.OrdinalIgnoreCase));
-        return (exact ?? results[0]).Id;
+        if (exact is not null)
+        {
+            return exact.Id;
+        }
+
+        var q = NormalizeCompanyKey(query);
+        var ranked = results
+            .Select(r => (Result: r, Score: CompanyNameScore(q, r.Name)))
+            .Where(x => x.Score >= 70)
+            .OrderByDescending(x => x.Score)
+            .ThenBy(x => (x.Result.Name ?? string.Empty).Length)
+            .ToList();
+
+        return ranked.Count > 0 ? ranked[0].Result.Id : null;
+    }
+
+    private static string NormalizeCompanyKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var chars = value.Trim().ToLowerInvariant()
+            .Where(c => char.IsLetterOrDigit(c) || char.IsWhiteSpace(c))
+            .ToArray();
+        return string.Join(' ', new string(chars).Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static int CompanyNameScore(string queryKey, string? candidateName)
+    {
+        var candidate = NormalizeCompanyKey(candidateName);
+        if (queryKey.Length == 0 || candidate.Length == 0)
+        {
+            return 0;
+        }
+
+        if (string.Equals(queryKey, candidate, StringComparison.Ordinal))
+        {
+            return 100;
+        }
+
+        if (candidate.StartsWith(queryKey, StringComparison.Ordinal)
+            || queryKey.StartsWith(candidate, StringComparison.Ordinal))
+        {
+            return 90;
+        }
+
+        if (candidate.Contains(queryKey, StringComparison.Ordinal)
+            || queryKey.Contains(candidate, StringComparison.Ordinal))
+        {
+            // Require meaningful overlap so short tokens don't latch onto random companies.
+            var shorter = Math.Min(queryKey.Length, candidate.Length);
+            return shorter >= 6 ? 75 : 40;
+        }
+
+        return 0;
+    }
+
+    private async Task<IReadOnlyList<StudioMissingTitle>> TryFetchMissingPopularAsync(
+        int companyId,
+        IReadOnlyList<StudioLibraryTitle> owned,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var apiKey = ResolveApiKey(Plugin.Instance?.Configuration.TmdbApiKey);
+            var ownedKeys = new HashSet<string>(
+                owned.Select(t => NormalizeTitleKey(t.Name)),
+                StringComparer.OrdinalIgnoreCase);
+
+            var movies = await DiscoverCompanyMediaAsync(companyId, "movie", apiKey, cancellationToken).ConfigureAwait(false);
+            var shows = await DiscoverCompanyMediaAsync(companyId, "tv", apiKey, cancellationToken).ConfigureAwait(false);
+
+            var missing = new List<StudioMissingTitle>();
+            foreach (var hit in movies.Concat(shows))
+            {
+                var title = NullIfEmpty(hit.Title) ?? NullIfEmpty(hit.Name);
+                if (title is null)
+                {
+                    continue;
+                }
+
+                if (ownedKeys.Contains(NormalizeTitleKey(title)))
+                {
+                    continue;
+                }
+
+                var year = ParseYear(hit.ReleaseDate) ?? ParseYear(hit.FirstAirDate);
+                var mediaType = !string.IsNullOrWhiteSpace(hit.Title) ? "movie" : "tv";
+                missing.Add(new StudioMissingTitle
+                {
+                    Name = title,
+                    Year = year,
+                    MediaType = mediaType,
+                    TmdbId = hit.Id,
+                    TmdbUrl = mediaType == "tv"
+                        ? "https://www.themoviedb.org/tv/" + hit.Id.ToString(CultureInfo.InvariantCulture)
+                        : "https://www.themoviedb.org/movie/" + hit.Id.ToString(CultureInfo.InvariantCulture)
+                });
+
+                if (missing.Count >= 8)
+                {
+                    break;
+                }
+            }
+
+            return missing;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Missing-popular lookup failed for company {CompanyId}", companyId);
+            return [];
+        }
+    }
+
+    private async Task<IReadOnlyList<TmdbDiscoverHit>> DiscoverCompanyMediaAsync(
+        int companyId,
+        string mediaType,
+        string apiKey,
+        CancellationToken cancellationToken)
+    {
+        var path = mediaType == "tv" ? "discover/tv" : "discover/movie";
+        var url =
+            "https://api.themoviedb.org/3/"
+            + path
+            + "?api_key="
+            + Uri.EscapeDataString(apiKey)
+            + "&with_companies="
+            + companyId.ToString(CultureInfo.InvariantCulture)
+            + "&sort_by=popularity.desc&include_adult=false&page=1";
+
+        var client = _httpClientFactory.CreateClient();
+        using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return [];
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var payload = await JsonSerializer.DeserializeAsync<TmdbDiscoverPayload>(stream, JsonOptions, cancellationToken)
+            .ConfigureAwait(false);
+        return payload?.Results ?? [];
+    }
+
+    private static string NormalizeTitleKey(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return string.Empty;
+        }
+
+        var chars = name.Trim().ToLowerInvariant()
+            .Where(c => char.IsLetterOrDigit(c) || char.IsWhiteSpace(c))
+            .ToArray();
+        return string.Join(' ', new string(chars).Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static int? ParseYear(string? date)
+    {
+        if (string.IsNullOrWhiteSpace(date) || date.Length < 4)
+        {
+            return null;
+        }
+
+        return int.TryParse(date.AsSpan(0, 4), NumberStyles.Integer, CultureInfo.InvariantCulture, out var year)
+            ? year
+            : null;
     }
 
     private async Task<TmdbCompanyDetails?> GetCompanyDetailsAsync(int companyId, string apiKey, CancellationToken cancellationToken)
@@ -422,5 +639,33 @@ public class StudioPageService
 
         [JsonPropertyName("origin_country")]
         public string? OriginCountry { get; set; }
+
+        [JsonPropertyName("parent_company")]
+        public TmdbParentCompany? ParentCompany { get; set; }
+    }
+
+    private sealed class TmdbParentCompany
+    {
+        public string? Name { get; set; }
+    }
+
+    private sealed class TmdbDiscoverPayload
+    {
+        public List<TmdbDiscoverHit>? Results { get; set; }
+    }
+
+    private sealed class TmdbDiscoverHit
+    {
+        public int Id { get; set; }
+
+        public string? Title { get; set; }
+
+        public string? Name { get; set; }
+
+        [JsonPropertyName("release_date")]
+        public string? ReleaseDate { get; set; }
+
+        [JsonPropertyName("first_air_date")]
+        public string? FirstAirDate { get; set; }
     }
 }

@@ -2592,6 +2592,9 @@
         if (titleEl) {
             titleEl.textContent = name;
         }
+        try {
+            document.title = name + ' — Studio';
+        } catch (e) { /* ignore */ }
 
         var hero = createElement('div', 'fullCrewStudioHero');
         var logoUrl = prop(data, 'LogoUrl', 'logoUrl');
@@ -2610,12 +2613,10 @@
         var bits = [];
         var hq = prop(data, 'Headquarters', 'headquarters');
         var country = prop(data, 'OriginCountry', 'originCountry');
-        if (hq) {
-            bits.push(hq);
-        }
-        if (country) {
-            bits.push(country);
-        }
+        var parent = prop(data, 'ParentCompany', 'parentCompany');
+        if (hq) { bits.push(hq); }
+        if (country) { bits.push(country); }
+        if (parent) { bits.push('Parent: ' + parent); }
         if (bits.length) {
             meta.appendChild(createElement('div', 'fullCrewStudioSub', bits.join(' · ')));
         }
@@ -2649,6 +2650,11 @@
             body.appendChild(createElement('p', 'fullCrewStudioOverview', overview));
         }
 
+        var stats = prop(data, 'Stats', 'stats');
+        if (stats && (prop(stats, 'TotalCount', 'totalCount') || 0) > 0) {
+            body.appendChild(renderStudioStatsSection(stats));
+        }
+
         var branches = prop(data, 'Branches', 'branches') || [];
         if (branches.length > 1) {
             var branchSection = createElement('section', 'fullCrewStudioSection');
@@ -2659,9 +2665,7 @@
                 var a = createElement('a', 'fullCrewStatsItemLink', String(b));
                 a.href = studioPageHash({ name: b, itemType: 'Studio' });
                 a.addEventListener('click', function (ev) {
-                    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) {
-                        return;
-                    }
+                    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) { return; }
                     ev.preventDefault();
                     window.location.hash = studioPageHash({ name: b, itemType: 'Studio' });
                 });
@@ -2675,11 +2679,7 @@
         var titles = prop(data, 'Titles', 'titles') || [];
         var gridSection = createElement('section', 'fullCrewStudioSection');
         gridSection.appendChild(
-            createElement(
-                'h3',
-                'fullCrewStudioSectionTitle',
-                'In your library (' + titles.length + ')'
-            )
+            createElement('h3', 'fullCrewStudioSectionTitle', 'In your library (' + titles.length + ')')
         );
 
         if (!titles.length) {
@@ -2693,12 +2693,8 @@
                 var card = createElement('a', 'fullCrewStudioCard');
                 card.href = detailsHashForItem(id);
                 card.addEventListener('click', function (ev) {
-                    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) {
-                        return;
-                    }
-                    if (navigateToItem(id)) {
-                        ev.preventDefault();
-                    }
+                    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) { return; }
+                    if (navigateToItem(id)) { ev.preventDefault(); }
                 });
 
                 var poster = createElement('div', 'fullCrewStudioPoster');
@@ -2711,11 +2707,7 @@
                     poster.appendChild(img);
                 } else {
                     poster.appendChild(
-                        createElement(
-                            'div',
-                            'fullCrewStudioPosterFallback',
-                            (prop(t, 'Type', 'type') || 'Title').charAt(0)
-                        )
+                        createElement('div', 'fullCrewStudioPosterFallback', (prop(t, 'Type', 'type') || 'Title').charAt(0))
                     );
                 }
                 card.appendChild(poster);
@@ -2724,13 +2716,11 @@
                 caption.appendChild(createElement('div', 'fullCrewStudioCardName', prop(t, 'Name', 'name') || 'Untitled'));
                 var year = prop(t, 'ProductionYear', 'productionYear');
                 var type = prop(t, 'Type', 'type');
+                var rating = prop(t, 'CommunityRating', 'communityRating');
                 var line = [];
-                if (type) {
-                    line.push(type);
-                }
-                if (year) {
-                    line.push(String(year));
-                }
+                if (type) { line.push(type); }
+                if (year) { line.push(String(year)); }
+                if (rating) { line.push('★ ' + Number(rating).toFixed(1)); }
                 if (line.length) {
                     caption.appendChild(createElement('div', 'fullCrewStudioCardMeta', line.join(' · ')));
                 }
@@ -2739,8 +2729,109 @@
             });
             gridSection.appendChild(grid);
         }
-
         body.appendChild(gridSection);
+
+        var missing = prop(data, 'MissingPopular', 'missingPopular') || [];
+        if (missing.length) {
+            var missSection = createElement('section', 'fullCrewStudioSection');
+            missSection.appendChild(createElement('h3', 'fullCrewStudioSectionTitle', 'Missing popular titles'));
+            missSection.appendChild(createElement(
+                'p',
+                'fullCrewStudioHint',
+                'Popular on TMDB for this company, not matched in your library (name match — alternate titles may hide).'
+            ));
+            var missList = createElement('ul', 'fullCrewStudioMissing');
+            missing.forEach(function (m) {
+                var li = createElement('li');
+                var label = prop(m, 'Name', 'name') || 'Untitled';
+                var year = prop(m, 'Year', 'year');
+                var media = prop(m, 'MediaType', 'mediaType');
+                var text = label;
+                if (year) { text += ' (' + year + ')'; }
+                if (media) { text += ' · ' + media; }
+                var href = prop(m, 'TmdbUrl', 'tmdbUrl');
+                if (href) {
+                    var a = createElement('a', 'fullCrewStatsItemLink', text);
+                    a.href = href;
+                    a.target = '_blank';
+                    a.rel = 'noopener noreferrer';
+                    li.appendChild(a);
+                } else {
+                    li.textContent = text;
+                }
+                missList.appendChild(li);
+            });
+            missSection.appendChild(missList);
+            body.appendChild(missSection);
+        }
+    }
+
+    function renderStudioStatsSection(stats) {
+        var section = createElement('section', 'fullCrewStudioSection');
+        section.appendChild(createElement('h3', 'fullCrewStudioSectionTitle', 'Your statistics'));
+
+        var chips = createElement('div', 'fullCrewStudioStatChips');
+        chips.appendChild(statChip(String(prop(stats, 'TotalCount', 'totalCount') || 0), 'titles'));
+        chips.appendChild(statChip(String(prop(stats, 'MovieCount', 'movieCount') || 0), 'movies'));
+        chips.appendChild(statChip(String(prop(stats, 'SeriesCount', 'seriesCount') || 0), 'series'));
+        section.appendChild(chips);
+
+        var facts = createElement('ul', 'fullCrewStudioStatFacts');
+        var firstY = prop(stats, 'FirstReleaseYear', 'firstReleaseYear');
+        var newestY = prop(stats, 'NewestReleaseYear', 'newestReleaseYear');
+        if (firstY) { facts.appendChild(statFact('First release', String(firstY))); }
+        if (newestY) { facts.appendChild(statFact('Newest release', String(newestY))); }
+        var avg = prop(stats, 'AverageCommunityRating', 'averageCommunityRating');
+        var ratedN = prop(stats, 'RatedTitleCount', 'ratedTitleCount') || 0;
+        if (avg && ratedN) {
+            facts.appendChild(statFact('Average rating', '★ ' + Number(avg).toFixed(1) + ' (' + ratedN + ' rated)'));
+        }
+
+        appendStudioLinkedFact(facts, 'Highest rated', prop(stats, 'HighestRatedTitle', 'highestRatedTitle'), prop(stats, 'HighestRatedTitleId', 'highestRatedTitleId'), prop(stats, 'HighestRatedValue', 'highestRatedValue') ? '★ ' + Number(prop(stats, 'HighestRatedValue', 'highestRatedValue')).toFixed(1) : null);
+        appendStudioLinkedFact(facts, 'Oldest', prop(stats, 'OldestTitle', 'oldestTitle'), prop(stats, 'OldestTitleId', 'oldestTitleId'), firstY ? String(firstY) : null);
+        appendStudioLinkedFact(facts, 'Newest', prop(stats, 'NewestTitle', 'newestTitle'), prop(stats, 'NewestTitleId', 'newestTitleId'), newestY ? String(newestY) : null);
+
+        if (facts.childNodes.length) {
+            section.appendChild(facts);
+        }
+        return section;
+    }
+
+    function statChip(value, label) {
+        var chip = createElement('div', 'fullCrewStudioStatChip');
+        chip.appendChild(createElement('div', 'fullCrewStudioStatChipValue', value));
+        chip.appendChild(createElement('div', 'fullCrewStudioStatChipLabel', label));
+        return chip;
+    }
+
+    function statFact(label, value) {
+        var li = createElement('li', 'fullCrewStudioStatFact');
+        li.appendChild(createElement('span', 'fullCrewStudioStatFactLabel', label));
+        li.appendChild(createElement('span', 'fullCrewStudioStatFactValue', value));
+        return li;
+    }
+
+    function appendStudioLinkedFact(list, label, title, id, extra) {
+        if (!title) { return; }
+        var li = createElement('li', 'fullCrewStudioStatFact');
+        li.appendChild(createElement('span', 'fullCrewStudioStatFactLabel', label));
+        var valueWrap = createElement('span', 'fullCrewStudioStatFactValue');
+        if (id) {
+            var a = createElement('a', 'fullCrewStatsItemLink', title);
+            a.href = detailsHashForItem(id);
+            a.addEventListener('click', function (ev) {
+                if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) { return; }
+                if (navigateToItem(id)) { ev.preventDefault(); }
+            });
+            valueWrap.appendChild(a);
+        } else {
+            valueWrap.appendChild(document.createTextNode(title));
+        }
+        if (extra) {
+            valueWrap.appendChild(document.createTextNode(' · ' + extra));
+        }
+        li.appendChild(valueWrap);
+        list.appendChild(li);
     }
 
     function mountStudioPage() {
