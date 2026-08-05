@@ -49,6 +49,27 @@ public class StudioPageResponse
 
     /// <summary>Well-known TMDB titles from this company not found in the library (bounded).</summary>
     public IReadOnlyList<StudioMissingTitle> MissingPopular { get; set; } = [];
+
+    /// <summary>
+    /// When most library titles also credit another studio (e.g. financier + production studio),
+    /// a soft hint pointing at that co-credited studio.
+    /// </summary>
+    public StudioCoCreditHint? CoCreditHint { get; set; }
+}
+
+/// <summary>
+/// Soft co-credit note when library titles for this studio heavily share another studio credit.
+/// </summary>
+public class StudioCoCreditHint
+{
+    /// <summary>Other studio name most often co-credited.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>How many of this page's titles also list that studio.</summary>
+    public int SharedTitleCount { get; set; }
+
+    /// <summary>Total titles on this studio page.</summary>
+    public int TotalTitleCount { get; set; }
 }
 
 /// <summary>

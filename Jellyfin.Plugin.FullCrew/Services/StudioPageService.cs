@@ -24,7 +24,7 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 public class StudioPageService
 {
     private const string JellyfinSharedTmdbApiKey = "4219e299c89411838049ab0dab19ebd5";
-    private const string TmdbImageBase = "https://image.tmdb.org/t/p/w300";
+    private const string TmdbImageBase = "https://image.tmdb.org/t/p/w500";
     private const int MaxTitles = 400;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -101,7 +101,7 @@ public class StudioPageService
             displayName = clusterLabel;
         }
 
-        var titles = FindLibraryTitles(user, matchNames);
+        var (titles, coCredit) = FindLibraryTitles(user, matchNames);
         var stats = BuildLibraryStats(titles);
         var tmdb = await TryFetchTmdbCompanyAsync(displayName, matchNames, cancellationToken).ConfigureAwait(false);
         var missing = tmdb?.Id > 0
@@ -127,7 +127,8 @@ public class StudioPageService
             Branches = matchNames,
             Titles = titles,
             Stats = stats,
-            MissingPopular = missing
+            MissingPopular = missing,
+            CoCreditHint = coCredit
         };
     }
 
@@ -195,11 +196,13 @@ public class StudioPageService
         return list;
     }
 
-    private IReadOnlyList<StudioLibraryTitle> FindLibraryTitles(User? user, IReadOnlyList<string> matchNames)
+    private (IReadOnlyList<StudioLibraryTitle> Titles, StudioCoCreditHint? CoCredit) FindLibraryTitles(
+        User? user,
+        IReadOnlyList<string> matchNames)
     {
         if (matchNames.Count == 0)
         {
-            return [];
+            return ([], null);
         }
 
         var wanted = new HashSet<string>(matchNames, StringComparer.OrdinalIgnoreCase);
@@ -224,6 +227,7 @@ public class StudioPageService
             }
 
             var results = new List<StudioLibraryTitle>();
+            var coCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var item in _libraryManager.GetItemList(query))
             {
                 if (item is null || item.IsVirtualItem)
@@ -249,22 +253,66 @@ public class StudioPageService
                     ImageTag = item.HasImage(ImageType.Primary) ? "primary" : null
                 });
 
+                foreach (var studio in studios)
+                {
+                    if (string.IsNullOrWhiteSpace(studio))
+                    {
+                        continue;
+                    }
+
+                    var other = studio.Trim();
+                    if (wanted.Contains(other))
+                    {
+                        continue;
+                    }
+
+                    coCounts[other] = coCounts.TryGetValue(other, out var n) ? n + 1 : 1;
+                }
+
                 if (results.Count >= MaxTitles)
                 {
                     break;
                 }
             }
 
-            return results
+            var ordered = results
                 .OrderByDescending(t => t.ProductionYear ?? 0)
                 .ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
+            return (ordered, BuildCoCreditHint(ordered.Count, coCounts));
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to find library titles for studio page");
-            return [];
+            return ([], null);
         }
+    }
+
+    private static StudioCoCreditHint? BuildCoCreditHint(int totalTitles, Dictionary<string, int> coCounts)
+    {
+        if (totalTitles < 2 || coCounts.Count == 0)
+        {
+            return null;
+        }
+
+        var best = coCounts
+            .OrderByDescending(kv => kv.Value)
+            .ThenBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+            .First();
+
+        // Soft note only when the other studio appears on most titles (financier/partner pattern).
+        if (best.Value < 2 || best.Value * 2 < totalTitles)
+        {
+            return null;
+        }
+
+        return new StudioCoCreditHint
+        {
+            Name = best.Key,
+            SharedTitleCount = best.Value,
+            TotalTitleCount = totalTitles
+        };
     }
 
     private static StudioLibraryStats BuildLibraryStats(IReadOnlyList<StudioLibraryTitle> titles)

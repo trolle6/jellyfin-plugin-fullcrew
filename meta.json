@@ -1,6 +1,6 @@
 {
   "category": "Metadata",
-  "changelog": "Richer studio pages: library stats, highest/oldest/newest, missing popular TMDB titles, stricter company matching.",
+  "changelog": "Studio pages redesigned to person-page profile layout (centered logo/name, bio, metadata rows, badge links, horizontal Movies/Shows rows). Quiet secondary stats, co-credit hint when titles heavily share another studio, and fixed document title (no more Page not found).",
   "description": "Fetches complete TMDB cast and crew for movies and series, groups people by department, and shows them in a polished accordion on Jellyfin Web item detail pages. Includes a nostalgia Break Bumper action, Library Stats, and studio detail pages.",
   "guid": "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f",
   "name": "Full Crew",
@@ -8,5 +8,5 @@
   "owner": "trolle6",
   "targetAbi": "10.11.0.0",
   "timestamp": "2026-08-05T00:00:00Z",
-  "version": "1.3.2.0"
+  "version": "1.3.3.0"
 }

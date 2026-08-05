@@ -1536,13 +1536,14 @@
         document.body.classList.add('withSectionTabs');
     }
 
-    function setStatsDocumentTitle(active) {
+    function setCustomDocumentTitle(active, titleText) {
+        var label = titleText || 'Full Crew';
         try {
             if (active) {
                 if (!document.documentElement.getAttribute('data-fullcrew-prev-title')) {
                     document.documentElement.setAttribute('data-fullcrew-prev-title', document.title || '');
                 }
-                document.title = 'Stats';
+                document.title = label;
             } else {
                 var prev = document.documentElement.getAttribute('data-fullcrew-prev-title');
                 if (prev != null) {
@@ -1555,25 +1556,31 @@
         }
 
         var headerCandidates = document.querySelectorAll(
-            '.skinHeader .headerHomeButton, .skinHeader .pageTitle, .skinHeader .headerButton.headerTitle, .headerTop .pageTitle, .headerTitle'
+            '.skinHeader .pageTitle, .skinHeader .headerButton.headerTitle, .headerTop .pageTitle, .headerTitle, .skinHeader h1, .skinHeader .sectionTitle'
         );
         Array.prototype.forEach.call(headerCandidates, function (el) {
-            if (!el || el.id === STATS_TAB_ID) {
+            if (!el || el.id === STATS_TAB_ID || el.closest('#' + STATS_TAB_ID)) {
                 return;
             }
             var text = (el.textContent || '').replace(/\s+/g, ' ').trim();
             if (active) {
-                if (/page not found/i.test(text) || text === '' || /home/i.test(text)) {
+                if (/page not found/i.test(text) || text === '' || /^home$/i.test(text) || /^stats$/i.test(text) || el.getAttribute('data-fullcrew-owned-title') === '1') {
                     if (!el.getAttribute('data-fullcrew-prev-header')) {
                         el.setAttribute('data-fullcrew-prev-header', text);
                     }
-                    el.textContent = 'Stats';
+                    el.setAttribute('data-fullcrew-owned-title', '1');
+                    el.textContent = label;
                 }
             } else if (el.getAttribute('data-fullcrew-prev-header') != null) {
                 el.textContent = el.getAttribute('data-fullcrew-prev-header');
                 el.removeAttribute('data-fullcrew-prev-header');
+                el.removeAttribute('data-fullcrew-owned-title');
             }
         });
+    }
+
+    function setStatsDocumentTitle(active) {
+        setCustomDocumentTitle(active, 'Stats');
     }
 
     function buildStandaloneStatsTabs(slider) {
@@ -2531,6 +2538,7 @@
 
     function tearDownStudioPage() {
         document.body.classList.remove('fullCrewStudioActive');
+        setCustomDocumentTitle(false);
         var page = document.getElementById(STUDIO_PAGE_ID);
         if (page && page.parentNode) {
             page.parentNode.removeChild(page);
@@ -2588,157 +2596,135 @@
         body.innerHTML = '';
 
         var name = prop(data, 'Name', 'name') || 'Studio';
-        var titleEl = page.querySelector('.fullCrewStudioTitle');
-        if (titleEl) {
-            titleEl.textContent = name;
-        }
-        try {
-            document.title = name + ' — Studio';
-        } catch (e) { /* ignore */ }
+        setCustomDocumentTitle(true, name);
 
-        var hero = createElement('div', 'fullCrewStudioHero');
+        var profile = createElement('div', 'fullCrewStudioProfile');
         var logoUrl = prop(data, 'LogoUrl', 'logoUrl');
         if (logoUrl) {
             var logo = createElement('img', 'fullCrewStudioLogo');
             logo.src = logoUrl;
             logo.alt = name;
-            hero.appendChild(logo);
+            profile.appendChild(logo);
         } else {
-            hero.appendChild(createElement('div', 'fullCrewStudioLogoFallback', name.charAt(0) || '?'));
+            profile.appendChild(createElement('div', 'fullCrewStudioLogoFallback', name.charAt(0) || '?'));
         }
-
-        var meta = createElement('div', 'fullCrewStudioMeta');
-        meta.appendChild(createElement('h2', 'fullCrewStudioName', name));
-
-        var bits = [];
-        var hq = prop(data, 'Headquarters', 'headquarters');
-        var country = prop(data, 'OriginCountry', 'originCountry');
-        var parent = prop(data, 'ParentCompany', 'parentCompany');
-        if (hq) { bits.push(hq); }
-        if (country) { bits.push(country); }
-        if (parent) { bits.push('Parent: ' + parent); }
-        if (bits.length) {
-            meta.appendChild(createElement('div', 'fullCrewStudioSub', bits.join(' · ')));
-        }
-
-        var links = createElement('div', 'fullCrewStudioLinks');
-        var homepage = prop(data, 'Homepage', 'homepage');
-        var tmdbUrl = prop(data, 'TmdbUrl', 'tmdbUrl');
-        if (tmdbUrl) {
-            var tmdb = createElement('a', 'fullCrewStudioExtLink', 'TMDB');
-            tmdb.href = tmdbUrl;
-            tmdb.target = '_blank';
-            tmdb.rel = 'noopener noreferrer';
-            links.appendChild(tmdb);
-        }
-        if (homepage) {
-            var home = createElement('a', 'fullCrewStudioExtLink', 'Homepage');
-            home.href = homepage;
-            home.target = '_blank';
-            home.rel = 'noopener noreferrer';
-            links.appendChild(home);
-        }
-        if (links.childNodes.length) {
-            meta.appendChild(links);
-        }
-
-        hero.appendChild(meta);
-        body.appendChild(hero);
+        profile.appendChild(createElement('h1', 'fullCrewStudioName', name));
+        body.appendChild(profile);
 
         var overview = prop(data, 'Overview', 'overview');
         if (overview) {
             body.appendChild(createElement('p', 'fullCrewStudioOverview', overview));
         }
 
+        var metaRows = createElement('dl', 'fullCrewStudioMetaRows');
+        var hq = prop(data, 'Headquarters', 'headquarters');
+        var country = prop(data, 'OriginCountry', 'originCountry');
+        var parent = prop(data, 'ParentCompany', 'parentCompany');
         var stats = prop(data, 'Stats', 'stats');
+        var firstY = stats ? prop(stats, 'FirstReleaseYear', 'firstReleaseYear') : null;
+        if (firstY) {
+            appendStudioMetaRow(metaRows, 'First release', String(firstY));
+        }
+        if (hq) {
+            appendStudioMetaRow(metaRows, 'Headquarters', hq);
+        }
+        if (country) {
+            appendStudioMetaRow(metaRows, 'Country', country);
+        }
+        if (parent) {
+            appendStudioMetaRow(metaRows, 'Parent', parent);
+        }
+        if (metaRows.childNodes.length) {
+            body.appendChild(metaRows);
+        }
+
+        var links = createElement('div', 'fullCrewStudioLinks');
+        var tmdbUrl = prop(data, 'TmdbUrl', 'tmdbUrl');
+        var homepage = prop(data, 'Homepage', 'homepage');
+        if (tmdbUrl) {
+            links.appendChild(studioBadgeLink('TMDb', tmdbUrl));
+        }
+        if (homepage) {
+            links.appendChild(studioBadgeLink('Homepage', homepage));
+        }
+        if (links.childNodes.length) {
+            body.appendChild(links);
+        }
+
+        var coCredit = prop(data, 'CoCreditHint', 'coCreditHint');
+        if (coCredit) {
+            var coName = prop(coCredit, 'Name', 'name');
+            if (coName) {
+                var note = createElement('p', 'fullCrewStudioCoCredit');
+                note.appendChild(document.createTextNode('Also often credited with '));
+                var coLink = createElement('a', 'fullCrewStudioCoCreditLink', coName);
+                coLink.href = studioPageHash({ name: coName, itemType: 'Studio' });
+                coLink.addEventListener('click', function (ev) {
+                    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) { return; }
+                    ev.preventDefault();
+                    window.location.hash = studioPageHash({ name: coName, itemType: 'Studio' });
+                });
+                note.appendChild(coLink);
+                body.appendChild(note);
+            }
+        }
+
         if (stats && (prop(stats, 'TotalCount', 'totalCount') || 0) > 0) {
-            body.appendChild(renderStudioStatsSection(stats));
+            body.appendChild(renderStudioQuietStats(stats));
         }
 
         var branches = prop(data, 'Branches', 'branches') || [];
         if (branches.length > 1) {
-            var branchSection = createElement('section', 'fullCrewStudioSection');
-            branchSection.appendChild(createElement('h3', 'fullCrewStudioSectionTitle', 'Studio variants'));
-            var branchList = createElement('ul', 'fullCrewStudioBranches');
-            branches.forEach(function (b) {
-                var li = createElement('li');
-                var a = createElement('a', 'fullCrewStatsItemLink', String(b));
+            var variants = createElement('p', 'fullCrewStudioVariants');
+            variants.appendChild(document.createTextNode('Also credited as '));
+            branches.forEach(function (b, i) {
+                if (i > 0) {
+                    variants.appendChild(document.createTextNode(i === branches.length - 1 ? ' and ' : ', '));
+                }
+                var a = createElement('a', 'fullCrewStudioVariantLink', String(b));
                 a.href = studioPageHash({ name: b, itemType: 'Studio' });
                 a.addEventListener('click', function (ev) {
                     if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) { return; }
                     ev.preventDefault();
                     window.location.hash = studioPageHash({ name: b, itemType: 'Studio' });
                 });
-                li.appendChild(a);
-                branchList.appendChild(li);
+                variants.appendChild(a);
             });
-            branchSection.appendChild(branchList);
-            body.appendChild(branchSection);
+            body.appendChild(variants);
         }
 
         var titles = prop(data, 'Titles', 'titles') || [];
-        var gridSection = createElement('section', 'fullCrewStudioSection');
-        gridSection.appendChild(
-            createElement('h3', 'fullCrewStudioSectionTitle', 'In your library (' + titles.length + ')')
-        );
+        var movies = titles.filter(function (t) {
+            return String(prop(t, 'Type', 'type') || '').toLowerCase() === 'movie';
+        });
+        var shows = titles.filter(function (t) {
+            return String(prop(t, 'Type', 'type') || '').toLowerCase() === 'series';
+        });
 
         if (!titles.length) {
-            gridSection.appendChild(
+            body.appendChild(
                 createElement('div', 'fullCrewStatsEmpty', 'No movies or series credited to this studio in your library.')
             );
         } else {
-            var grid = createElement('div', 'fullCrewStudioGrid');
-            titles.forEach(function (t) {
-                var id = prop(t, 'Id', 'id');
-                var card = createElement('a', 'fullCrewStudioCard');
-                card.href = detailsHashForItem(id);
-                card.addEventListener('click', function (ev) {
-                    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) { return; }
-                    if (navigateToItem(id)) { ev.preventDefault(); }
-                });
-
-                var poster = createElement('div', 'fullCrewStudioPoster');
-                var imgUrl = primaryImageUrl(id);
-                if (imgUrl && prop(t, 'ImageTag', 'imageTag')) {
-                    var img = createElement('img', 'fullCrewStudioPosterImg');
-                    img.src = imgUrl;
-                    img.alt = prop(t, 'Name', 'name') || '';
-                    img.loading = 'lazy';
-                    poster.appendChild(img);
-                } else {
-                    poster.appendChild(
-                        createElement('div', 'fullCrewStudioPosterFallback', (prop(t, 'Type', 'type') || 'Title').charAt(0))
-                    );
-                }
-                card.appendChild(poster);
-
-                var caption = createElement('div', 'fullCrewStudioCardCaption');
-                caption.appendChild(createElement('div', 'fullCrewStudioCardName', prop(t, 'Name', 'name') || 'Untitled'));
-                var year = prop(t, 'ProductionYear', 'productionYear');
-                var type = prop(t, 'Type', 'type');
-                var rating = prop(t, 'CommunityRating', 'communityRating');
-                var line = [];
-                if (type) { line.push(type); }
-                if (year) { line.push(String(year)); }
-                if (rating) { line.push('★ ' + Number(rating).toFixed(1)); }
-                if (line.length) {
-                    caption.appendChild(createElement('div', 'fullCrewStudioCardMeta', line.join(' · ')));
-                }
-                card.appendChild(caption);
-                grid.appendChild(card);
-            });
-            gridSection.appendChild(grid);
+            if (movies.length) {
+                body.appendChild(renderStudioTitleRow('Movies', movies));
+            }
+            if (shows.length) {
+                body.appendChild(renderStudioTitleRow('Shows', shows));
+            }
+            if (!movies.length && !shows.length) {
+                body.appendChild(renderStudioTitleRow('In your library', titles));
+            }
         }
-        body.appendChild(gridSection);
 
         var missing = prop(data, 'MissingPopular', 'missingPopular') || [];
         if (missing.length) {
-            var missSection = createElement('section', 'fullCrewStudioSection');
+            var missSection = createElement('section', 'fullCrewStudioSection fullCrewStudioSection--secondary');
             missSection.appendChild(createElement('h3', 'fullCrewStudioSectionTitle', 'Missing popular titles'));
             missSection.appendChild(createElement(
                 'p',
                 'fullCrewStudioHint',
-                'Popular on TMDB for this company, not matched in your library (name match — alternate titles may hide).'
+                'Popular on TMDB for this company, not matched in your library.'
             ));
             var missList = createElement('ul', 'fullCrewStudioMissing');
             missing.forEach(function (m) {
@@ -2766,56 +2752,67 @@
         }
     }
 
-    function renderStudioStatsSection(stats) {
-        var section = createElement('section', 'fullCrewStudioSection');
-        section.appendChild(createElement('h3', 'fullCrewStudioSectionTitle', 'Your statistics'));
+    function appendStudioMetaRow(dl, label, value) {
+        if (!value) {
+            return;
+        }
+        dl.appendChild(createElement('dt', 'fullCrewStudioMetaLabel', label));
+        dl.appendChild(createElement('dd', 'fullCrewStudioMetaValue', value));
+    }
 
-        var chips = createElement('div', 'fullCrewStudioStatChips');
-        chips.appendChild(statChip(String(prop(stats, 'TotalCount', 'totalCount') || 0), 'titles'));
-        chips.appendChild(statChip(String(prop(stats, 'MovieCount', 'movieCount') || 0), 'movies'));
-        chips.appendChild(statChip(String(prop(stats, 'SeriesCount', 'seriesCount') || 0), 'series'));
-        section.appendChild(chips);
+    function studioBadgeLink(label, href) {
+        var a = createElement('a', 'fullCrewStudioBadge', label);
+        a.href = href;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        return a;
+    }
 
-        var facts = createElement('ul', 'fullCrewStudioStatFacts');
+    function renderStudioQuietStats(stats) {
+        var wrap = createElement('div', 'fullCrewStudioQuietStats');
+        var bits = [];
+        var movies = prop(stats, 'MovieCount', 'movieCount') || 0;
+        var series = prop(stats, 'SeriesCount', 'seriesCount') || 0;
+        var total = prop(stats, 'TotalCount', 'totalCount') || 0;
+        if (total) {
+            bits.push(total + ' in library');
+        }
+        if (movies) {
+            bits.push(movies + ' movie' + (movies === 1 ? '' : 's'));
+        }
+        if (series) {
+            bits.push(series + ' show' + (series === 1 ? '' : 's'));
+        }
         var firstY = prop(stats, 'FirstReleaseYear', 'firstReleaseYear');
         var newestY = prop(stats, 'NewestReleaseYear', 'newestReleaseYear');
-        if (firstY) { facts.appendChild(statFact('First release', String(firstY))); }
-        if (newestY) { facts.appendChild(statFact('Newest release', String(newestY))); }
+        if (firstY && newestY && firstY !== newestY) {
+            bits.push(firstY + '–' + newestY);
+        }
         var avg = prop(stats, 'AverageCommunityRating', 'averageCommunityRating');
-        var ratedN = prop(stats, 'RatedTitleCount', 'ratedTitleCount') || 0;
-        if (avg && ratedN) {
-            facts.appendChild(statFact('Average rating', '★ ' + Number(avg).toFixed(1) + ' (' + ratedN + ' rated)'));
+        if (avg) {
+            bits.push('avg ★ ' + Number(avg).toFixed(1));
+        }
+        if (bits.length) {
+            wrap.appendChild(createElement('div', 'fullCrewStudioQuietLine', bits.join(' · ')));
         }
 
-        appendStudioLinkedFact(facts, 'Highest rated', prop(stats, 'HighestRatedTitle', 'highestRatedTitle'), prop(stats, 'HighestRatedTitleId', 'highestRatedTitleId'), prop(stats, 'HighestRatedValue', 'highestRatedValue') ? '★ ' + Number(prop(stats, 'HighestRatedValue', 'highestRatedValue')).toFixed(1) : null);
-        appendStudioLinkedFact(facts, 'Oldest', prop(stats, 'OldestTitle', 'oldestTitle'), prop(stats, 'OldestTitleId', 'oldestTitleId'), firstY ? String(firstY) : null);
-        appendStudioLinkedFact(facts, 'Newest', prop(stats, 'NewestTitle', 'newestTitle'), prop(stats, 'NewestTitleId', 'newestTitleId'), newestY ? String(newestY) : null);
-
-        if (facts.childNodes.length) {
-            section.appendChild(facts);
+        var details = createElement('div', 'fullCrewStudioQuietDetails');
+        appendStudioQuietLinked(details, 'Highest', prop(stats, 'HighestRatedTitle', 'highestRatedTitle'), prop(stats, 'HighestRatedTitleId', 'highestRatedTitleId'), prop(stats, 'HighestRatedValue', 'highestRatedValue') ? '★ ' + Number(prop(stats, 'HighestRatedValue', 'highestRatedValue')).toFixed(1) : null);
+        appendStudioQuietLinked(details, 'Oldest', prop(stats, 'OldestTitle', 'oldestTitle'), prop(stats, 'OldestTitleId', 'oldestTitleId'), firstY ? String(firstY) : null);
+        appendStudioQuietLinked(details, 'Newest', prop(stats, 'NewestTitle', 'newestTitle'), prop(stats, 'NewestTitleId', 'newestTitleId'), newestY ? String(newestY) : null);
+        if (details.childNodes.length) {
+            wrap.appendChild(details);
         }
-        return section;
+        return wrap;
     }
 
-    function statChip(value, label) {
-        var chip = createElement('div', 'fullCrewStudioStatChip');
-        chip.appendChild(createElement('div', 'fullCrewStudioStatChipValue', value));
-        chip.appendChild(createElement('div', 'fullCrewStudioStatChipLabel', label));
-        return chip;
-    }
-
-    function statFact(label, value) {
-        var li = createElement('li', 'fullCrewStudioStatFact');
-        li.appendChild(createElement('span', 'fullCrewStudioStatFactLabel', label));
-        li.appendChild(createElement('span', 'fullCrewStudioStatFactValue', value));
-        return li;
-    }
-
-    function appendStudioLinkedFact(list, label, title, id, extra) {
-        if (!title) { return; }
-        var li = createElement('li', 'fullCrewStudioStatFact');
-        li.appendChild(createElement('span', 'fullCrewStudioStatFactLabel', label));
-        var valueWrap = createElement('span', 'fullCrewStudioStatFactValue');
+    function appendStudioQuietLinked(parent, label, title, id, extra) {
+        if (!title) {
+            return;
+        }
+        var row = createElement('div', 'fullCrewStudioQuietDetail');
+        row.appendChild(createElement('span', 'fullCrewStudioQuietDetailLabel', label));
+        var value = createElement('span', 'fullCrewStudioQuietDetailValue');
         if (id) {
             var a = createElement('a', 'fullCrewStatsItemLink', title);
             a.href = detailsHashForItem(id);
@@ -2823,15 +2820,64 @@
                 if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) { return; }
                 if (navigateToItem(id)) { ev.preventDefault(); }
             });
-            valueWrap.appendChild(a);
+            value.appendChild(a);
         } else {
-            valueWrap.appendChild(document.createTextNode(title));
+            value.appendChild(document.createTextNode(title));
         }
         if (extra) {
-            valueWrap.appendChild(document.createTextNode(' · ' + extra));
+            value.appendChild(document.createTextNode(' · ' + extra));
         }
-        li.appendChild(valueWrap);
-        list.appendChild(li);
+        row.appendChild(value);
+        parent.appendChild(row);
+    }
+
+    function renderStudioTitleRow(heading, titles) {
+        var section = createElement('section', 'fullCrewStudioSection fullCrewStudioSection--library');
+        section.appendChild(createElement('h2', 'fullCrewStudioSectionTitle', heading));
+        var scroller = createElement('div', 'fullCrewStudioRow');
+        titles.forEach(function (t) {
+            scroller.appendChild(renderStudioPosterCard(t));
+        });
+        section.appendChild(scroller);
+        return section;
+    }
+
+    function renderStudioPosterCard(t) {
+        var id = prop(t, 'Id', 'id');
+        var card = createElement('a', 'fullCrewStudioCard');
+        card.href = detailsHashForItem(id);
+        card.addEventListener('click', function (ev) {
+            if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) { return; }
+            if (navigateToItem(id)) { ev.preventDefault(); }
+        });
+
+        var poster = createElement('div', 'fullCrewStudioPoster');
+        var imgUrl = primaryImageUrl(id);
+        if (imgUrl && prop(t, 'ImageTag', 'imageTag')) {
+            var img = createElement('img', 'fullCrewStudioPosterImg');
+            img.src = imgUrl;
+            img.alt = prop(t, 'Name', 'name') || '';
+            img.loading = 'lazy';
+            poster.appendChild(img);
+        } else {
+            poster.appendChild(
+                createElement('div', 'fullCrewStudioPosterFallback', (prop(t, 'Type', 'type') || 'Title').charAt(0))
+            );
+        }
+        card.appendChild(poster);
+
+        var caption = createElement('div', 'fullCrewStudioCardCaption');
+        caption.appendChild(createElement('div', 'fullCrewStudioCardName', prop(t, 'Name', 'name') || 'Untitled'));
+        var year = prop(t, 'ProductionYear', 'productionYear');
+        var rating = prop(t, 'CommunityRating', 'communityRating');
+        var line = [];
+        if (year) { line.push(String(year)); }
+        if (rating) { line.push('★ ' + Number(rating).toFixed(1)); }
+        if (line.length) {
+            caption.appendChild(createElement('div', 'fullCrewStudioCardMeta', line.join(' · ')));
+        }
+        card.appendChild(caption);
+        return card;
     }
 
     function mountStudioPage() {
@@ -2851,6 +2897,7 @@
         if (existing && existing.getAttribute('data-route') === routeKey && existing.getAttribute('data-loaded') === '1') {
             document.body.classList.add('fullCrewStudioActive');
             setStatsTabSelected(false);
+            setCustomDocumentTitle(true, existing.getAttribute('data-studio-name') || route.name);
             return;
         }
 
@@ -2863,12 +2910,9 @@
         page.setAttribute('data-route', routeKey);
 
         var header = createElement('div', 'fullCrewStudioHeader');
-        var titleWrap = createElement('div', 'fullCrewStatsTitleWrap');
-        var back = createElement('a', 'fullCrewStatsBack', '← Stats · Studios');
+        var back = createElement('a', 'fullCrewStudioBack', '← Stats · Studios');
         back.href = statsDetailHash('studios');
-        titleWrap.appendChild(back);
-        titleWrap.appendChild(createElement('h1', 'fullCrewStudioTitle', 'Loading…'));
-        header.appendChild(titleWrap);
+        header.appendChild(back);
         page.appendChild(header);
 
         var body = createElement('div', 'fullCrewStudioBody');
@@ -2878,10 +2922,13 @@
         mount.appendChild(page);
         document.body.classList.add('fullCrewStudioActive');
         setStatsTabSelected(false);
+        setCustomDocumentTitle(true, route.name);
 
         fetchStudioPage(route)
             .then(function (data) {
+                var loadedName = prop(data, 'Name', 'name') || route.name;
                 page.setAttribute('data-loaded', '1');
+                page.setAttribute('data-studio-name', loadedName);
                 renderStudioPageContent(page, data);
             })
             .catch(function (err) {
@@ -2890,6 +2937,7 @@
                 body.appendChild(
                     createElement('div', 'fullCrewStatsStatus', 'Could not load studio details.')
                 );
+                setCustomDocumentTitle(true, route.name);
             });
     }
 
