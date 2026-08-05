@@ -824,15 +824,14 @@
 
         var client = apiClient();
         if (!client || typeof client.getItem !== 'function') {
-            itemPromiseCache[itemId] = Promise.resolve(null);
-            return itemPromiseCache[itemId];
+            // Client may not be ready yet during early scan — do not cache a permanent miss.
+            return Promise.resolve(null);
         }
 
         try {
             var userId = client.getCurrentUserId && client.getCurrentUserId();
             if (!userId) {
-                itemPromiseCache[itemId] = Promise.resolve(null);
-                return itemPromiseCache[itemId];
+                return Promise.resolve(null);
             }
             itemPromiseCache[itemId] = Promise.resolve(client.getItem(userId, itemId)).catch(function () {
                 delete itemPromiseCache[itemId];
@@ -840,8 +839,7 @@
             });
             return itemPromiseCache[itemId];
         } catch (e) {
-            itemPromiseCache[itemId] = Promise.resolve(null);
-            return itemPromiseCache[itemId];
+            return Promise.resolve(null);
         }
     }
 
@@ -2907,6 +2905,12 @@
             var logo = createElement('img', 'fullCrewStudioLogo');
             logo.src = logoUrl;
             logo.alt = name;
+            logo.onerror = function () {
+                var fallback = createElement('div', 'fullCrewStudioLogoFallback', name.charAt(0) || '?');
+                if (logo.parentNode) {
+                    logo.parentNode.replaceChild(fallback, logo);
+                }
+            };
             profile.appendChild(logo);
         } else {
             profile.appendChild(createElement('div', 'fullCrewStudioLogoFallback', name.charAt(0) || '?'));

@@ -99,8 +99,8 @@ public class StudioPageService
             displayName = clusterLabel;
         }
 
-        var (titles, coCredit) = FindLibraryTitles(user, matchNames);
-        var stats = BuildLibraryStats(titles);
+        var (titles, allMatches, coCredit) = FindLibraryTitles(user, matchNames);
+        var stats = BuildLibraryStats(allMatches);
         var tmdb = await TryFetchTmdbCompanyAsync(displayName, matchNames, cancellationToken).ConfigureAwait(false);
         var missing = tmdb?.Id > 0
             ? await TryFetchMissingPopularAsync(tmdb.Id, titles, cancellationToken).ConfigureAwait(false)
@@ -194,13 +194,13 @@ public class StudioPageService
         return list;
     }
 
-    private (IReadOnlyList<StudioLibraryTitle> Titles, StudioCoCreditHint? CoCredit) FindLibraryTitles(
+    private (IReadOnlyList<StudioLibraryTitle> Titles, IReadOnlyList<StudioLibraryTitle> AllMatches, StudioCoCreditHint? CoCredit) FindLibraryTitles(
         User? user,
         IReadOnlyList<string> matchNames)
     {
         if (matchNames.Count == 0)
         {
-            return ([], null);
+            return ([], [], null);
         }
 
         var wanted = new HashSet<string>(matchNames, StringComparer.OrdinalIgnoreCase);
@@ -268,18 +268,18 @@ public class StudioPageService
                 }
             }
 
-            var ordered = results
+            var allMatches = results
                 .OrderByDescending(t => t.ProductionYear ?? 0)
                 .ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
-                .Take(MaxTitles)
                 .ToList();
+            var titles = allMatches.Take(MaxTitles).ToList();
 
-            return (ordered, BuildCoCreditHint(results.Count, coCounts));
+            return (titles, allMatches, BuildCoCreditHint(allMatches.Count, coCounts));
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to find library titles for studio page");
-            return ([], null);
+            return ([], [], null);
         }
     }
 

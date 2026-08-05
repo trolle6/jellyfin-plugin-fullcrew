@@ -29,7 +29,7 @@ public class LibraryStatsService
     private const int MaxCategoryBuckets = 2000;
     private const int SeriesEpisodeSampleLimit = 12;
     /// <summary>Episodes sampled to fill series cast (always merged, still once per series).</summary>
-    private const int SeriesPeopleEpisodeSampleLimit = 48;
+    private const int SeriesPeopleEpisodeSampleLimit = 24;
     private const int MaxInsights = 14;
     /// <summary>When Other would exceed this share on overview charts, omit it (detail page still has full list).</summary>
     private const double OmitOtherPercentThreshold = 40.0;
@@ -1068,7 +1068,8 @@ public class LibraryStatsService
         foreach (var episode in SampleSeriesEpisodesForPeople(series, user, SeriesPeopleEpisodeSampleLimit))
         {
             AddPeople(SafeGetPeople(episode));
-            if (byKey.Count >= MaxPeoplePerSeries * 2)
+            // Stop once we have a healthy distinct cast — avoid scanning every sampled episode.
+            if (byKey.Count >= MaxPeoplePerSeries)
             {
                 break;
             }
@@ -1090,7 +1091,7 @@ public class LibraryStatsService
         query.Recursive = true;
         query.IncludeItemTypes = [BaseItemKind.Episode];
         query.IsVirtualItem = false;
-        query.Limit = Math.Max(limit * 3, 80);
+        query.Limit = Math.Max(limit * 2, 40);
         query.OrderBy =
         [
             (ItemSortBy.ParentIndexNumber, SortOrder.Ascending),
