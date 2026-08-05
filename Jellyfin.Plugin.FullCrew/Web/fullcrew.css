@@ -227,6 +227,90 @@ a.fullCrewPerson:focus-visible .fullCrewPersonName {
     white-space: nowrap;
 }
 
+.fullCrewBumperButton .fullCrewBumperIcon {
+    font-size: 1.6em !important;
+}
+
+.fullCrewBumperBusy {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+.fullCrewBumperOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    box-sizing: border-box;
+}
+
+.fullCrewBumperBackdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.72);
+}
+
+.fullCrewBumperPanel {
+    position: relative;
+    z-index: 1;
+    width: min(960px, 100%);
+    background: #101010;
+    border-radius: 0.6rem;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+}
+
+.fullCrewBumperOverlayHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+}
+
+.fullCrewBumperOverlayTitle {
+    font-weight: 600;
+    font-size: 1rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fullCrewBumperClose {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 1.6rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.8;
+    padding: 0.1rem 0.35rem;
+}
+
+.fullCrewBumperClose:hover,
+.fullCrewBumperClose:focus-visible {
+    opacity: 1;
+}
+
+.fullCrewBumperFrameWrap {
+    position: relative;
+    width: 100%;
+    padding-top: 56.25%;
+    background: #000;
+}
+
+.fullCrewBumperFrame {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
+
 @media (max-width: 42em) {
     .fullCrewPeople {
         grid-template-columns: 1fr;
@@ -236,5 +320,352 @@ a.fullCrewPerson:focus-visible .fullCrewPersonName {
         flex-direction: column;
         align-items: flex-start;
         gap: 0.25em;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Library Stats page                                                 */
+/* ------------------------------------------------------------------ */
+
+#fullCrewStatsTab .emby-button-foreground,
+.headerTabs .emby-tab-button .emby-button-foreground {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+}
+
+#fullCrewStatsTab .material-icons,
+#fullCrewStatsTab .material-symbols-outlined,
+.headerTabs .emby-tab-button .material-icons,
+.headerTabs .emby-tab-button .material-symbols-outlined {
+    font-size: 1.15em;
+    line-height: 1;
+    width: 1em;
+    text-align: center;
+}
+
+body.fullCrewStatsActive .mainAnimatedPages > .page,
+body.fullCrewStatsActive .mainAnimatedPages > .mainAnimatedPage {
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+.fullCrewStatsPage {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    overflow: auto;
+    box-sizing: border-box;
+    padding: 1.25rem 1.5rem 2.5rem;
+    background: var(--background-color, #101010);
+    color: inherit;
+}
+
+.fullCrewStatsHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin: 0 0 1.25rem;
+}
+
+.fullCrewStatsTitle {
+    margin: 0;
+    font-size: 1.55rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+.fullCrewStatsToggle {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.45rem;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.fullCrewStatsToggleBtn {
+    appearance: none;
+    border: 0;
+    margin: 0;
+    padding: 0.45rem 0.85rem;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 0.88rem;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+.fullCrewStatsToggleBtn + .fullCrewStatsToggleBtn {
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.fullCrewStatsToggleBtn:hover,
+.fullCrewStatsToggleBtn:focus-visible {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.05);
+    outline: none;
+}
+
+.fullCrewStatsToggleBtn.is-active {
+    opacity: 1;
+    background: rgba(0, 164, 220, 0.18);
+    color: var(--primary-color, #00a4dc);
+}
+
+.fullCrewStatsStatus {
+    padding: 1.5rem 0;
+    opacity: 0.7;
+}
+
+.fullCrewStatsStatus--error {
+    opacity: 0.95;
+    color: #e57373;
+}
+
+.fullCrewStatsSummary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+}
+
+.fullCrewStatsChip {
+    min-width: 6.5rem;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.fullCrewStatsChipValue {
+    font-size: 1.35rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+}
+
+.fullCrewStatsChipLabel {
+    margin-top: 0.2rem;
+    font-size: 0.78rem;
+    opacity: 0.6;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.fullCrewStatsSection {
+    margin-bottom: 1.35rem;
+}
+
+.fullCrewStatsSectionTitle {
+    margin: 0 0 0.65rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+.fullCrewStatsInsights {
+    margin: 0;
+    padding: 0.75rem 1rem 0.75rem 1.4rem;
+    border-radius: 0.5rem;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    list-style: disc;
+}
+
+.fullCrewStatsInsights li {
+    margin: 0.35rem 0;
+    line-height: 1.4;
+    opacity: 0.9;
+}
+
+.fullCrewStatsGrid {
+    display: grid;
+    /* Prefer 1–2 readable columns over a row of tiny pies with clipped legends. */
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+    gap: 1.15rem 1.35rem;
+}
+
+.fullCrewStatsChartSection {
+    padding: 1rem 1.1rem 1.15rem;
+    border-radius: 0.55rem;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    margin-bottom: 0;
+    min-width: 0;
+}
+
+.fullCrewStatsEmpty {
+    opacity: 0.55;
+    font-size: 0.9rem;
+    padding: 0.5rem 0;
+}
+
+.fullCrewStatsPieWrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.9rem;
+}
+
+.fullCrewStatsPieCanvas {
+    flex-shrink: 0;
+    border-radius: 50%;
+}
+
+.fullCrewStatsLegend {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.fullCrewStatsLegendItem {
+    display: grid;
+    grid-template-columns: 0.7rem minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 0.55rem;
+    font-size: 0.9rem;
+    line-height: 1.35;
+}
+
+.fullCrewStatsSwatch {
+    width: 0.7rem;
+    height: 0.7rem;
+    margin-top: 0.2rem;
+    border-radius: 0.15rem;
+    flex-shrink: 0;
+}
+
+.fullCrewStatsLegendName {
+    /* Full labels; wrap instead of ellipsis-clipping to a single character. */
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    min-width: 0;
+}
+
+.fullCrewStatsLegendMeta {
+    opacity: 0.65;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    padding-top: 0.05rem;
+}
+
+.fullCrewStatsBars {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.fullCrewStatsBarRow {
+    display: grid;
+    grid-template-columns: minmax(9rem, 13rem) minmax(0, 1fr) auto;
+    gap: 0.65rem;
+    align-items: center;
+    font-size: 0.9rem;
+}
+
+.fullCrewStatsBarLabel {
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.3;
+    min-width: 0;
+}
+
+.fullCrewStatsBarTrack {
+    height: 0.6rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+}
+
+.fullCrewStatsBarFill {
+    height: 100%;
+    border-radius: inherit;
+    min-width: 2px;
+}
+
+.fullCrewStatsBarValue {
+    opacity: 0.65;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    font-size: 0.82rem;
+}
+
+.fullCrewStatsRankList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    counter-reset: fullcrew-rank;
+}
+
+.fullCrewStatsRankItem {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.85rem;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 0.92rem;
+    line-height: 1.35;
+    counter-increment: fullcrew-rank;
+}
+
+.fullCrewStatsRankItem:last-child {
+    border-bottom: 0;
+}
+
+.fullCrewStatsRankName {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.fullCrewStatsRankName::before {
+    content: counter(fullcrew-rank) ". ";
+    opacity: 0.45;
+    font-variant-numeric: tabular-nums;
+}
+
+.fullCrewStatsRankMeta {
+    flex-shrink: 0;
+    opacity: 0.65;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.fullCrewStatsFooter {
+    margin-top: 1.5rem;
+    font-size: 0.78rem;
+    opacity: 0.45;
+}
+
+@media (max-width: 42em) {
+    .fullCrewStatsPage {
+        padding: 1rem 0.85rem 2rem;
+    }
+
+    .fullCrewStatsGrid {
+        grid-template-columns: 1fr;
+    }
+
+    .fullCrewStatsBarRow {
+        grid-template-columns: 1fr;
+        gap: 0.25rem;
+    }
+
+    .fullCrewStatsBarValue {
+        justify-self: end;
     }
 }

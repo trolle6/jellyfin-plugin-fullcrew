@@ -15,6 +15,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
         serviceCollection.AddSingleton<CreditsService>();
+        serviceCollection.AddSingleton<BumperService>();
+        serviceCollection.AddSingleton<LibraryStatsService>();
         serviceCollection.AddSingleton<IStartupFilter, ScriptInjectionStartupFilter>();
         serviceCollection.AddHostedService<ScriptInjectionService>();
     }

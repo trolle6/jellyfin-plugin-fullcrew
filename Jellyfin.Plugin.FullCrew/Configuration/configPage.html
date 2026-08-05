@@ -37,6 +37,42 @@
                     </div>
 
                     <div class="verticalSection">
+                        <h3 class="sectionTitle">Library stats</h3>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="EnableLibraryStats" />
+                                <span>Show Stats tab next to Favourites</span>
+                            </label>
+                        </div>
+                        <div class="fieldDescription">
+                            Adds a Library Stats page with genre, studio, people-by-role, rating, tag, and runtime breakdowns.
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <h3 class="sectionTitle">Break bumpers</h3>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="EnableBumpers" />
+                                <span>Show Bumper button on detail pages</span>
+                            </label>
+                        </div>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="EnableYouTubeBumpers" />
+                                <span>Allow YouTube search when no local bumper is found</span>
+                            </label>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" type="text" id="BumpersCollectionName" label="Local bumpers collection / folder name" />
+                            <div class="fieldDescription">
+                                Optional. Prefer clips from a collection or folder with this name (default: Bumpers).
+                                Also matches library items tagged or named with “bumper”.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
                         <h3 class="sectionTitle">Departments</h3>
                         <div class="fieldDescription" style="margin-bottom:0.75em;">Choose which departments appear in the accordion.</div>
                         <div id="DepartmentToggles"></div>
@@ -126,6 +162,10 @@
                         document.querySelector('#CacheHours').value = config.CacheHours != null ? config.CacheHours : 12;
                         document.querySelector('#MaxPeoplePerDepartment').value =
                             config.MaxPeoplePerDepartment != null ? config.MaxPeoplePerDepartment : 100;
+                        document.querySelector('#EnableLibraryStats').checked = config.EnableLibraryStats !== false;
+                        document.querySelector('#EnableBumpers').checked = config.EnableBumpers !== false;
+                        document.querySelector('#EnableYouTubeBumpers').checked = config.EnableYouTubeBumpers !== false;
+                        document.querySelector('#BumpersCollectionName').value = config.BumpersCollectionName || 'Bumpers';
                         renderDepartmentToggles(config.EnabledDepartments || FullCrewConfig.allDepartments);
                         Dashboard.hideLoadingMsg();
                     });
@@ -139,6 +179,10 @@
                         config.CacheHours = parseInt(document.querySelector('#CacheHours').value, 10) || 12;
                         config.MaxPeoplePerDepartment =
                             parseInt(document.querySelector('#MaxPeoplePerDepartment').value, 10) || 100;
+                        config.EnableLibraryStats = !!document.querySelector('#EnableLibraryStats').checked;
+                        config.EnableBumpers = !!document.querySelector('#EnableBumpers').checked;
+                        config.EnableYouTubeBumpers = !!document.querySelector('#EnableYouTubeBumpers').checked;
+                        config.BumpersCollectionName = document.querySelector('#BumpersCollectionName').value || 'Bumpers';
                         config.EnabledDepartments = readEnabledDepartments();
                         ApiClient.updatePluginConfiguration(FullCrewConfig.pluginUniqueId, config).then(function (result) {
                             Dashboard.processPluginConfigurationUpdateResult(result);

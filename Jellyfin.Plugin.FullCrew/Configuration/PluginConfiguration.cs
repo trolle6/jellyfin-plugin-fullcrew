@@ -15,6 +15,10 @@ public class PluginConfiguration : BasePluginConfiguration
         TmdbApiKey = string.Empty;
         CacheHours = 12;
         MaxPeoplePerDepartment = 100;
+        EnableBumpers = true;
+        EnableYouTubeBumpers = true;
+        EnableLibraryStats = true;
+        BumpersCollectionName = "Bumpers";
         EnabledDepartments =
         [
             "Cast",
@@ -48,6 +52,26 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets the maximum number of people shown per department.
     /// </summary>
     public int MaxPeoplePerDepartment { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the Break Bumper button is shown.
+    /// </summary>
+    public bool EnableBumpers { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether YouTube curated/search bumpers are allowed.
+    /// </summary>
+    public bool EnableYouTubeBumpers { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the Library Stats page and API are enabled.
+    /// </summary>
+    public bool EnableLibraryStats { get; set; }
+
+    /// <summary>
+    /// Gets or sets the local collection/folder name to prefer for bumpers.
+    /// </summary>
+    public string BumpersCollectionName { get; set; }
 
     /// <summary>
     /// Gets or sets the department names to display.

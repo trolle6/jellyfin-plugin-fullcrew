@@ -46,6 +46,35 @@ public class CreditsService
         "Other"
     ];
 
+    /// <summary>
+    /// Preferred display order when one person has multiple stacked jobs.
+    /// Unknown roles sort after these, alphabetically.
+    /// </summary>
+    private static readonly string[] RolePriorityOrder =
+    [
+        "Creator",
+        "Executive Producer",
+        "Co-Executive Producer",
+        "Producer",
+        "Co-Producer",
+        "Associate Producer",
+        "Line Producer",
+        "Director",
+        "Co-Director",
+        "Writer",
+        "Screenplay",
+        "Story",
+        "Characters",
+        "Editor",
+        "Supervising Editor",
+        "Director of Photography",
+        "Cinematography",
+        "Original Music Composer",
+        "Music",
+        "Actor",
+        "Self"
+    ];
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -105,8 +134,8 @@ public class CreditsService
         }
 
         var cacheKey = lookup.SeasonNumber is int seasonNumber
-            ? $"fullcrew-{lookup.MediaKind}-{lookup.TmdbId}-s{seasonNumber}"
-            : $"fullcrew-{lookup.MediaKind}-{lookup.TmdbId}";
+            ? $"fullcrew-v2-{lookup.MediaKind}-{lookup.TmdbId}-s{seasonNumber}"
+            : $"fullcrew-v2-{lookup.MediaKind}-{lookup.TmdbId}";
         if (_memoryCache.TryGetValue(cacheKey, out FullCrewResponse? cached) && cached is not null)
         {
             return CloneForItem(cached, item);
@@ -339,11 +368,11 @@ public class CreditsService
                 .First();
 
             var stackedRoles = credits
-                .OrderBy(c => DepartmentSortIndex(c.Department))
-                .ThenBy(c => c.Person.Role, StringComparer.OrdinalIgnoreCase)
                 .Select(c => c.Person.Role)
                 .Where(r => !string.IsNullOrWhiteSpace(r))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(RoleSortIndex)
+                .ThenBy(r => r, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             var best = credits
@@ -441,6 +470,33 @@ public class CreditsService
         }
 
         return DepartmentOrder.Length + 1;
+    }
+
+    private static int RoleSortIndex(string role)
+    {
+        if (string.IsNullOrWhiteSpace(role))
+        {
+            return RolePriorityOrder.Length + 2;
+        }
+
+        for (var i = 0; i < RolePriorityOrder.Length; i++)
+        {
+            if (string.Equals(RolePriorityOrder[i], role, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        // Fuzzy: "Executive Producer (uncredited)" still ranks with Executive Producer.
+        for (var i = 0; i < RolePriorityOrder.Length; i++)
+        {
+            if (role.StartsWith(RolePriorityOrder[i], StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return RolePriorityOrder.Length + 1;
     }
 
     private static string NormalizeDepartment(string department)

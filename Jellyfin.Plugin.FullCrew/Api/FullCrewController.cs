@@ -1,9 +1,12 @@
 using System;
 using System.IO;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.FullCrew.Models;
 using Jellyfin.Plugin.FullCrew.Services;
+using MediaBrowser.Controller.Library;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -18,15 +21,28 @@ namespace Jellyfin.Plugin.FullCrew.Api;
 [Route("FullCrew")]
 public class FullCrewController : ControllerBase
 {
+    private const string JellyfinUserIdClaim = "Jellyfin-UserId";
+
     private readonly CreditsService _creditsService;
+    private readonly BumperService _bumperService;
+    private readonly LibraryStatsService _libraryStatsService;
+    private readonly IUserManager _userManager;
     private readonly ILogger<FullCrewController> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FullCrewController"/> class.
     /// </summary>
-    public FullCrewController(CreditsService creditsService, ILogger<FullCrewController> logger)
+    public FullCrewController(
+        CreditsService creditsService,
+        BumperService bumperService,
+        LibraryStatsService libraryStatsService,
+        IUserManager userManager,
+        ILogger<FullCrewController> logger)
     {
         _creditsService = creditsService;
+        _bumperService = bumperService;
+        _libraryStatsService = libraryStatsService;
+        _userManager = userManager;
         _logger = logger;
     }
 
@@ -36,7 +52,7 @@ public class FullCrewController : ControllerBase
     /// <param name="itemId">The Jellyfin item id.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Categorized credits.</returns>
-    [HttpGet("{itemId}")]
+    [HttpGet("{itemId:guid}")]
     [Authorize]
     [ProducesResponseType(typeof(FullCrewResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<FullCrewResponse>> GetCredits(
@@ -44,6 +60,47 @@ public class FullCrewController : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _creditsService.GetCreditsAsync(itemId, cancellationToken).ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Resolves a nostalgia break-bumper for an item (local library, curated YouTube, or search).
+    /// </summary>
+    [HttpGet("{itemId:guid}/bumper")]
+    [Authorize]
+    [ProducesResponseType(typeof(BumperResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<BumperResponse>> GetBumper(
+        [FromRoute] Guid itemId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _bumperService.GetBumperAsync(itemId, cancellationToken).ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Resolves an official trailer when Jellyfin's native trailer button is unavailable.
+    /// </summary>
+    [HttpGet("{itemId:guid}/trailer")]
+    [Authorize]
+    [ProducesResponseType(typeof(BumperResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<BumperResponse>> GetTrailer(
+        [FromRoute] Guid itemId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _bumperService.GetTrailerAsync(itemId, cancellationToken).ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Gets aggregated Movie + Series library statistics for charts and insights.
+    /// </summary>
+    [HttpGet("stats")]
+    [Authorize]
+    [ProducesResponseType(typeof(LibraryStatsResponse), StatusCodes.Status200OK)]
+    public ActionResult<LibraryStatsResponse> GetLibraryStats()
+    {
+        var user = TryGetCurrentUser();
+        var result = _libraryStatsService.GetStats(user);
         return Ok(result);
     }
 
@@ -115,5 +172,17 @@ public class FullCrewController : ControllerBase
         {
             return null;
         }
+    }
+
+    private User? TryGetCurrentUser()
+    {
+        var claim = User.FindFirstValue(JellyfinUserIdClaim)
+                    ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(claim, out var userId) || userId == Guid.Empty)
+        {
+            return null;
+        }
+
+        return _userManager.GetUserById(userId);
     }
 }

@@ -1,12 +1,12 @@
 {
   "category": "Metadata",
-  "changelog": "Show stacked credits one role per line. Serve client assets from disk beside the DLL.",
-  "description": "Fetches complete TMDB cast and crew for movies and series, groups people by department, and shows them in a polished accordion on Jellyfin Web item detail pages.",
+  "changelog": "Library Stats: resolution (480p–8K), HDR/range (SDR/HDR10/HDR10+/HLG/Dolby Vision), video/audio codec & channel buckets from MediaStreams; series sample one early episode; insights for most common resolution and HDR share.",
+  "description": "Fetches complete TMDB cast and crew for movies and series, groups people by department, and shows them in a polished accordion on Jellyfin Web item detail pages. Includes a nostalgia Break Bumper action and a Library Stats page.",
   "guid": "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f",
   "name": "Full Crew",
-  "overview": "Full cast and crew by department on movie and series pages",
+  "overview": "Full cast and crew by department, break bumpers, and library stats",
   "owner": "trolle6",
   "targetAbi": "10.11.0.0",
-  "timestamp": "2026-08-02T00:00:00Z",
-  "version": "1.0.10.0"
+  "timestamp": "2026-08-05T00:00:00Z",
+  "version": "1.2.4.0"
 }
