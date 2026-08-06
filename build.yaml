@@ -1,7 +1,7 @@
 ---
 name: "Full Crew"
 guid: "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f"
-version: "1.4.3.0"
+version: "1.4.4.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Full cast and crew by department, break bumpers, library stats, and studio pages"
@@ -16,7 +16,7 @@ owner: "trolle6"
 artifacts:
 - "Jellyfin.Plugin.FullCrew.dll"
 changelog: >
-  Fix studio pages blinking/failing when opened from Stats: pending chrome is
-  keyed to the active route (not any Full Crew page), Stats teardown no longer
-  clears pending, studio titles are claimed early, studio fetch uses a
-  query-string API, and failed loads no longer remount-loop.
+  Skip Full Cast and Crew (and bumper/trailer buttons) on Person and other
+  non-media detail pages; tear down leftover UI when navigating onto them.
+  Credits API also rejects non-media item types so Person TMDB ids are not
+  mistaken for movie credits.

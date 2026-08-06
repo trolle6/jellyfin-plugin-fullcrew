@@ -112,6 +112,18 @@ public class CreditsService
             };
         }
 
+        var kind = item.GetBaseItemKind();
+        if (kind is not (BaseItemKind.Movie or BaseItemKind.Series or BaseItemKind.Season or BaseItemKind.Episode))
+        {
+            return new FullCrewResponse
+            {
+                ItemId = item.Id.ToString("N", CultureInfo.InvariantCulture),
+                ItemName = item.Name,
+                MediaType = kind.ToString(),
+                Error = "Cast and crew is only available for movies, series, seasons, and episodes."
+            };
+        }
+
         var config = Plugin.Instance?.Configuration;
         var apiKey = TmdbDefaults.ResolveApiKey(config?.TmdbApiKey);
 

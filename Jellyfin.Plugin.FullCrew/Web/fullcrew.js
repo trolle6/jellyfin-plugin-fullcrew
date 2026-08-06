@@ -824,6 +824,20 @@
         }
     }
 
+    /** Movie / Series / Season / Episode — the only types that get cast/crew or bumper/trailer UI. */
+    function isMediaDetailItemType(type) {
+        return /^(Movie|Series|Season|Episode)$/i.test(String(type || ''));
+    }
+
+    function teardownDetailExtras(view) {
+        if (!view) {
+            return;
+        }
+        removeExisting(view);
+        showNativeCast(view);
+        removeDetailButtons(view);
+    }
+
     function renderStatus(section, message, isError) {
         var body = section.querySelector('.fullCrewBody');
         body.innerHTML = '';
@@ -985,8 +999,30 @@
         }
 
         ensureStyles();
-        mountDetailButtons(view, itemId);
 
+        // Resolve type before injecting — Person/Genre/Studio/BoxSet detail pages share
+        // the same itemDetailPage shell and must not get cast/crew or bumper/trailer.
+        getItemPromise(itemId).then(function (item) {
+            if (!document.body.contains(view)) {
+                return;
+            }
+
+            var type = item && (item.Type || item.type);
+            if (!item) {
+                // ApiClient not ready yet — retry on the next scan pass.
+                return;
+            }
+            if (!isMediaDetailItemType(type)) {
+                teardownDetailExtras(view);
+                return;
+            }
+
+            mountDetailButtons(view, itemId);
+            mountCreditsSection(view, itemId);
+        });
+    }
+
+    function mountCreditsSection(view, itemId) {
         var existing = view.querySelector('#' + SECTION_ID);
         if (existing && existing.getAttribute('data-item-id') === itemId) {
             return;
@@ -1495,6 +1531,16 @@
         return button;
     }
 
+    function removeDetailButtons(view) {
+        if (!view) {
+            return;
+        }
+        var scope = view.querySelector('.mainDetailButtons') || view;
+        Array.prototype.forEach.call(scope.querySelectorAll('#' + BUMPER_BTN_ID + ', #' + TRAILER_BTN_ID), function (el) {
+            el.remove();
+        });
+    }
+
     function mountDetailButtons(view, itemId) {
         var row = view.querySelector('.mainDetailButtons');
         if (!row) {
@@ -1508,17 +1554,14 @@
 
             var type = item && (item.Type || item.type);
             // Bumper/Trailer only belong on playable media — not Person/Genre/etc.
-            if (!isBumperTrailerItemType(type)) {
+            if (!isMediaDetailItemType(type)) {
+                removeDetailButtons(view);
                 return;
             }
 
             var trailer = mountTrailerButton(row, itemId);
             mountBumperButton(row, itemId, trailer);
         });
-    }
-
-    function isBumperTrailerItemType(type) {
-        return /^(Movie|Series|Season|Episode)$/i.test(String(type || ''));
     }
 
     function scan() {
