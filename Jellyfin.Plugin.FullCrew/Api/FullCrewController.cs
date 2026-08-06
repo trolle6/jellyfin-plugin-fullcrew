@@ -128,6 +128,19 @@ public class FullCrewController : ControllerBase
     }
 
     /// <summary>
+    /// Studio detail page via query string (preferred by the client to avoid path double-encoding).
+    /// </summary>
+    [HttpGet("studio")]
+    [Authorize]
+    [ProducesResponseType(typeof(StudioPageResponse), StatusCodes.Status200OK)]
+    public Task<ActionResult<StudioPageResponse>> GetStudioPageByQuery(
+        [FromQuery] string? name,
+        [FromQuery] string? id,
+        [FromQuery] string? branches,
+        CancellationToken cancellationToken)
+        => GetStudioPageCoreAsync(name, id, branches, cancellationToken);
+
+    /// <summary>
     /// Studio detail page: TMDB company metadata + library titles for a studio / name-root cluster.
     /// </summary>
     /// <param name="name">Studio or cluster display name (route key).</param>
@@ -137,10 +150,17 @@ public class FullCrewController : ControllerBase
     [HttpGet("studio/{name}")]
     [Authorize]
     [ProducesResponseType(typeof(StudioPageResponse), StatusCodes.Status200OK)]
-    public async Task<ActionResult<StudioPageResponse>> GetStudioPage(
+    public Task<ActionResult<StudioPageResponse>> GetStudioPage(
         [FromRoute] string name,
         [FromQuery] string? id,
         [FromQuery] string? branches,
+        CancellationToken cancellationToken)
+        => GetStudioPageCoreAsync(name, id, branches, cancellationToken);
+
+    private async Task<ActionResult<StudioPageResponse>> GetStudioPageCoreAsync(
+        string? name,
+        string? id,
+        string? branches,
         CancellationToken cancellationToken)
     {
         Guid? itemId = null;

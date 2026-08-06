@@ -65,8 +65,15 @@
             /* Avoid "Page not found" flashing in the skin header while pending */
             'html.' + ROUTE_PENDING_CLASS + ' .skinHeader .pageTitle,' +
             'html.' + ROUTE_PENDING_CLASS + ' .skinHeader .headerTitle,' +
-            'html.' + ROUTE_PENDING_CLASS + ' .headerTop .pageTitle' +
-            '{visibility:hidden!important}'
+            'html.' + ROUTE_PENDING_CLASS + ' .headerTop .pageTitle,' +
+            'html.' + STATS_BODY_CLASS + '.' + ROUTE_PENDING_CLASS + ' .skinHeader .pageTitle,' +
+            'html.' + STUDIO_BODY_CLASS + '.' + ROUTE_PENDING_CLASS + ' .skinHeader .pageTitle' +
+            '{visibility:hidden!important}' +
+            /* Keep overlay host sized while our absolute page mounts */
+            'body.' + STATS_BODY_CLASS + ' .mainAnimatedPages,' +
+            'body.' + STUDIO_BODY_CLASS + ' .mainAnimatedPages,' +
+            'html.' + ROUTE_PENDING_CLASS + ' .mainAnimatedPages' +
+            '{position:relative!important;min-height:70vh!important}'
         );
     }
 
@@ -114,6 +121,7 @@
         ensureCriticalStyles();
         ensureStylesheetLink();
 
+        root.classList.remove(STATS_BODY_CLASS, STUDIO_BODY_CLASS);
         root.classList.add(route.bodyClass);
         if (opts.pending) {
             root.classList.add(ROUTE_PENDING_CLASS);
@@ -607,8 +615,10 @@
         CustomPage.prototype.tearDown = function (opts) {
             opts = opts || {};
             if (this.spec.bodyClass) {
-                document.documentElement.classList.remove(this.spec.bodyClass, ROUTE_PENDING_CLASS);
-                document.body.classList.remove(this.spec.bodyClass, ROUTE_PENDING_CLASS);
+                // Never clear ROUTE_PENDING here — callers keep pending up across
+                // shell swaps so Jellyfin 404 chrome cannot flash between remounts.
+                document.documentElement.classList.remove(this.spec.bodyClass);
+                document.body.classList.remove(this.spec.bodyClass);
             }
             if (opts.releaseTitle !== false && this.spec.ownsTitle) {
                 PageTitle.release();
@@ -2376,8 +2386,10 @@
     }
 
     function tearDownStatsPage() {
-        document.documentElement.classList.remove(STATS_BODY_CLASS, ROUTE_PENDING_CLASS);
-        document.body.classList.remove(STATS_BODY_CLASS, ROUTE_PENDING_CLASS);
+        // Do not clear ROUTE_PENDING here — Stats→Studio relies on pending chrome
+        // staying up through this teardown until the studio shell is attached.
+        document.documentElement.classList.remove(STATS_BODY_CLASS);
+        document.body.classList.remove(STATS_BODY_CLASS);
         var page = document.getElementById(STATS_PAGE_ID);
         if (page && page.parentNode) {
             page.parentNode.removeChild(page);
@@ -2520,11 +2532,41 @@
         }, 400);
     }
 
+    /** True when the overlay for this Full Crew route is already in the DOM. */
+    function routePageMounted(route) {
+        if (!route) {
+            return false;
+        }
+        if (route.kind === 'studio') {
+            return !!document.getElementById(STUDIO_PAGE_ID);
+        }
+        if (route.kind === 'stats') {
+            return !!document.getElementById(STATS_PAGE_ID);
+        }
+        return !!(document.getElementById(STATS_PAGE_ID) || document.getElementById(STUDIO_PAGE_ID));
+    }
+
+    function claimRouteTitle(route) {
+        if (!route) {
+            return;
+        }
+        if (route.kind === 'studio') {
+            setCustomDocumentTitle(true, route.title || 'Studio');
+        } else if (route.kind === 'stats') {
+            setStatsDocumentTitle(true);
+        } else if (route.title) {
+            setCustomDocumentTitle(true, route.title);
+        }
+    }
+
     function syncStatsUi() {
         var early = peekFullCrewRoute();
         if (early) {
-            // Keep 404 chrome hidden while config / mount catch up.
-            applyRouteChrome(early, { pending: !document.getElementById(STATS_PAGE_ID) && !document.getElementById(STUDIO_PAGE_ID), setTitle: true });
+            // Pending until *this* route's page exists — not "any" Full Crew page.
+            // Otherwise Stats→Studio clears pending while Stats is still mounted, then
+            // tearDownStats leaves a frame of Jellyfin 404 chrome (the studio blink).
+            applyRouteChrome(early, { pending: !routePageMounted(early), setTitle: true });
+            claimRouteTitle(early);
         } else {
             applyRouteChrome(null);
         }
@@ -3168,18 +3210,16 @@
     }
 
     function fetchStudioPage(route) {
-        var path = 'FullCrew/studio/' + encodeURIComponent(route.name);
-        var query = [];
+        // Prefer query-string name so ApiClient.getUrl cannot double-encode path spaces
+        // (e.g. "Studio Ghibli" → %2520) and break matching.
+        var query = ['name=' + encodeURIComponent(route.name)];
         if (route.id) {
             query.push('id=' + encodeURIComponent(route.id));
         }
         if (route.branches && route.branches.length) {
             query.push('branches=' + route.branches.map(encodeURIComponent).join(','));
         }
-        if (query.length) {
-            path += '?' + query.join('&');
-        }
-        return Core.getJson(path);
+        return Core.getJson('FullCrew/studio?' + query.join('&'));
     }
 
     function primaryImageUrl(itemId) {
@@ -3421,14 +3461,18 @@
         }
 
         ensureStyles();
-        applyRouteChrome(peekFullCrewRoute(), { pending: false, setTitle: false });
+        // Keep 404 chrome hidden through Stats teardown → studio shell attach.
+        applyRouteChrome(peekFullCrewRoute(), { pending: true, setTitle: false });
+        setCustomDocumentTitle(true, route.name);
         ensureHeaderTabsVisible();
         injectStatsTab();
 
         var existing = document.getElementById(STUDIO_PAGE_ID);
         var routeKey = route.name + '|' + (route.id || '') + '|' + (route.branches || []).join(',');
         if (existing && existing.getAttribute('data-route') === routeKey &&
-            (existing.getAttribute('data-loaded') === '1' || existing.getAttribute('data-loading') === '1')) {
+            (existing.getAttribute('data-loaded') === '1' ||
+                existing.getAttribute('data-loading') === '1' ||
+                existing.getAttribute('data-error') === '1')) {
             document.documentElement.classList.add(STUDIO_BODY_CLASS);
             document.body.classList.add(STUDIO_BODY_CLASS);
             clearRoutePending();
@@ -3437,13 +3481,16 @@
             return;
         }
 
+        // Drop Stats overlay only after studio chrome is pending (avoids 404 frame).
         tearDownStatsPage();
 
+        var fetchGen = String(Date.now()) + '-' + Math.random().toString(36).slice(2, 8);
         var page = studioPageCtrl.mountShell(routeKey, function () {
             var p = createElement('div', 'fullCrewPage fullCrewStudioPage');
             p.id = STUDIO_PAGE_ID;
             p.setAttribute('role', 'main');
             p.setAttribute('data-loading', '1');
+            p.setAttribute('data-fetch-gen', fetchGen);
 
             var header = createElement('div', 'fullCrewStudioHeader');
             var back = createElement('a', 'fullCrewStudioBack', '← Stats · Studios');
@@ -3457,19 +3504,32 @@
             return p;
         });
         clearRoutePending();
+        applyRouteChrome(peekFullCrewRoute(), { pending: false, setTitle: false });
         setStatsTabSelected(false);
         setCustomDocumentTitle(true, route.name);
 
         fetchStudioPage(route)
             .then(function (data) {
+                if (!document.body.contains(page) || page.getAttribute('data-fetch-gen') !== fetchGen) {
+                    return;
+                }
+                if (!isStudioRoute()) {
+                    return;
+                }
                 var loadedName = prop(data, 'Name', 'name') || route.name;
                 page.setAttribute('data-loaded', '1');
                 page.removeAttribute('data-loading');
+                page.removeAttribute('data-error');
                 page.setAttribute('data-studio-name', loadedName);
                 renderStudioPageContent(page, data);
             })
             .catch(function (err) {
+                if (!document.body.contains(page) || page.getAttribute('data-fetch-gen') !== fetchGen) {
+                    return;
+                }
                 console.warn('[FullCrew] studio page failed', err);
+                // Mark error so syncStatsUi skip-remount does not thrash forever.
+                page.setAttribute('data-error', '1');
                 page.removeAttribute('data-loading');
                 var body = page.querySelector('.fullCrewStudioBody');
                 if (body) {
@@ -3539,11 +3599,7 @@
         var early = peekFullCrewRoute();
         if (early) {
             applyRouteChrome(early, { pending: true, setTitle: true });
-            if (early.kind === 'stats') {
-                setStatsDocumentTitle(true);
-            } else if (early.kind === 'studio') {
-                setCustomDocumentTitle(true, early.title);
-            }
+            claimRouteTitle(early);
         }
 
         refreshStatsEnabled().then(function () {
@@ -3573,6 +3629,7 @@
             var route = peekFullCrewRoute();
             if (route) {
                 applyRouteChrome(route, { pending: true, setTitle: true });
+                claimRouteTitle(route);
                 scanAll();
             } else {
                 applyRouteChrome(null);

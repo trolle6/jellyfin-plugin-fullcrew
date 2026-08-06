@@ -23,7 +23,7 @@ public class ScriptInjectionService : IHostedService
     /// </summary>
     internal const string EarlyBootTag =
         """
-        <script plugin="FullCrew-early">(function(){try{var h=(location.hash||'').split('?')[0];if(h.indexOf('#!/')===0)h='#'+h.slice(2);if(h.indexOf('#/fullcrew/')!==0)return;var stats=h==='#/fullcrew/stats'||h.indexOf('#/fullcrew/stats/')===0;var cls=stats?'fullCrewStatsActive':'fullCrewStudioActive';var root=document.documentElement;root.classList.add('fullCrewRoutePending',cls);var css='html.fullCrewRoutePending,html.fullCrewStatsActive,html.fullCrewStudioActive{background:var(--background-color,#101010)!important}html.fullCrewRoutePending body,body.fullCrewStatsActive,body.fullCrewStudioActive{background:var(--background-color,#101010)!important}html.fullCrewRoutePending .mainAnimatedPages>.page,html.fullCrewRoutePending .mainAnimatedPages>.mainAnimatedPage,body.fullCrewStatsActive .mainAnimatedPages>.page,body.fullCrewStatsActive .mainAnimatedPages>.mainAnimatedPage,body.fullCrewStudioActive .mainAnimatedPages>.page,body.fullCrewStudioActive .mainAnimatedPages>.mainAnimatedPage,html.fullCrewRoutePending .mainAnimatedPages .emptyMessage{visibility:hidden!important;pointer-events:none!important;opacity:0!important}html.fullCrewRoutePending .skinHeader .pageTitle,html.fullCrewRoutePending .skinHeader .headerTitle,html.fullCrewRoutePending .headerTop .pageTitle{visibility:hidden!important}';var s=document.createElement('style');s.id='fullCrewCritical';s.textContent=css;(document.head||root).appendChild(s);var l=document.createElement('link');l.id='fullCrewStyles';l.rel='stylesheet';l.href='/FullCrew/fullcrew.css';(document.head||root).appendChild(l);function apply(){if(document.body){document.body.classList.add(cls,'fullCrewRoutePending');}}apply();if(!document.body)document.addEventListener('DOMContentLoaded',apply);if(stats){try{document.title='Stats';}catch(e){}}}catch(e){}})();</script>
+        <script plugin="FullCrew-early">(function(){try{var h=(location.hash||'').split('?')[0];if(h.indexOf('#!/')===0)h='#'+h.slice(2);if(h.indexOf('#/fullcrew/')!==0)return;var stats=h==='#/fullcrew/stats'||h.indexOf('#/fullcrew/stats/')===0;var studio=h.indexOf('#/fullcrew/studio/')===0;var cls=stats?'fullCrewStatsActive':'fullCrewStudioActive';var root=document.documentElement;root.classList.add('fullCrewRoutePending',cls);var css='html.fullCrewRoutePending,html.fullCrewStatsActive,html.fullCrewStudioActive{background:var(--background-color,#101010)!important}html.fullCrewRoutePending body,body.fullCrewStatsActive,body.fullCrewStudioActive{background:var(--background-color,#101010)!important}html.fullCrewRoutePending .mainAnimatedPages>.page,html.fullCrewRoutePending .mainAnimatedPages>.mainAnimatedPage,html.fullCrewStatsActive .mainAnimatedPages>.page,html.fullCrewStudioActive .mainAnimatedPages>.page,body.fullCrewStatsActive .mainAnimatedPages>.page,body.fullCrewStatsActive .mainAnimatedPages>.mainAnimatedPage,body.fullCrewStudioActive .mainAnimatedPages>.page,body.fullCrewStudioActive .mainAnimatedPages>.mainAnimatedPage,html.fullCrewRoutePending .mainAnimatedPages .emptyMessage{visibility:hidden!important;pointer-events:none!important;opacity:0!important}html.fullCrewRoutePending .skinHeader .pageTitle,html.fullCrewRoutePending .skinHeader .headerTitle,html.fullCrewRoutePending .headerTop .pageTitle{visibility:hidden!important}body.fullCrewStatsActive .mainAnimatedPages,body.fullCrewStudioActive .mainAnimatedPages,html.fullCrewRoutePending .mainAnimatedPages{position:relative!important;min-height:70vh!important}';var s=document.createElement('style');s.id='fullCrewCritical';s.textContent=css;(document.head||root).appendChild(s);var l=document.createElement('link');l.id='fullCrewStyles';l.rel='stylesheet';l.href='/FullCrew/fullcrew.css';(document.head||root).appendChild(l);function apply(){if(document.body){document.body.classList.add(cls,'fullCrewRoutePending');}}apply();if(!document.body)document.addEventListener('DOMContentLoaded',apply);try{if(stats){document.title='Stats';}else if(studio){var n=h.slice('#/fullcrew/studio/'.length);try{n=decodeURIComponent(n)||n;}catch(e0){}document.title=n||'Studio';}}catch(e1){}}catch(e){}})();</script>
         """;
 
     internal const string ScriptTag =
@@ -240,16 +240,24 @@ public class ScriptInjectionService : IHostedService
     if (h.indexOf('#!/') === 0) h = '#' + h.slice(2);
     if (h.indexOf('#/fullcrew/') === 0) {
       var stats = h === '#/fullcrew/stats' || h.indexOf('#/fullcrew/stats/') === 0;
+      var studio = h.indexOf('#/fullcrew/studio/') === 0;
       var cls = stats ? 'fullCrewStatsActive' : 'fullCrewStudioActive';
       document.documentElement.classList.add('fullCrewRoutePending', cls);
       if (document.body) document.body.classList.add(cls, 'fullCrewRoutePending');
       if (!document.getElementById('fullCrewCritical')) {
         var st = document.createElement('style');
         st.id = 'fullCrewCritical';
-        st.textContent = 'html.fullCrewRoutePending .mainAnimatedPages>.page,body.fullCrewStatsActive .mainAnimatedPages>.page,body.fullCrewStudioActive .mainAnimatedPages>.page{visibility:hidden!important;opacity:0!important}';
+        st.textContent = 'html.fullCrewRoutePending .mainAnimatedPages>.page,html.fullCrewStatsActive .mainAnimatedPages>.page,html.fullCrewStudioActive .mainAnimatedPages>.page,body.fullCrewStatsActive .mainAnimatedPages>.page,body.fullCrewStudioActive .mainAnimatedPages>.page{visibility:hidden!important;opacity:0!important}html.fullCrewRoutePending .skinHeader .pageTitle{visibility:hidden!important}body.fullCrewStatsActive .mainAnimatedPages,body.fullCrewStudioActive .mainAnimatedPages,html.fullCrewRoutePending .mainAnimatedPages{position:relative!important;min-height:70vh!important}';
         (document.head || document.documentElement).appendChild(st);
       }
-      if (stats) { try { document.title = 'Stats'; } catch (e) {} }
+      try {
+        if (stats) { document.title = 'Stats'; }
+        else if (studio) {
+          var n = h.slice('#/fullcrew/studio/'.length);
+          try { n = decodeURIComponent(n) || n; } catch (e1) {}
+          document.title = n || 'Studio';
+        }
+      } catch (e2) {}
     }
   } catch (e0) {}
   if (!document.getElementById('fullCrewStyles')) {

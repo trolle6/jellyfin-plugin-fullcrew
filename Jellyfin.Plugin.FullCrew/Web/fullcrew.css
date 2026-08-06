@@ -398,6 +398,14 @@ html.fullCrewRoutePending .mainAnimatedPages > .mainAnimatedPage {
     opacity: 0 !important;
 }
 
+/* Ensure absolute Full Crew overlays have a sized containing block */
+body.fullCrewStatsActive .mainAnimatedPages,
+body.fullCrewStudioActive .mainAnimatedPages,
+html.fullCrewRoutePending .mainAnimatedPages {
+    position: relative !important;
+    min-height: 70vh !important;
+}
+
 /* Keep our overlay visible above the hidden 404 shell */
 body.fullCrewStatsActive .fullCrewPage,
 body.fullCrewStudioActive .fullCrewPage,
