@@ -328,9 +328,10 @@
         }
 
         /**
-         * First-class document + skinHeader title ownership.
-         * claim()/release() set intent; a dedicated MutationObserver re-applies
-         * only when Jellyfin overwrites (avoids Home↔Stats↔404 oscillation).
+         * First-class document + skinHeader pageTitle ownership.
+         * Only while on #/fullcrew/* — never rewrite Home brand/"Jellyfin" chrome.
+         * claim()/release() set intent; a MutationObserver re-applies only when
+         * Jellyfin overwrites (avoids Stats↔404 oscillation without Home stickers).
          */
         var PageTitle = (function () {
             var owned = false;
@@ -340,37 +341,68 @@
             var PREV_DOC = 'data-fullcrew-prev-title';
             var OWNED = 'data-fullcrew-owned-title';
             var PREV_HDR = 'data-fullcrew-prev-header';
+            /* Narrow: real page titles only — never bare .headerTitle / h1 / sectionTitle
+             * (those match brand chips and home section headers → "Stats"/"Jellyfin" stickers). */
             var HEADER_SEL =
-                '.skinHeader .pageTitle, .skinHeader .headerButton.headerTitle, .headerTop .pageTitle, .headerTitle, .skinHeader h1, .skinHeader .sectionTitle';
+                '.skinHeader .headerLeft .pageTitle, .skinHeader .pageTitle, .headerTop .pageTitle';
 
             function headerNodes() {
                 return document.querySelectorAll(HEADER_SEL);
+            }
+
+            function ownedNodesEverywhere() {
+                return document.querySelectorAll('[' + OWNED + '="1"]');
             }
 
             function isOurTab(node) {
                 return !!(node && (node.id === 'fullCrewStatsTab' || (node.closest && node.closest('#fullCrewStatsTab'))));
             }
 
-            function shouldTake(node) {
-                if (isOurTab(node)) {
-                    return false;
+            function onFullCrewRoute() {
+                return !!peekFullCrewRoute();
+            }
+
+            /** Single visible pageTitle — owning several leaves overlapping stickers. */
+            function primaryHeaderNode() {
+                var nodes = headerNodes();
+                for (var i = 0; i < nodes.length; i++) {
+                    var node = nodes[i];
+                    if (!node || isOurTab(node)) {
+                        continue;
+                    }
+                    if (node.offsetParent === null && node.getClientRects && !node.getClientRects().length) {
+                        continue;
+                    }
+                    return node;
                 }
-                if (node.getAttribute(OWNED) === '1') {
-                    return true;
+                return nodes.length ? nodes[0] : null;
+            }
+
+            function scrubNode(node) {
+                if (!node) {
+                    return;
                 }
-                var text = (node.textContent || '').replace(/\s+/g, ' ').trim();
-                if (!text || /page not found/i.test(text)) {
-                    return true;
+                if (node.getAttribute(OWNED) !== '1' && node.getAttribute(PREV_HDR) == null) {
+                    return;
                 }
-                // While we own the route, reclaim whenever Jellyfin flips the header away.
-                if (owned && text !== label) {
-                    return true;
+                var prevHdr = node.getAttribute(PREV_HDR);
+                // Always restore prior text (including '') so we never leave "Stats" behind.
+                if (prevHdr != null) {
+                    node.textContent = prevHdr;
                 }
-                return false;
+                node.removeAttribute(PREV_HDR);
+                node.removeAttribute(OWNED);
             }
 
             function apply() {
                 if (!owned || applying) {
+                    return;
+                }
+                // Never keep title ownership off Full Crew routes (Home/Favourites/etc.).
+                if (!onFullCrewRoute()) {
+                    owned = false;
+                    label = '';
+                    restore();
                     return;
                 }
                 applying = true;
@@ -388,23 +420,31 @@
                         document.title = label;
                     }
 
-                    Array.prototype.forEach.call(headerNodes(), function (node) {
-                        if (!node || isOurTab(node) || !shouldTake(node)) {
-                            return;
-                        }
-                        var text = (node.textContent || '').replace(/\s+/g, ' ').trim();
-                        if (!node.getAttribute(PREV_HDR)) {
-                            if (text && !/page not found/i.test(text) && text !== label) {
-                                node.setAttribute(PREV_HDR, text);
-                            } else {
-                                node.setAttribute(PREV_HDR, '');
-                            }
-                        }
-                        node.setAttribute(OWNED, '1');
-                        if (node.textContent !== label) {
-                            node.textContent = label;
+                    var primary = primaryHeaderNode();
+                    // Drop ownership on any stale/extra nodes so Home never shows dual stickers.
+                    Array.prototype.forEach.call(ownedNodesEverywhere(), function (node) {
+                        if (node !== primary) {
+                            scrubNode(node);
                         }
                     });
+
+                    if (!primary) {
+                        applying = false;
+                        return;
+                    }
+
+                    var text = (primary.textContent || '').replace(/\s+/g, ' ').trim();
+                    if (!primary.getAttribute(PREV_HDR)) {
+                        if (text && !/page not found/i.test(text) && text !== label) {
+                            primary.setAttribute(PREV_HDR, text);
+                        } else {
+                            primary.setAttribute(PREV_HDR, '');
+                        }
+                    }
+                    primary.setAttribute(OWNED, '1');
+                    if (primary.textContent !== label) {
+                        primary.textContent = label;
+                    }
                 } catch (e) { /* ignore */ }
                 applying = false;
             }
@@ -418,16 +458,12 @@
                         document.documentElement.removeAttribute(PREV_DOC);
                     }
                 } catch (e) { /* ignore */ }
+                Array.prototype.forEach.call(ownedNodesEverywhere(), scrubNode);
+                // Also clear any nodes matching the header selector that still carry attrs.
                 Array.prototype.forEach.call(headerNodes(), function (node) {
-                    if (!node || node.getAttribute(OWNED) !== '1') {
-                        return;
+                    if (node && (node.getAttribute(OWNED) === '1' || node.getAttribute(PREV_HDR) != null)) {
+                        scrubNode(node);
                     }
-                    var prevHdr = node.getAttribute(PREV_HDR);
-                    if (prevHdr != null && prevHdr !== '') {
-                        node.textContent = prevHdr;
-                    }
-                    node.removeAttribute(PREV_HDR);
-                    node.removeAttribute(OWNED);
                 });
             }
 
@@ -446,22 +482,15 @@
                     if (!owned || applying) {
                         return;
                     }
-                    if (document.title !== label || document.querySelector(HEADER_SEL + '[' + OWNED + '="1"]') == null) {
-                        apply();
+                    if (!onFullCrewRoute()) {
+                        owned = false;
+                        label = '';
+                        restore();
                         return;
                     }
-                    var drifted = false;
-                    Array.prototype.forEach.call(headerNodes(), function (node) {
-                        if (isOurTab(node)) {
-                            return;
-                        }
-                        if (node.getAttribute(OWNED) === '1' && node.textContent !== label) {
-                            drifted = true;
-                        } else if (node.getAttribute(OWNED) !== '1' && /page not found/i.test(node.textContent || '')) {
-                            drifted = true;
-                        }
-                    });
-                    if (drifted) {
+                    var primary = primaryHeaderNode();
+                    if (document.title !== label || !primary || primary.getAttribute(OWNED) !== '1' ||
+                        primary.textContent !== label) {
                         apply();
                     }
                 });
@@ -474,23 +503,29 @@
 
             return {
                 claim: function (titleText) {
+                    if (!onFullCrewRoute()) {
+                        this.release();
+                        return;
+                    }
                     owned = true;
                     label = titleText || 'Full Crew';
                     apply();
                     startObserver();
                 },
                 release: function () {
-                    if (!owned) {
-                        return;
-                    }
                     owned = false;
                     label = '';
                     restore();
                 },
                 tick: function () {
-                    if (owned) {
-                        apply();
+                    if (!owned) {
+                        return;
                     }
+                    if (!onFullCrewRoute()) {
+                        this.release();
+                        return;
+                    }
+                    apply();
                 },
                 isOwned: function () {
                     return owned;
@@ -2612,6 +2647,8 @@
             claimRouteTitle(early);
         } else {
             applyRouteChrome(null);
+            // Drop title ownership immediately so Home never keeps "Stats"/"Jellyfin" stickers.
+            Core.PageTitle.release();
         }
 
         if (!statsConfigLoaded) {
@@ -3632,7 +3669,11 @@
     function scanAll() {
         scan();
         syncStatsUi();
-        Core.PageTitle.tick();
+        if (peekFullCrewRoute()) {
+            Core.PageTitle.tick();
+        } else if (Core.PageTitle.isOwned()) {
+            Core.PageTitle.release();
+        }
     }
 
     function start() {
@@ -3676,6 +3717,7 @@
                 scanAll();
             } else {
                 applyRouteChrome(null);
+                Core.PageTitle.release();
                 window.setTimeout(scanAll, 80);
             }
         });
@@ -3693,11 +3735,12 @@
                 }, 30);
                 return;
             }
+            // Non–Full Crew (Home / Favourites / …): never tick title ownership.
+            Core.PageTitle.release();
             if (view) {
                 window.setTimeout(function () {
                     mount(view);
                     syncStatsUi();
-                    Core.PageTitle.tick();
                 }, 200);
             } else {
                 window.setTimeout(scanAll, 200);
