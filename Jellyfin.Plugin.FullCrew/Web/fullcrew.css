@@ -90,15 +90,15 @@
 
 .fullCrewDept {
     border-radius: 0.45em;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--fc-surface);
     border: 1px solid rgba(255, 255, 255, 0.06);
     overflow: hidden;
     transition: border-color 0.2s ease, background 0.2s ease;
 }
 
 .fullCrewDept.is-open {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.1);
+    background: var(--fc-surface-strong);
+    border-color: var(--fc-border);
 }
 
 .fullCrewDeptToggle {
@@ -489,7 +489,7 @@ html.fullCrewStudioActive .fullCrewPage {
 
 .fullCrewStatsStatus--error {
     opacity: 0.95;
-    color: #e57373;
+    color: var(--fc-danger);
 }
 
 .fullCrewStatsSummary {

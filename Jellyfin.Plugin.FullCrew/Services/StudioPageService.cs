@@ -434,7 +434,7 @@ public class StudioPageService
             + Uri.EscapeDataString(query);
 
         var client = _httpClientFactory.CreateClient();
-        using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        using var response = await SendGetAsync(client, url, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             return null;
@@ -586,7 +586,7 @@ public class StudioPageService
             + "&sort_by=popularity.desc&include_adult=false&page=1";
 
         var client = _httpClientFactory.CreateClient();
-        using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        using var response = await SendGetAsync(client, url, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             return [];
@@ -632,7 +632,7 @@ public class StudioPageService
             + Uri.EscapeDataString(apiKey);
 
         var client = _httpClientFactory.CreateClient();
-        using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        using var response = await SendGetAsync(client, url, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             return null;
@@ -641,6 +641,16 @@ public class StudioPageService
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         return await JsonSerializer.DeserializeAsync<TmdbCompanyDetails>(stream, JsonOptions, cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private static async Task<HttpResponseMessage> SendGetAsync(
+        HttpClient client,
+        string url,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.TryAddWithoutValidation("User-Agent", PluginInfo.UserAgent);
+        return await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
     private sealed class TmdbCompanySearchPayload

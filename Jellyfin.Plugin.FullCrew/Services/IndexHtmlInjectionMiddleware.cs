@@ -91,9 +91,4 @@ public sealed class IndexHtmlInjectionMiddleware
                || path.Equals("/web/index.html", StringComparison.OrdinalIgnoreCase)
                || path.EndsWith("/web/index.html", StringComparison.OrdinalIgnoreCase);
     }
-
-    private static string InsertScript(string html)
-    {
-        return ScriptInjectionService.EnsureClientInjection(html);
-    }
 }

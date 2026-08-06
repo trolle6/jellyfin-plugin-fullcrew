@@ -1,6 +1,6 @@
 {
   "category": "Metadata",
-  "changelog": "Stop Full Crew page-title ownership from leaving Stats/Jellyfin stickers on Home; titles only on #/fullcrew/* routes.",
+  "changelog": "Professional structure pass: shared departments/HTTP identity, credits cache respects config, versioned client assets, JS Core primitives (routing/navigate/page load), dead-code cleanup. Behavior preserved for Stats, studio, anti-blink, person gating, bumpers, title ownership.",
   "description": "Fetches complete TMDB cast and crew for movies and series, groups people by department, and shows them in a polished accordion on Jellyfin Web item detail pages. Includes a nostalgia Break Bumper action, Library Stats, and studio detail pages.",
   "guid": "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f",
   "name": "Full Crew",
@@ -8,5 +8,5 @@
   "owner": "trolle6",
   "targetAbi": "10.11.0.0",
   "timestamp": "2026-08-06T00:00:00Z",
-  "version": "1.4.5.0"
+  "version": "1.5.0.0"
 }

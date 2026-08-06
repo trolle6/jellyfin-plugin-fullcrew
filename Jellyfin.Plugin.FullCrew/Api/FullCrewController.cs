@@ -234,23 +234,31 @@ public class FullCrewController : ControllerBase
         // Prefer loose files next to the plugin DLL. Overwriting the DLL while Jellyfin is
         // running corrupts memory-mapped embedded resources; disk files stay readable.
         var diskPath = ResolvePluginWebPath(fileName);
+        ActionResult result;
         if (diskPath is not null && System.IO.File.Exists(diskPath))
         {
-            return PhysicalFile(diskPath, contentType);
+            result = PhysicalFile(diskPath, contentType);
         }
-
-        var assembly = typeof(Plugin).Assembly;
-        var resourceName = $"{typeof(Plugin).Namespace}.Web.{fileName}";
-        var stream = assembly.GetManifestResourceStream(resourceName);
-        if (stream is null)
+        else
         {
-            _logger.LogWarning(
-                "Full Crew client asset missing: {FileName} (disk and embedded). Restart Jellyfin after updating the plugin DLL.",
-                fileName);
-            return NotFound();
+            var assembly = typeof(Plugin).Assembly;
+            var resourceName = $"{typeof(Plugin).Namespace}.Web.{fileName}";
+            var stream = assembly.GetManifestResourceStream(resourceName);
+            if (stream is null)
+            {
+                _logger.LogWarning(
+                    "Full Crew client asset missing: {FileName} (disk and embedded). Restart Jellyfin after updating the plugin DLL.",
+                    fileName);
+                return NotFound();
+            }
+
+            result = new FileStreamResult(stream, contentType);
         }
 
-        return new FileStreamResult(stream, contentType);
+        // Assets are versioned via ?v= on inject; allow short private cache without stale forever.
+        Response.Headers.CacheControl = "private, max-age=300";
+        Response.Headers["X-FullCrew-Version"] = PluginInfo.Version;
+        return result;
     }
 
     private static string? ResolvePluginWebPath(string fileName)

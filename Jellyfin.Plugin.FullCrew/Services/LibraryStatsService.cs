@@ -1159,36 +1159,6 @@ public class LibraryStatsService
         }
     }
 
-    private List<BaseItem> SampleSeriesEpisodes(BaseItem series, User? user, int limit)
-    {
-        var query = user is null
-            ? new InternalItemsQuery()
-            : new InternalItemsQuery(user);
-
-        query.ParentId = series.Id;
-        query.Recursive = true;
-        query.IncludeItemTypes = [BaseItemKind.Episode];
-        query.IsVirtualItem = false;
-        query.Limit = limit;
-        query.OrderBy =
-        [
-            (ItemSortBy.ParentIndexNumber, SortOrder.Ascending),
-            (ItemSortBy.IndexNumber, SortOrder.Ascending)
-        ];
-
-        try
-        {
-            return _libraryManager.GetItemList(query)
-                .Where(e => e is not null && !e.IsVirtualItem)
-                .ToList();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Skipping episode people sample for series {SeriesId}", series.Id);
-            return [];
-        }
-    }
-
     private IReadOnlyList<PersonInfo> SafeGetPeople(BaseItem item)
     {
         try

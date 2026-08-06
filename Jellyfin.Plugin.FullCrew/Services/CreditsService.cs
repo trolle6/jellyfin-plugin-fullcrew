@@ -23,22 +23,7 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 /// </summary>
 public class CreditsService
 {
-    private static readonly string[] DepartmentOrder =
-    [
-        "Cast",
-        "Directing",
-        "Writing",
-        "Production",
-        "Camera",
-        "Editing",
-        "Sound",
-        "Art",
-        "Costume & Make-Up",
-        "Visual Effects",
-        "Lighting",
-        "Crew",
-        "Other"
-    ];
+    private static readonly string[] DepartmentOrder = CrewDepartments.DefaultOrder;
 
     /// <summary>
     /// Preferred display order when one person has multiple stacked jobs.
@@ -139,9 +124,12 @@ public class CreditsService
             };
         }
 
+        // Include display config so department toggles / caps take effect without waiting for TTL.
+        var maxPeople = Math.Clamp(config?.MaxPeoplePerDepartment ?? 100, 1, 500);
+        var enabledDepts = string.Join('|', config?.EnabledDepartments ?? DepartmentOrder);
         var cacheKey = lookup.SeasonNumber is int seasonNumber
-            ? $"fullcrew-v2-{lookup.MediaKind}-{lookup.TmdbId}-s{seasonNumber}"
-            : $"fullcrew-v2-{lookup.MediaKind}-{lookup.TmdbId}";
+            ? $"fullcrew-v3-{lookup.MediaKind}-{lookup.TmdbId}-s{seasonNumber}-m{maxPeople}-[{enabledDepts}]"
+            : $"fullcrew-v3-{lookup.MediaKind}-{lookup.TmdbId}-m{maxPeople}-[{enabledDepts}]";
         if (_memoryCache.TryGetValue(cacheKey, out FullCrewResponse? cached) && cached is not null)
         {
             return CloneForItem(cached, item);
@@ -175,10 +163,8 @@ public class CreditsService
         CancellationToken cancellationToken)
     {
         var client = _httpClientFactory.CreateClient();
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Jellyfin-Plugin-FullCrew/1.0");
-
         var path = BuildTmdbCreditsUrl(lookup, apiKey);
-        using var httpResponse = await client.GetAsync(path, cancellationToken).ConfigureAwait(false);
+        using var httpResponse = await SendGetAsync(client, path, cancellationToken).ConfigureAwait(false);
 
         if (!httpResponse.IsSuccessStatusCode && lookup.SeasonNumber is not null)
         {
@@ -189,11 +175,21 @@ public class CreditsService
                 lookup.SeasonNumber);
 
             var fallbackPath = BuildTmdbCreditsUrl(lookup with { SeasonNumber = null }, apiKey);
-            using var fallbackResponse = await client.GetAsync(fallbackPath, cancellationToken).ConfigureAwait(false);
+            using var fallbackResponse = await SendGetAsync(client, fallbackPath, cancellationToken).ConfigureAwait(false);
             return await ParseCreditsResponseAsync(item, lookup, fallbackResponse, cancellationToken).ConfigureAwait(false);
         }
 
         return await ParseCreditsResponseAsync(item, lookup, httpResponse, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<HttpResponseMessage> SendGetAsync(
+        HttpClient client,
+        string url,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.TryAddWithoutValidation("User-Agent", PluginInfo.UserAgent);
+        return await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
     private static string BuildTmdbCreditsUrl(TmdbLookup lookup, string apiKey)

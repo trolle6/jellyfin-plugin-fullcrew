@@ -29,7 +29,6 @@ public partial class BumperService
     private readonly ILibraryManager _libraryManager;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<BumperService> _logger;
-    private readonly Random _random = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BumperService"/> class.
@@ -224,7 +223,7 @@ public partial class BumperService
             .Take(8)
             .ToList();
 
-        var pick = ranked[_random.Next(Math.Min(3, ranked.Count))];
+        var pick = ranked[Random.Shared.Next(Math.Min(3, ranked.Count))];
         return new BumperResponse
         {
             Source = "YouTube",
@@ -303,9 +302,6 @@ public partial class BumperService
         try
         {
             var client = _httpClientFactory.CreateClient();
-            client.Timeout = TimeSpan.FromSeconds(8);
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("Jellyfin-Plugin-FullCrew/1.4.0");
-
             var payload = new Dictionary<string, object>
             {
                 ["context"] = new Dictionary<string, object>
@@ -320,8 +316,18 @@ public partial class BumperService
             };
 
             using var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                "https://www.youtube.com/youtubei/v1/search?prettyPrint=false")
+            {
+                Content = content
+            };
+            request.Headers.TryAddWithoutValidation("User-Agent", PluginInfo.UserAgent);
+
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(8));
             using var response = await client
-                .PostAsync("https://www.youtube.com/youtubei/v1/search?prettyPrint=false", content, cancellationToken)
+                .SendAsync(request, timeoutCts.Token)
                 .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
@@ -662,7 +668,7 @@ public partial class BumperService
                 : networkMatched.Count > 0 ? networkMatched
                 : candidates;
 
-            return pool[_random.Next(pool.Count)];
+            return pool[Random.Shared.Next(pool.Count)];
         }
         catch (Exception ex)
         {

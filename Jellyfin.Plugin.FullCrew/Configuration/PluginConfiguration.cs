@@ -1,3 +1,5 @@
+using System;
+using Jellyfin.Plugin.FullCrew.Services;
 using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.FullCrew.Configuration;
@@ -19,22 +21,7 @@ public class PluginConfiguration : BasePluginConfiguration
         EnableYouTubeBumpers = true;
         EnableLibraryStats = true;
         BumpersCollectionName = "Bumpers";
-        EnabledDepartments =
-        [
-            "Cast",
-            "Directing",
-            "Writing",
-            "Production",
-            "Camera",
-            "Editing",
-            "Sound",
-            "Art",
-            "Costume & Make-Up",
-            "Visual Effects",
-            "Lighting",
-            "Crew",
-            "Other"
-        ];
+        EnabledDepartments = (string[])CrewDepartments.DefaultOrder.Clone();
     }
 
     /// <summary>

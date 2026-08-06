@@ -8,10 +8,13 @@
     /* named sections that share Core primitives:                         */
     /*   Core.el / Core.prop / Core.getJson / Core.PageTitle / Core.Ui    */
     /*   Core.CustomPage — mount/teardown for hash-routed overlays        */
+    /*   Core.navigateToItem / Core.bindPageLoad / Core.findMount         */
     /* Features: Crew accordion · Bumper/Trailer · Stats · Studio         */
+    /* Route chrome (peek/apply) runs before the duplicate-script guard.  */
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
+    var PLUGIN_VERSION = '1.5.0.0';
     var CRITICAL_STYLE_ID = 'fullCrewCritical';
     var STYLE_ID = 'fullCrewStyles';
     var ROUTE_PENDING_CLASS = 'fullCrewRoutePending';
@@ -99,7 +102,7 @@
         var link = document.createElement('link');
         link.id = STYLE_ID;
         link.rel = 'stylesheet';
-        link.href = '/FullCrew/fullcrew.css';
+        link.href = '/FullCrew/fullcrew.css?v=' + PLUGIN_VERSION;
         (document.head || document.documentElement).appendChild(link);
     }
 
@@ -166,14 +169,6 @@
         if (document.body) {
             document.body.classList.remove(ROUTE_PENDING_CLASS);
         }
-        var hdr = document.querySelectorAll(
-            '.skinHeader .pageTitle, .skinHeader .headerTitle, .headerTop .pageTitle'
-        );
-        Array.prototype.forEach.call(hdr, function (node) {
-            if (node && node.style) {
-                /* critical CSS used visibility; once mounted, PageTitle owns text */
-            }
-        });
     }
 
     // Before-paint intervention when this file runs (defer or async).
@@ -287,27 +282,58 @@
             return '#/details?id=' + encodeURIComponent(itemId);
         }
 
+        /**
+         * Navigate to a Jellyfin entity page (Person, Genre, Studio, BoxSet, …).
+         * Prefer Emby.Page / appRouter; fall back to hash navigation.
+         */
         function navigateToItem(itemId) {
             if (!itemId) {
                 return false;
             }
+
+            try {
+                if (window.Emby && window.Emby.Page && typeof window.Emby.Page.showItem === 'function') {
+                    window.Emby.Page.showItem(String(itemId));
+                    return true;
+                }
+            } catch (e) { /* fall through */ }
+
+            try {
+                if (window.appRouter && typeof window.appRouter.showItem === 'function') {
+                    var client = apiClient();
+                    var userId = client && client.getCurrentUserId && client.getCurrentUserId();
+                    if (client && userId && typeof client.getItem === 'function') {
+                        Promise.resolve(client.getItem(userId, String(itemId)))
+                            .then(function (item) {
+                                if (item) {
+                                    window.appRouter.showItem(item);
+                                } else {
+                                    window.location.hash = detailsHashForItem(itemId);
+                                }
+                            })
+                            .catch(function () {
+                                window.location.hash = detailsHashForItem(itemId);
+                            });
+                        return true;
+                    }
+
+                    window.appRouter.showItem(String(itemId));
+                    return true;
+                }
+            } catch (e1) { /* fall through */ }
+
             try {
                 if (window.Dashboard && typeof window.Dashboard.navigate === 'function') {
                     window.Dashboard.navigate('details?id=' + encodeURIComponent(itemId));
                     return true;
                 }
-            } catch (e0) { /* fall through */ }
-            try {
-                if (window.appRouter && typeof window.appRouter.showItem === 'function') {
-                    window.appRouter.showItem(itemId);
-                    return true;
-                }
-            } catch (e1) { /* fall through */ }
+            } catch (e2) { /* fall through */ }
+
             window.location.hash = detailsHashForItem(itemId);
             return true;
         }
 
-        // Overridable by the full in-app router once Feature: Stats defines it.
+        // Overridable if a feature needs a specialized router (kept for API stability).
         var navigateImpl = navigateToItem;
 
         function primaryImageUrl(itemId, maxHeight) {
@@ -634,13 +660,17 @@
             this.spec = spec;
         }
 
-        CustomPage.prototype.findMount = function () {
+        CustomPage.findMount = function () {
             return (
                 document.querySelector('.mainAnimatedPages') ||
                 document.querySelector('#mainContent') ||
                 document.querySelector('.mainDrawer-scrollContainer') ||
                 document.body
             );
+        };
+
+        CustomPage.prototype.findMount = function () {
+            return CustomPage.findMount();
         };
 
         CustomPage.prototype.get = function () {
@@ -683,6 +713,48 @@
             return page;
         };
 
+        /**
+         * Shared promise→DOM bind: skip if page unmounted; optional stillValid gate.
+         * opts: { stillValid, onSuccess, onError, warn, errorSelector, errorMessage, errorClass }
+         */
+        function bindPageLoad(page, promise, opts) {
+            opts = opts || {};
+            return promise
+                .then(function (data) {
+                    if (!document.body.contains(page)) {
+                        return;
+                    }
+                    if (opts.stillValid && !opts.stillValid()) {
+                        return;
+                    }
+                    if (typeof opts.onSuccess === 'function') {
+                        opts.onSuccess(data);
+                    }
+                    page.setAttribute('data-loaded', '1');
+                    page.removeAttribute('data-loading');
+                })
+                .catch(function (err) {
+                    if (!document.body.contains(page)) {
+                        return;
+                    }
+                    if (opts.warn) {
+                        console.warn(opts.warn, err);
+                    }
+                    if (typeof opts.onError === 'function') {
+                        opts.onError(err);
+                    } else if (opts.errorMessage) {
+                        var body = page.querySelector(opts.errorSelector || '.fullCrewStatsBody, .fullCrewStudioBody');
+                        if (body) {
+                            body.innerHTML = '';
+                            body.appendChild(
+                                Ui.status(opts.errorMessage, true, opts.errorClass || 'fullCrewStatsStatus')
+                            );
+                        }
+                    }
+                    page.removeAttribute('data-loading');
+                });
+        }
+
         return {
             ensureStyles: ensureStyles,
             el: el,
@@ -703,7 +775,10 @@
             primaryImageUrl: primaryImageUrl,
             PageTitle: PageTitle,
             Ui: Ui,
-            CustomPage: CustomPage
+            CustomPage: CustomPage,
+            findMount: CustomPage.findMount,
+            bindPageLoad: bindPageLoad,
+            version: PLUGIN_VERSION
         };
     })();
 
@@ -1797,55 +1872,11 @@
     }
 
     /**
-     * Navigate to a Jellyfin entity page (Person, Genre, Studio, BoxSet, …).
-     * Prefer in-app router; fall back to hash navigation.
+     * Navigate to a Jellyfin entity page — delegates to Core (Emby.Page / appRouter / hash).
      */
     function navigateToItem(itemId) {
-        if (!itemId) {
-            return false;
-        }
-
-        try {
-            if (window.Emby && window.Emby.Page && typeof window.Emby.Page.showItem === 'function') {
-                window.Emby.Page.showItem(String(itemId));
-                return true;
-            }
-        } catch (e) {
-            /* ignore */
-        }
-
-        try {
-            if (window.appRouter && typeof window.appRouter.showItem === 'function') {
-                var client = apiClient();
-                var userId = client && client.getCurrentUserId && client.getCurrentUserId();
-                if (client && userId && typeof client.getItem === 'function') {
-                    Promise.resolve(client.getItem(userId, String(itemId)))
-                        .then(function (item) {
-                            if (item) {
-                                window.appRouter.showItem(item);
-                            } else {
-                                window.location.hash = detailsHashForItem(itemId);
-                            }
-                        })
-                        .catch(function () {
-                            window.location.hash = detailsHashForItem(itemId);
-                        });
-                    return true;
-                }
-
-                window.appRouter.showItem(String(itemId));
-                return true;
-            }
-        } catch (e2) {
-            /* ignore */
-        }
-
-        window.location.hash = detailsHashForItem(itemId);
-        return true;
+        return Core.navigateToItem(itemId);
     }
-
-    // Prefer the full in-app router path for shared Ui links/cards.
-    Core.setNavigateToItem(navigateToItem);
 
     function createBucketNameEl(tagName, className, bucket) {
         var label = displayBucketName(bucket.name);
@@ -2455,12 +2486,7 @@
     }
 
     function findStatsMountPoint() {
-        return (
-            document.querySelector('.mainAnimatedPages') ||
-            document.querySelector('#mainContent') ||
-            document.querySelector('.mainDrawer-scrollContainer') ||
-            document.body
-        );
+        return Core.findMount();
     }
 
     function tearDownStatsPage() {
@@ -2524,20 +2550,13 @@
             page.setAttribute('data-route', routeKey);
             page.setAttribute('data-loading', '1');
             mount.appendChild(page);
-            fetchStatsCategory(route.category)
-                .then(function (data) {
-                    if (!document.body.contains(page) || !isStatsRoute()) {
-                        return;
-                    }
+            Core.bindPageLoad(page, fetchStatsCategory(route.category), {
+                stillValid: isStatsRoute,
+                warn: '[FullCrew] failed to load stats category ' + route.category,
+                onSuccess: function (data) {
                     renderStatsDetailContent(page, data);
-                    page.setAttribute('data-loaded', '1');
-                    page.removeAttribute('data-loading');
-                })
-                .catch(function (err) {
-                    if (!document.body.contains(page)) {
-                        return;
-                    }
-                    console.warn('[FullCrew] failed to load stats category', route.category, err);
+                },
+                onError: function () {
                     var body = page.querySelector('.fullCrewStatsBody');
                     if (body) {
                         body.innerHTML = '';
@@ -2553,8 +2572,8 @@
                     if (titleEl) {
                         titleEl.textContent = route.category;
                     }
-                    page.removeAttribute('data-loading');
-                });
+                }
+            });
             return;
         }
 
@@ -2563,33 +2582,14 @@
         page.setAttribute('data-loading', '1');
         mount.appendChild(page);
 
-        fetchStats()
-            .then(function (data) {
-                if (!document.body.contains(page) || !isStatsRoute()) {
-                    return;
-                }
+        Core.bindPageLoad(page, fetchStats(), {
+            stillValid: isStatsRoute,
+            warn: '[FullCrew] failed to load library stats',
+            onSuccess: function (data) {
                 renderStatsContent(page, data);
-                page.setAttribute('data-loaded', '1');
-                page.removeAttribute('data-loading');
-            })
-            .catch(function (err) {
-                if (!document.body.contains(page)) {
-                    return;
-                }
-                console.warn('[FullCrew] failed to load library stats', err);
-                var body = page.querySelector('.fullCrewStatsBody');
-                if (body) {
-                    body.innerHTML = '';
-                    body.appendChild(
-                        createElement(
-                            'div',
-                            'fullCrewStatsStatus fullCrewStatsStatus--error',
-                            'Could not load library stats. Is the plugin API available?'
-                        )
-                    );
-                }
-                page.removeAttribute('data-loading');
-            });
+            },
+            errorMessage: 'Could not load library stats. Is the plugin API available?'
+        });
     }
 
     function maybeOpenFavoritesFromFlag() {
@@ -3588,36 +3588,27 @@
         setStatsTabSelected(false);
         setCustomDocumentTitle(true, route.name);
 
-        fetchStudioPage(route)
-            .then(function (data) {
-                if (!document.body.contains(page) || page.getAttribute('data-fetch-gen') !== fetchGen) {
-                    return;
-                }
-                if (!isStudioRoute()) {
-                    return;
-                }
+        Core.bindPageLoad(page, fetchStudioPage(route), {
+            stillValid: function () {
+                return page.getAttribute('data-fetch-gen') === fetchGen && isStudioRoute();
+            },
+            warn: '[FullCrew] studio page failed',
+            onSuccess: function (data) {
                 var loadedName = prop(data, 'Name', 'name') || route.name;
-                page.setAttribute('data-loaded', '1');
-                page.removeAttribute('data-loading');
                 page.removeAttribute('data-error');
                 page.setAttribute('data-studio-name', loadedName);
                 renderStudioPageContent(page, data);
-            })
-            .catch(function (err) {
-                if (!document.body.contains(page) || page.getAttribute('data-fetch-gen') !== fetchGen) {
-                    return;
-                }
-                console.warn('[FullCrew] studio page failed', err);
-                // Mark error so syncStatsUi skip-remount does not thrash forever.
+            },
+            onError: function () {
                 page.setAttribute('data-error', '1');
-                page.removeAttribute('data-loading');
                 var body = page.querySelector('.fullCrewStudioBody');
                 if (body) {
                     body.innerHTML = '';
                     body.appendChild(Core.Ui.status('Could not load studio details.', true));
                 }
                 setCustomDocumentTitle(true, route.name);
-            });
+            }
+        });
     }
 
     /* ================================================================== */
