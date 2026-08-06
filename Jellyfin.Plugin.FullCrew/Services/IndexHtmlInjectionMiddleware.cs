@@ -57,7 +57,8 @@ public sealed class IndexHtmlInjectionMiddleware
 
         if (!string.IsNullOrEmpty(body)
             && body.Contains("</body>", StringComparison.OrdinalIgnoreCase)
-            && !body.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase))
+            && !body.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase)
+            && !body.Contains("FullCrew-early", StringComparison.OrdinalIgnoreCase))
         {
             body = InsertScript(body);
 

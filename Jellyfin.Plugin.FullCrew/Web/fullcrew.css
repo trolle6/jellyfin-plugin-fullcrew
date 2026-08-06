@@ -386,9 +386,32 @@ a.fullCrewPerson:focus-visible .fullCrewPersonName {
 body.fullCrewStatsActive .mainAnimatedPages > .page,
 body.fullCrewStatsActive .mainAnimatedPages > .mainAnimatedPage,
 body.fullCrewStudioActive .mainAnimatedPages > .page,
-body.fullCrewStudioActive .mainAnimatedPages > .mainAnimatedPage {
+body.fullCrewStudioActive .mainAnimatedPages > .mainAnimatedPage,
+html.fullCrewStatsActive .mainAnimatedPages > .page,
+html.fullCrewStatsActive .mainAnimatedPages > .mainAnimatedPage,
+html.fullCrewStudioActive .mainAnimatedPages > .page,
+html.fullCrewStudioActive .mainAnimatedPages > .mainAnimatedPage,
+html.fullCrewRoutePending .mainAnimatedPages > .page,
+html.fullCrewRoutePending .mainAnimatedPages > .mainAnimatedPage {
     visibility: hidden !important;
     pointer-events: none !important;
+    opacity: 0 !important;
+}
+
+/* Keep our overlay visible above the hidden 404 shell */
+body.fullCrewStatsActive .fullCrewPage,
+body.fullCrewStudioActive .fullCrewPage,
+html.fullCrewStatsActive .fullCrewPage,
+html.fullCrewStudioActive .fullCrewPage {
+    visibility: visible !important;
+    pointer-events: auto !important;
+    opacity: 1 !important;
+}
+
+/* Stabilize Stats tab so late injection doesn't feel like a blink */
+#fullCrewStatsTab {
+    flex: 0 0 auto;
+    min-width: 4.5em;
 }
 
 .fullCrewStatsPage {

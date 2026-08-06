@@ -12,19 +12,176 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
+    var CRITICAL_STYLE_ID = 'fullCrewCritical';
+    var STYLE_ID = 'fullCrewStyles';
+    var ROUTE_PENDING_CLASS = 'fullCrewRoutePending';
+    var STATS_BODY_CLASS = 'fullCrewStatsActive';
+    var STUDIO_BODY_CLASS = 'fullCrewStudioActive';
 
-    var Core = (function () {
-        var STYLE_ID = 'fullCrewStyles';
+    /**
+     * Parse hash ASAP (no DOM required). Used by early chrome + routers.
+     * Matches #/fullcrew/... and #!/fullcrew/...
+     */
+    function peekFullCrewRoute(hash) {
+        var raw = (hash || (typeof location !== 'undefined' ? location.hash : '') || '').split('?')[0];
+        if (raw.indexOf('#!/') === 0) {
+            raw = '#' + raw.slice(2);
+        }
+        if (raw.indexOf('#/fullcrew/') !== 0) {
+            return null;
+        }
+        if (raw === '#/fullcrew/stats' || raw.indexOf('#/fullcrew/stats/') === 0) {
+            return { kind: 'stats', title: 'Stats', bodyClass: STATS_BODY_CLASS };
+        }
+        if (raw.indexOf('#/fullcrew/studio/') === 0) {
+            var enc = raw.slice('#/fullcrew/studio/'.length);
+            var name = enc;
+            try {
+                name = decodeURIComponent(enc) || enc;
+            } catch (e) { /* keep enc */ }
+            return { kind: 'studio', title: name || 'Studio', bodyClass: STUDIO_BODY_CLASS };
+        }
+        return { kind: 'other', title: 'Full Crew', bodyClass: STATS_BODY_CLASS };
+    }
 
-        function ensureStyles() {
-            if (document.getElementById(STYLE_ID)) {
+    function criticalCssText() {
+        return (
+            'html.' + ROUTE_PENDING_CLASS + ',html.' + STATS_BODY_CLASS + ',html.' + STUDIO_BODY_CLASS +
+            '{background:var(--background-color,#101010)!important}' +
+            'html.' + ROUTE_PENDING_CLASS + ' body,body.' + STATS_BODY_CLASS + ',body.' + STUDIO_BODY_CLASS +
+            '{background:var(--background-color,#101010)!important}' +
+            /* Hide Jellyfin's not-found / empty page until our overlay mounts */
+            'html.' + ROUTE_PENDING_CLASS + ' .mainAnimatedPages > .page,' +
+            'html.' + ROUTE_PENDING_CLASS + ' .mainAnimatedPages > .mainAnimatedPage,' +
+            'body.' + STATS_BODY_CLASS + ' .mainAnimatedPages > .page,' +
+            'body.' + STATS_BODY_CLASS + ' .mainAnimatedPages > .mainAnimatedPage,' +
+            'body.' + STUDIO_BODY_CLASS + ' .mainAnimatedPages > .page,' +
+            'body.' + STUDIO_BODY_CLASS + ' .mainAnimatedPages > .mainAnimatedPage,' +
+            'html.' + ROUTE_PENDING_CLASS + ' .mainAnimatedPages .emptyMessage,' +
+            'html.' + ROUTE_PENDING_CLASS + ' .mainAnimatedPages .noItemsMessage,' +
+            'body.' + STATS_BODY_CLASS + ' .mainAnimatedPages .emptyMessage,' +
+            'body.' + STUDIO_BODY_CLASS + ' .mainAnimatedPages .emptyMessage' +
+            '{visibility:hidden!important;pointer-events:none!important;opacity:0!important}' +
+            /* Avoid "Page not found" flashing in the skin header while pending */
+            'html.' + ROUTE_PENDING_CLASS + ' .skinHeader .pageTitle,' +
+            'html.' + ROUTE_PENDING_CLASS + ' .skinHeader .headerTitle,' +
+            'html.' + ROUTE_PENDING_CLASS + ' .headerTop .pageTitle' +
+            '{visibility:hidden!important}'
+        );
+    }
+
+    function ensureCriticalStyles() {
+        var existing = document.getElementById(CRITICAL_STYLE_ID);
+        if (existing) {
+            return existing;
+        }
+        var style = document.createElement('style');
+        style.id = CRITICAL_STYLE_ID;
+        style.textContent = criticalCssText();
+        var parent = document.head || document.documentElement;
+        if (parent) {
+            parent.insertBefore(style, parent.firstChild);
+        }
+        return style;
+    }
+
+    function ensureStylesheetLink() {
+        if (document.getElementById(STYLE_ID)) {
+            return;
+        }
+        var link = document.createElement('link');
+        link.id = STYLE_ID;
+        link.rel = 'stylesheet';
+        link.href = '/FullCrew/fullcrew.css';
+        (document.head || document.documentElement).appendChild(link);
+    }
+
+    /**
+     * Apply/remove route body+html classes and optional early title.
+     * Safe to call before DOMContentLoaded (body may be null).
+     */
+    function applyRouteChrome(route, opts) {
+        opts = opts || {};
+        var root = document.documentElement;
+        if (!route) {
+            root.classList.remove(ROUTE_PENDING_CLASS, STATS_BODY_CLASS, STUDIO_BODY_CLASS);
+            if (document.body) {
+                document.body.classList.remove(ROUTE_PENDING_CLASS, STATS_BODY_CLASS, STUDIO_BODY_CLASS);
+            }
+            return;
+        }
+
+        ensureCriticalStyles();
+        ensureStylesheetLink();
+
+        root.classList.add(route.bodyClass);
+        if (opts.pending) {
+            root.classList.add(ROUTE_PENDING_CLASS);
+        } else {
+            root.classList.remove(ROUTE_PENDING_CLASS);
+        }
+
+        function onBody(body) {
+            if (!body) {
                 return;
             }
-            var link = document.createElement('link');
-            link.id = STYLE_ID;
-            link.rel = 'stylesheet';
-            link.href = '/FullCrew/fullcrew.css';
-            document.head.appendChild(link);
+            body.classList.remove(STATS_BODY_CLASS, STUDIO_BODY_CLASS);
+            body.classList.add(route.bodyClass);
+            if (opts.pending) {
+                body.classList.add(ROUTE_PENDING_CLASS);
+            } else {
+                body.classList.remove(ROUTE_PENDING_CLASS);
+            }
+        }
+
+        if (document.body) {
+            onBody(document.body);
+        } else if (opts.pending) {
+            document.addEventListener('DOMContentLoaded', function () {
+                var still = peekFullCrewRoute();
+                if (still) {
+                    onBody(document.body);
+                }
+            });
+        }
+
+        if (opts.setTitle && route.title) {
+            try {
+                document.title = route.title;
+            } catch (e) { /* ignore */ }
+        }
+    }
+
+    function clearRoutePending() {
+        var root = document.documentElement;
+        root.classList.remove(ROUTE_PENDING_CLASS);
+        if (document.body) {
+            document.body.classList.remove(ROUTE_PENDING_CLASS);
+        }
+        var hdr = document.querySelectorAll(
+            '.skinHeader .pageTitle, .skinHeader .headerTitle, .headerTop .pageTitle'
+        );
+        Array.prototype.forEach.call(hdr, function (node) {
+            if (node && node.style) {
+                /* critical CSS used visibility; once mounted, PageTitle owns text */
+            }
+        });
+    }
+
+    // Before-paint intervention when this file runs (defer or async).
+    // Index HTML may also inject an identical early boot; both are idempotent.
+    (function earlyBoot() {
+        var route = peekFullCrewRoute();
+        if (!route) {
+            return;
+        }
+        applyRouteChrome(route, { pending: true, setTitle: true });
+    })();
+
+    var Core = (function () {
+        function ensureStyles() {
+            ensureCriticalStyles();
+            ensureStylesheetLink();
         }
 
         function el(tag, className, text) {
@@ -158,12 +315,14 @@
 
         /**
          * First-class document + skinHeader title ownership.
-         * claim()/release() set intent; tick() re-applies after Jellyfin overwrites
-         * the header (e.g. "Page not found") during SPA navigations.
+         * claim()/release() set intent; a dedicated MutationObserver re-applies
+         * only when Jellyfin overwrites (avoids Home↔Stats↔404 oscillation).
          */
         var PageTitle = (function () {
             var owned = false;
             var label = '';
+            var applying = false;
+            var titleObserver = null;
             var PREV_DOC = 'data-fullcrew-prev-title';
             var OWNED = 'data-fullcrew-owned-title';
             var PREV_HDR = 'data-fullcrew-prev-header';
@@ -174,44 +333,70 @@
                 return document.querySelectorAll(HEADER_SEL);
             }
 
+            function isOurTab(node) {
+                return !!(node && (node.id === 'fullCrewStatsTab' || (node.closest && node.closest('#fullCrewStatsTab'))));
+            }
+
             function shouldTake(node) {
-                var text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+                if (isOurTab(node)) {
+                    return false;
+                }
                 if (node.getAttribute(OWNED) === '1') {
                     return true;
                 }
-                return !text || /page not found/i.test(text) || /^home$/i.test(text) || /^stats$/i.test(text);
+                var text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+                if (!text || /page not found/i.test(text)) {
+                    return true;
+                }
+                // While we own the route, reclaim whenever Jellyfin flips the header away.
+                if (owned && text !== label) {
+                    return true;
+                }
+                return false;
             }
 
             function apply() {
-                if (!owned) {
+                if (!owned || applying) {
                     return;
                 }
+                applying = true;
                 try {
                     if (!document.documentElement.getAttribute(PREV_DOC)) {
-                        document.documentElement.setAttribute(PREV_DOC, document.title || '');
+                        var cur = document.title || '';
+                        // Don't stash "Page not found" / our own label as the restore target.
+                        if (!/page not found/i.test(cur) && cur !== label) {
+                            document.documentElement.setAttribute(PREV_DOC, cur);
+                        } else if (!document.documentElement.getAttribute(PREV_DOC)) {
+                            document.documentElement.setAttribute(PREV_DOC, 'Jellyfin');
+                        }
                     }
-                    document.title = label;
-                } catch (e) { /* ignore */ }
+                    if (document.title !== label) {
+                        document.title = label;
+                    }
 
-                Array.prototype.forEach.call(headerNodes(), function (node) {
-                    if (!node || node.id === 'fullCrewStatsTab' || node.closest('#fullCrewStatsTab')) {
-                        return;
-                    }
-                    if (!shouldTake(node)) {
-                        return;
-                    }
-                    var text = (node.textContent || '').replace(/\s+/g, ' ').trim();
-                    if (!node.getAttribute(PREV_HDR)) {
-                        node.setAttribute(PREV_HDR, text);
-                    }
-                    node.setAttribute(OWNED, '1');
-                    if (node.textContent !== label) {
-                        node.textContent = label;
-                    }
-                });
+                    Array.prototype.forEach.call(headerNodes(), function (node) {
+                        if (!node || isOurTab(node) || !shouldTake(node)) {
+                            return;
+                        }
+                        var text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+                        if (!node.getAttribute(PREV_HDR)) {
+                            if (text && !/page not found/i.test(text) && text !== label) {
+                                node.setAttribute(PREV_HDR, text);
+                            } else {
+                                node.setAttribute(PREV_HDR, '');
+                            }
+                        }
+                        node.setAttribute(OWNED, '1');
+                        if (node.textContent !== label) {
+                            node.textContent = label;
+                        }
+                    });
+                } catch (e) { /* ignore */ }
+                applying = false;
             }
 
             function restore() {
+                stopObserver();
                 try {
                     var prev = document.documentElement.getAttribute(PREV_DOC);
                     if (prev != null) {
@@ -220,12 +405,56 @@
                     }
                 } catch (e) { /* ignore */ }
                 Array.prototype.forEach.call(headerNodes(), function (node) {
-                    if (!node || node.getAttribute(PREV_HDR) == null) {
+                    if (!node || node.getAttribute(OWNED) !== '1') {
                         return;
                     }
-                    node.textContent = node.getAttribute(PREV_HDR);
+                    var prevHdr = node.getAttribute(PREV_HDR);
+                    if (prevHdr != null && prevHdr !== '') {
+                        node.textContent = prevHdr;
+                    }
                     node.removeAttribute(PREV_HDR);
                     node.removeAttribute(OWNED);
+                });
+            }
+
+            function stopObserver() {
+                if (titleObserver) {
+                    titleObserver.disconnect();
+                    titleObserver = null;
+                }
+            }
+
+            function startObserver() {
+                if (titleObserver || typeof MutationObserver === 'undefined') {
+                    return;
+                }
+                titleObserver = new MutationObserver(function () {
+                    if (!owned || applying) {
+                        return;
+                    }
+                    if (document.title !== label || document.querySelector(HEADER_SEL + '[' + OWNED + '="1"]') == null) {
+                        apply();
+                        return;
+                    }
+                    var drifted = false;
+                    Array.prototype.forEach.call(headerNodes(), function (node) {
+                        if (isOurTab(node)) {
+                            return;
+                        }
+                        if (node.getAttribute(OWNED) === '1' && node.textContent !== label) {
+                            drifted = true;
+                        } else if (node.getAttribute(OWNED) !== '1' && /page not found/i.test(node.textContent || '')) {
+                            drifted = true;
+                        }
+                    });
+                    if (drifted) {
+                        apply();
+                    }
+                });
+                titleObserver.observe(document.documentElement, {
+                    subtree: true,
+                    childList: true,
+                    characterData: true
                 });
             }
 
@@ -234,6 +463,7 @@
                     owned = true;
                     label = titleText || 'Full Crew';
                     apply();
+                    startObserver();
                 },
                 release: function () {
                     if (!owned) {
@@ -371,7 +601,8 @@
         CustomPage.prototype.tearDown = function (opts) {
             opts = opts || {};
             if (this.spec.bodyClass) {
-                document.body.classList.remove(this.spec.bodyClass);
+                document.documentElement.classList.remove(this.spec.bodyClass, ROUTE_PENDING_CLASS);
+                document.body.classList.remove(this.spec.bodyClass, ROUTE_PENDING_CLASS);
             }
             if (opts.releaseTitle !== false && this.spec.ownsTitle) {
                 PageTitle.release();
@@ -392,7 +623,10 @@
             var page = buildShell();
             page.setAttribute('data-route', routeKey);
             if (this.spec.bodyClass) {
+                document.documentElement.classList.add(this.spec.bodyClass);
                 document.body.classList.add(this.spec.bodyClass);
+                document.documentElement.classList.remove(ROUTE_PENDING_CLASS);
+                document.body.classList.remove(ROUTE_PENDING_CLASS);
             }
             this.findMount().appendChild(page);
             return page;
@@ -1295,6 +1529,7 @@
 
     var STATS_TAB_ID = 'fullCrewStatsTab';
     var STATS_PAGE_ID = 'fullCrewStatsPage';
+    var STUDIO_PAGE_ID = 'fullCrewStudioPage';
     var STATS_HASH = '#/fullcrew/stats';
     var STATS_VIEW_KEY = 'fullCrew.statsViewMode';
     var STATS_DETAIL_VIEW_KEY = 'fullCrew.statsDetailViewMode';
@@ -1827,6 +2062,20 @@
             return tab;
         }
 
+        var wantSelected = selected ? '1' : '0';
+        if (
+            tab.getAttribute('data-fullcrew-styled') === '1' &&
+            tab.getAttribute('data-fullcrew-selected') === wantSelected &&
+            tab.querySelector('.emby-button-foreground')
+        ) {
+            if (selected) {
+                tab.classList.add('emby-tab-button-active');
+            } else {
+                tab.classList.remove('emby-tab-button-active');
+            }
+            return tab;
+        }
+
         var classes = 'emby-tab-button emby-button';
         if (sampleTab && sampleTab.className) {
             classes = String(sampleTab.className)
@@ -1872,6 +2121,8 @@
         var iconSpec = detectNativeTabIcon(sampleTab, 'insights');
         tab.innerHTML = '';
         tab.appendChild(buildTabForeground('Stats', iconSpec));
+        tab.setAttribute('data-fullcrew-styled', '1');
+        tab.setAttribute('data-fullcrew-selected', wantSelected);
         return tab;
     }
 
@@ -1969,6 +2220,8 @@
         });
         var stats = makeTab(STATS_TAB_ID, 'Stats', STATS_HASH, true, 'insights');
         stats.setAttribute('data-fullcrew-stats-tab', '1');
+        stats.setAttribute('data-fullcrew-styled', '1');
+        stats.setAttribute('data-fullcrew-selected', '1');
         stats.addEventListener('click', onStatsTabClick);
 
         slider.appendChild(home);
@@ -2049,7 +2302,10 @@
         if (existing && document.body.contains(existing)) {
             styleStatsTabLikeNative(existing, findFavouritesTab() || findHomeTab(), false);
             setStatsTabSelected(false);
-            setStatsDocumentTitle(false);
+            // Do not touch document title on normal Home/Favourites — avoids Stats blink.
+            if (Core.PageTitle.isOwned() && !isStudioRoute()) {
+                setStatsDocumentTitle(false);
+            }
             wireNativeTabExit(findHomeTab());
             wireNativeTabExit(findFavouritesTab());
             return;
@@ -2114,14 +2370,198 @@
     }
 
     function tearDownStatsPage() {
-        document.body.classList.remove('fullCrewStatsActive');
+        document.documentElement.classList.remove(STATS_BODY_CLASS, ROUTE_PENDING_CLASS);
+        document.body.classList.remove(STATS_BODY_CLASS, ROUTE_PENDING_CLASS);
         var page = document.getElementById(STATS_PAGE_ID);
         if (page && page.parentNode) {
             page.parentNode.removeChild(page);
         }
         statsDetailBuckets = null;
         setStatsTabSelected(false);
-        setStatsDocumentTitle(false);
+        if (!isStudioRoute()) {
+            setStatsDocumentTitle(false);
+        }
+    }
+
+    function mountStatsPage() {
+        if (!statsEnabled) {
+            tearDownStatsPage();
+            removeStatsTab();
+            return;
+        }
+
+        var route = parseStatsRoute();
+        if (!route) {
+            tearDownStatsPage();
+            return;
+        }
+
+        ensureStyles();
+        applyRouteChrome(peekFullCrewRoute(), { pending: false, setTitle: false });
+        ensureHeaderTabsVisible();
+        injectStatsTab();
+        setStatsTabSelected(true);
+        setStatsDocumentTitle(true);
+
+        document.body.classList.add(STATS_BODY_CLASS);
+        document.documentElement.classList.add(STATS_BODY_CLASS);
+        clearRoutePending();
+
+        var routeKey = route.kind === 'detail' ? 'detail:' + route.category : 'overview';
+        var mount = findStatsMountPoint();
+        var page = document.getElementById(STATS_PAGE_ID);
+        if (page && page.getAttribute('data-route') === routeKey) {
+            // Already on the correct shell — don't remount (avoids blink).
+            if (page.getAttribute('data-loaded') === '1' || page.getAttribute('data-loading') === '1') {
+                return;
+            }
+        }
+
+        if (page && page.parentNode) {
+            page.parentNode.removeChild(page);
+            page = null;
+        }
+        statsDetailBuckets = null;
+
+        if (route.kind === 'detail') {
+            page = createStatsDetailShell(route.category);
+            page.setAttribute('data-route', routeKey);
+            page.setAttribute('data-loading', '1');
+            mount.appendChild(page);
+            fetchStatsCategory(route.category)
+                .then(function (data) {
+                    if (!document.body.contains(page) || !isStatsRoute()) {
+                        return;
+                    }
+                    renderStatsDetailContent(page, data);
+                    page.setAttribute('data-loaded', '1');
+                    page.removeAttribute('data-loading');
+                })
+                .catch(function (err) {
+                    if (!document.body.contains(page)) {
+                        return;
+                    }
+                    console.warn('[FullCrew] failed to load stats category', route.category, err);
+                    var body = page.querySelector('.fullCrewStatsBody');
+                    if (body) {
+                        body.innerHTML = '';
+                        body.appendChild(
+                            createElement(
+                                'div',
+                                'fullCrewStatsStatus fullCrewStatsStatus--error',
+                                'Could not load this category. It may be unknown or the plugin API is unavailable.'
+                            )
+                        );
+                    }
+                    var titleEl = page.querySelector('.fullCrewStatsTitle');
+                    if (titleEl) {
+                        titleEl.textContent = route.category;
+                    }
+                    page.removeAttribute('data-loading');
+                });
+            return;
+        }
+
+        page = createStatsPageShell();
+        page.setAttribute('data-route', routeKey);
+        page.setAttribute('data-loading', '1');
+        mount.appendChild(page);
+
+        fetchStats()
+            .then(function (data) {
+                if (!document.body.contains(page) || !isStatsRoute()) {
+                    return;
+                }
+                renderStatsContent(page, data);
+                page.setAttribute('data-loaded', '1');
+                page.removeAttribute('data-loading');
+            })
+            .catch(function (err) {
+                if (!document.body.contains(page)) {
+                    return;
+                }
+                console.warn('[FullCrew] failed to load library stats', err);
+                var body = page.querySelector('.fullCrewStatsBody');
+                if (body) {
+                    body.innerHTML = '';
+                    body.appendChild(
+                        createElement(
+                            'div',
+                            'fullCrewStatsStatus fullCrewStatsStatus--error',
+                            'Could not load library stats. Is the plugin API available?'
+                        )
+                    );
+                }
+                page.removeAttribute('data-loading');
+            });
+    }
+
+    function maybeOpenFavoritesFromFlag() {
+        try {
+            if (window.sessionStorage.getItem('fullCrew.openFavorites') !== '1') {
+                return;
+            }
+            window.sessionStorage.removeItem('fullCrew.openFavorites');
+        } catch (e) {
+            return;
+        }
+
+        window.setTimeout(function () {
+            var fav = findFavouritesTab();
+            if (fav) {
+                fav.click();
+            }
+        }, 400);
+    }
+
+    function syncStatsUi() {
+        var early = peekFullCrewRoute();
+        if (early) {
+            // Keep 404 chrome hidden while config / mount catch up.
+            applyRouteChrome(early, { pending: !document.getElementById(STATS_PAGE_ID) && !document.getElementById(STUDIO_PAGE_ID), setTitle: true });
+        } else {
+            applyRouteChrome(null);
+        }
+
+        if (!statsConfigLoaded) {
+            // Optimistic mount: default EnableLibraryStats is true — don't wait on API.
+            if (early && statsEnabled) {
+                if (early.kind === 'studio') {
+                    mountStudioPage();
+                } else if (early.kind === 'stats') {
+                    mountStatsPage();
+                }
+            } else {
+                injectStatsTab();
+            }
+            refreshStatsEnabled().then(syncStatsUi);
+            return;
+        }
+
+        if (!statsEnabled) {
+            tearDownStatsPage();
+            tearDownStudioPage();
+            removeStatsTab();
+            applyRouteChrome(null);
+            return;
+        }
+
+        if (isStudioRoute()) {
+            tearDownStatsPage();
+            mountStudioPage();
+            return;
+        }
+
+        tearDownStudioPage();
+
+        if (isStatsRoute()) {
+            mountStatsPage();
+            return;
+        }
+
+        tearDownStatsPage();
+        injectStatsTab();
+        maybeOpenFavoritesFromFlag();
     }
 
     function formatPercent(value) {
@@ -2671,162 +3111,13 @@
         }
     }
 
-    function mountStatsPage() {
-        if (!statsEnabled) {
-            tearDownStatsPage();
-            removeStatsTab();
-            return;
-        }
-
-        var route = parseStatsRoute();
-        if (!route) {
-            tearDownStatsPage();
-            return;
-        }
-
-        ensureStyles();
-        ensureHeaderTabsVisible();
-        injectStatsTab();
-        setStatsTabSelected(true);
-        setStatsDocumentTitle(true);
-
-        document.body.classList.add('fullCrewStatsActive');
-
-        var routeKey = route.kind === 'detail' ? 'detail:' + route.category : 'overview';
-        var mount = findStatsMountPoint();
-        var page = document.getElementById(STATS_PAGE_ID);
-        if (page && page.getAttribute('data-route') === routeKey && page.getAttribute('data-loaded') === '1') {
-            return;
-        }
-
-        if (page && page.parentNode) {
-            page.parentNode.removeChild(page);
-            page = null;
-        }
-        statsDetailBuckets = null;
-
-        if (route.kind === 'detail') {
-            page = createStatsDetailShell(route.category);
-            mount.appendChild(page);
-            fetchStatsCategory(route.category)
-                .then(function (data) {
-                    if (!document.body.contains(page) || !isStatsRoute()) {
-                        return;
-                    }
-                    renderStatsDetailContent(page, data);
-                    page.setAttribute('data-loaded', '1');
-                })
-                .catch(function (err) {
-                    if (!document.body.contains(page)) {
-                        return;
-                    }
-                    console.warn('[FullCrew] failed to load stats category', route.category, err);
-                    var body = page.querySelector('.fullCrewStatsBody');
-                    if (body) {
-                        body.innerHTML = '';
-                        body.appendChild(
-                            createElement(
-                                'div',
-                                'fullCrewStatsStatus fullCrewStatsStatus--error',
-                                'Could not load this category. It may be unknown or the plugin API is unavailable.'
-                            )
-                        );
-                    }
-                    var titleEl = page.querySelector('.fullCrewStatsTitle');
-                    if (titleEl) {
-                        titleEl.textContent = route.category;
-                    }
-                });
-            return;
-        }
-
-        page = createStatsPageShell();
-        mount.appendChild(page);
-
-        fetchStats()
-            .then(function (data) {
-                if (!document.body.contains(page) || !isStatsRoute()) {
-                    return;
-                }
-                renderStatsContent(page, data);
-                page.setAttribute('data-loaded', '1');
-            })
-            .catch(function (err) {
-                if (!document.body.contains(page)) {
-                    return;
-                }
-                console.warn('[FullCrew] failed to load library stats', err);
-                var body = page.querySelector('.fullCrewStatsBody');
-                if (body) {
-                    body.innerHTML = '';
-                    body.appendChild(
-                        createElement(
-                            'div',
-                            'fullCrewStatsStatus fullCrewStatsStatus--error',
-                            'Could not load library stats. Is the plugin API available?'
-                        )
-                    );
-                }
-            });
-    }
-
-    function maybeOpenFavoritesFromFlag() {
-        try {
-            if (window.sessionStorage.getItem('fullCrew.openFavorites') !== '1') {
-                return;
-            }
-            window.sessionStorage.removeItem('fullCrew.openFavorites');
-        } catch (e) {
-            return;
-        }
-
-        window.setTimeout(function () {
-            var fav = findFavouritesTab();
-            if (fav) {
-                fav.click();
-            }
-        }, 400);
-    }
-
-    function syncStatsUi() {
-        if (!statsConfigLoaded) {
-            refreshStatsEnabled().then(syncStatsUi);
-            return;
-        }
-
-        if (!statsEnabled) {
-            tearDownStatsPage();
-            tearDownStudioPage();
-            removeStatsTab();
-            return;
-        }
-
-        if (isStudioRoute()) {
-            tearDownStatsPage();
-            mountStudioPage();
-            return;
-        }
-
-        tearDownStudioPage();
-
-        if (isStatsRoute()) {
-            mountStatsPage();
-            return;
-        }
-
-        tearDownStatsPage();
-        injectStatsTab();
-        maybeOpenFavoritesFromFlag();
-    }
-
     /* ================================================================== */
     /* Feature: Studio detail page                                        */
     /* ================================================================== */
 
-    var STUDIO_PAGE_ID = 'fullCrewStudioPage';
     var studioPageCtrl = new Core.CustomPage({
         id: STUDIO_PAGE_ID,
-        bodyClass: 'fullCrewStudioActive',
+        bodyClass: STUDIO_BODY_CLASS,
         ownsTitle: true
     });
 
@@ -3124,13 +3415,17 @@
         }
 
         ensureStyles();
+        applyRouteChrome(peekFullCrewRoute(), { pending: false, setTitle: false });
         ensureHeaderTabsVisible();
         injectStatsTab();
 
         var existing = document.getElementById(STUDIO_PAGE_ID);
         var routeKey = route.name + '|' + (route.id || '') + '|' + (route.branches || []).join(',');
-        if (existing && existing.getAttribute('data-route') === routeKey && existing.getAttribute('data-loaded') === '1') {
-            document.body.classList.add('fullCrewStudioActive');
+        if (existing && existing.getAttribute('data-route') === routeKey &&
+            (existing.getAttribute('data-loaded') === '1' || existing.getAttribute('data-loading') === '1')) {
+            document.documentElement.classList.add(STUDIO_BODY_CLASS);
+            document.body.classList.add(STUDIO_BODY_CLASS);
+            clearRoutePending();
             setStatsTabSelected(false);
             setCustomDocumentTitle(true, existing.getAttribute('data-studio-name') || route.name);
             return;
@@ -3142,6 +3437,7 @@
             var p = createElement('div', 'fullCrewPage fullCrewStudioPage');
             p.id = STUDIO_PAGE_ID;
             p.setAttribute('role', 'main');
+            p.setAttribute('data-loading', '1');
 
             var header = createElement('div', 'fullCrewStudioHeader');
             var back = createElement('a', 'fullCrewStudioBack', '← Stats · Studios');
@@ -3154,6 +3450,7 @@
             p.appendChild(body);
             return p;
         });
+        clearRoutePending();
         setStatsTabSelected(false);
         setCustomDocumentTitle(true, route.name);
 
@@ -3161,11 +3458,13 @@
             .then(function (data) {
                 var loadedName = prop(data, 'Name', 'name') || route.name;
                 page.setAttribute('data-loaded', '1');
+                page.removeAttribute('data-loading');
                 page.setAttribute('data-studio-name', loadedName);
                 renderStudioPageContent(page, data);
             })
             .catch(function (err) {
                 console.warn('[FullCrew] studio page failed', err);
+                page.removeAttribute('data-loading');
                 var body = page.querySelector('.fullCrewStudioBody');
                 if (body) {
                     body.innerHTML = '';
@@ -3179,6 +3478,48 @@
     /* Boot — single scan loop owns all feature mount/teardown            */
     /* ================================================================== */
 
+    function mutationTouchesFullCrewOnly(mutations) {
+        if (!mutations || !mutations.length) {
+            return false;
+        }
+        for (var i = 0; i < mutations.length; i++) {
+            var m = mutations[i];
+            var nodes = [];
+            if (m.target) {
+                nodes.push(m.target);
+            }
+            if (m.addedNodes && m.addedNodes.length) {
+                Array.prototype.push.apply(nodes, m.addedNodes);
+            }
+            if (m.removedNodes && m.removedNodes.length) {
+                Array.prototype.push.apply(nodes, m.removedNodes);
+            }
+            for (var j = 0; j < nodes.length; j++) {
+                var n = nodes[j];
+                if (!n || n.nodeType !== 1) {
+                    if (n && n.nodeType === 3) {
+                        // text change inside header title — PageTitle observer handles it
+                        continue;
+                    }
+                    return false;
+                }
+                if (n.id === STATS_PAGE_ID || n.id === STUDIO_PAGE_ID || n.id === STATS_TAB_ID ||
+                    n.id === CRITICAL_STYLE_ID || n.id === STYLE_ID) {
+                    continue;
+                }
+                if (n.closest && (n.closest('#' + STATS_PAGE_ID) || n.closest('#' + STUDIO_PAGE_ID) ||
+                    n.closest('#' + STATS_TAB_ID))) {
+                    continue;
+                }
+                if (n.classList && (n.classList.contains('fullCrewPage') || n.classList.contains('fullCrewStatsPage'))) {
+                    continue;
+                }
+                return false;
+            }
+        }
+        return true;
+    }
+
     function scanAll() {
         scan();
         syncStatsUi();
@@ -3187,28 +3528,65 @@
 
     function start() {
         ensureStyles();
+
+        // Immediate route sync — don't wait on config for hash chrome.
+        var early = peekFullCrewRoute();
+        if (early) {
+            applyRouteChrome(early, { pending: true, setTitle: true });
+            if (early.kind === 'stats') {
+                setStatsDocumentTitle(true);
+            } else if (early.kind === 'studio') {
+                setCustomDocumentTitle(true, early.title);
+            }
+        }
+
         refreshStatsEnabled().then(function () {
             scanAll();
         });
-        scan();
+        scanAll();
 
-        var observer = new MutationObserver(function () {
+        var observer = new MutationObserver(function (mutations) {
+            if (mutationTouchesFullCrewOnly(mutations)) {
+                if (Core.PageTitle.isOwned()) {
+                    Core.PageTitle.tick();
+                }
+                return;
+            }
             window.clearTimeout(start._timer);
-            start._timer = window.setTimeout(scanAll, 250);
+            start._timer = window.setTimeout(scanAll, 180);
         });
 
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
+        if (document.body) {
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        }
 
         window.addEventListener('hashchange', function () {
-            window.setTimeout(scanAll, 200);
+            var route = peekFullCrewRoute();
+            if (route) {
+                applyRouteChrome(route, { pending: true, setTitle: true });
+                scanAll();
+            } else {
+                applyRouteChrome(null);
+                window.setTimeout(scanAll, 80);
+            }
         });
 
         document.addEventListener('viewshow', function (e) {
             var detail = e && e.detail;
             var view = (detail && detail.element) || (e && e.target);
+            if (peekFullCrewRoute()) {
+                window.setTimeout(function () {
+                    if (view) {
+                        mount(view);
+                    }
+                    syncStatsUi();
+                    Core.PageTitle.tick();
+                }, 30);
+                return;
+            }
             if (view) {
                 window.setTimeout(function () {
                     mount(view);

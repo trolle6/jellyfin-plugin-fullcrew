@@ -17,7 +17,17 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 /// </summary>
 public class ScriptInjectionService : IHostedService
 {
-    internal const string ScriptTag = "<script plugin=\"FullCrew\" src=\"/FullCrew/fullcrew.js\" defer></script>";
+    /// <summary>
+    /// Inline early-boot: hide Jellyfin 404 chrome for #/fullcrew/* before first paint.
+    /// Must stay synchronous (no defer) and ahead of the deferred fullcrew.js tag.
+    /// </summary>
+    internal const string EarlyBootTag =
+        """
+        <script plugin="FullCrew-early">(function(){try{var h=(location.hash||'').split('?')[0];if(h.indexOf('#!/')===0)h='#'+h.slice(2);if(h.indexOf('#/fullcrew/')!==0)return;var stats=h==='#/fullcrew/stats'||h.indexOf('#/fullcrew/stats/')===0;var cls=stats?'fullCrewStatsActive':'fullCrewStudioActive';var root=document.documentElement;root.classList.add('fullCrewRoutePending',cls);var css='html.fullCrewRoutePending,html.fullCrewStatsActive,html.fullCrewStudioActive{background:var(--background-color,#101010)!important}html.fullCrewRoutePending body,body.fullCrewStatsActive,body.fullCrewStudioActive{background:var(--background-color,#101010)!important}html.fullCrewRoutePending .mainAnimatedPages>.page,html.fullCrewRoutePending .mainAnimatedPages>.mainAnimatedPage,body.fullCrewStatsActive .mainAnimatedPages>.page,body.fullCrewStatsActive .mainAnimatedPages>.mainAnimatedPage,body.fullCrewStudioActive .mainAnimatedPages>.page,body.fullCrewStudioActive .mainAnimatedPages>.mainAnimatedPage,html.fullCrewRoutePending .mainAnimatedPages .emptyMessage{visibility:hidden!important;pointer-events:none!important;opacity:0!important}html.fullCrewRoutePending .skinHeader .pageTitle,html.fullCrewRoutePending .skinHeader .headerTitle,html.fullCrewRoutePending .headerTop .pageTitle{visibility:hidden!important}';var s=document.createElement('style');s.id='fullCrewCritical';s.textContent=css;(document.head||root).appendChild(s);var l=document.createElement('link');l.id='fullCrewStyles';l.rel='stylesheet';l.href='/FullCrew/fullcrew.css';(document.head||root).appendChild(l);function apply(){if(document.body){document.body.classList.add(cls,'fullCrewRoutePending');}}apply();if(!document.body)document.addEventListener('DOMContentLoaded',apply);if(stats){try{document.title='Stats';}catch(e){}}}catch(e){}})();</script>
+        """;
+
+    internal const string ScriptTag =
+        EarlyBootTag + "<script plugin=\"FullCrew\" src=\"/FullCrew/fullcrew.js\" defer></script>";
 
     private readonly ILogger<ScriptInjectionService> _logger;
     private readonly IServerApplicationPaths _applicationPaths;
@@ -225,9 +235,33 @@ public class ScriptInjectionService : IHostedService
 (function () {
   if (window.__fullCrewLoader) { return; }
   window.__fullCrewLoader = true;
+  try {
+    var h = (location.hash || '').split('?')[0];
+    if (h.indexOf('#!/') === 0) h = '#' + h.slice(2);
+    if (h.indexOf('#/fullcrew/') === 0) {
+      var stats = h === '#/fullcrew/stats' || h.indexOf('#/fullcrew/stats/') === 0;
+      var cls = stats ? 'fullCrewStatsActive' : 'fullCrewStudioActive';
+      document.documentElement.classList.add('fullCrewRoutePending', cls);
+      if (document.body) document.body.classList.add(cls, 'fullCrewRoutePending');
+      if (!document.getElementById('fullCrewCritical')) {
+        var st = document.createElement('style');
+        st.id = 'fullCrewCritical';
+        st.textContent = 'html.fullCrewRoutePending .mainAnimatedPages>.page,body.fullCrewStatsActive .mainAnimatedPages>.page,body.fullCrewStudioActive .mainAnimatedPages>.page{visibility:hidden!important;opacity:0!important}';
+        (document.head || document.documentElement).appendChild(st);
+      }
+      if (stats) { try { document.title = 'Stats'; } catch (e) {} }
+    }
+  } catch (e0) {}
+  if (!document.getElementById('fullCrewStyles')) {
+    var l = document.createElement('link');
+    l.id = 'fullCrewStyles';
+    l.rel = 'stylesheet';
+    l.href = '/FullCrew/fullcrew.css';
+    (document.head || document.documentElement).appendChild(l);
+  }
   var s = document.createElement('script');
   s.src = '/FullCrew/fullcrew.js';
-  s.async = true;
+  s.defer = true;
   document.head.appendChild(s);
 })();
 """;
@@ -309,7 +343,8 @@ public class ScriptInjectionService : IHostedService
             }
 
             var contents = File.ReadAllText(indexPath);
-            if (contents.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase))
+            if (contents.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase)
+                || contents.Contains("FullCrew-early", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -388,7 +423,8 @@ public static class FileTransformationPatch
         }
 
         if (contents.Contains(ScriptInjectionService.ScriptTag, StringComparison.OrdinalIgnoreCase)
-            || contents.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase))
+            || contents.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase)
+            || contents.Contains("FullCrew-early", StringComparison.OrdinalIgnoreCase))
         {
             return contents;
         }
