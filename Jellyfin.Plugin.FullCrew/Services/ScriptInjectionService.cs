@@ -343,35 +343,12 @@ public class ScriptInjectionService : IHostedService
             }
 
             var contents = File.ReadAllText(indexPath);
-            if (contents.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase)
-                || contents.Contains("FullCrew-early", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            string updated;
-            const string enhancedMarker = "JellyfinEnhanced/script";
-            var enhancedIdx = contents.IndexOf(enhancedMarker, StringComparison.OrdinalIgnoreCase);
-            if (enhancedIdx >= 0)
-            {
-                var scriptEnd = contents.IndexOf("</script>", enhancedIdx, StringComparison.OrdinalIgnoreCase);
-                if (scriptEnd >= 0)
-                {
-                    updated = contents.Insert(scriptEnd + "</script>".Length, ScriptTag);
-                }
-                else
-                {
-                    updated = InsertBeforeBodyClose(contents);
-                }
-            }
-            else
-            {
-                updated = InsertBeforeBodyClose(contents);
-            }
-
+            var updated = EnsureClientInjection(contents);
             if (ReferenceEquals(updated, contents) || updated == contents)
             {
-                return false;
+                // Already fully injected (including early-boot), or no </body>.
+                return contents.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase)
+                       || contents.Contains("FullCrew-early", StringComparison.OrdinalIgnoreCase);
             }
 
             File.WriteAllText(indexPath, updated);
@@ -382,6 +359,65 @@ public class ScriptInjectionService : IHostedService
             _logger.LogWarning(ex, "Full Crew: failed to patch index.html.");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Ensures early-boot + deferred fullcrew.js are present. Upgrades older
+    /// single-script injections that lack FullCrew-early.
+    /// </summary>
+    internal static string EnsureClientInjection(string html)
+    {
+        if (string.IsNullOrEmpty(html))
+        {
+            return html;
+        }
+
+        var hasEarly = html.Contains("FullCrew-early", StringComparison.OrdinalIgnoreCase);
+        var hasScript = html.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase);
+
+        if (hasEarly && hasScript)
+        {
+            return html;
+        }
+
+        if (hasScript && !hasEarly)
+        {
+            // Upgrade: insert early-boot immediately before the existing Full Crew script tag.
+            var marker = "src=\"/FullCrew/fullcrew.js\"";
+            var markerIdx = html.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (markerIdx < 0)
+            {
+                marker = "src='/FullCrew/fullcrew.js'";
+                markerIdx = html.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (markerIdx >= 0)
+            {
+                var scriptStart = html.LastIndexOf("<script", markerIdx, StringComparison.OrdinalIgnoreCase);
+                if (scriptStart >= 0)
+                {
+                    return html.Insert(scriptStart, EarlyBootTag);
+                }
+            }
+
+            // Fallback: prepend combined tag before </body> and leave the old tag
+            // (duplicate fullcrew.js is guarded client-side).
+            return InsertBeforeBodyClose(html);
+        }
+
+        // Fresh inject.
+        const string enhancedMarker = "JellyfinEnhanced/script";
+        var enhancedIdx = html.IndexOf(enhancedMarker, StringComparison.OrdinalIgnoreCase);
+        if (enhancedIdx >= 0)
+        {
+            var scriptEnd = html.IndexOf("</script>", enhancedIdx, StringComparison.OrdinalIgnoreCase);
+            if (scriptEnd >= 0)
+            {
+                return html.Insert(scriptEnd + "</script>".Length, ScriptTag);
+            }
+        }
+
+        return InsertBeforeBodyClose(html);
     }
 
     private static string InsertBeforeBodyClose(string contents)
@@ -422,20 +458,7 @@ public static class FileTransformationPatch
             return contents;
         }
 
-        if (contents.Contains(ScriptInjectionService.ScriptTag, StringComparison.OrdinalIgnoreCase)
-            || contents.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase)
-            || contents.Contains("FullCrew-early", StringComparison.OrdinalIgnoreCase))
-        {
-            return contents;
-        }
-
-        var bodyIndex = contents.IndexOf("</body>", StringComparison.OrdinalIgnoreCase);
-        if (bodyIndex < 0)
-        {
-            return contents;
-        }
-
-        return contents.Insert(bodyIndex, "    " + ScriptInjectionService.ScriptTag + "\n");
+        return ScriptInjectionService.EnsureClientInjection(contents);
     }
 
     private static string ReadContents(object payload)

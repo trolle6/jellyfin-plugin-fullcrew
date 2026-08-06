@@ -56,16 +56,18 @@ public sealed class IndexHtmlInjectionMiddleware
         var body = await new StreamReader(buffer, Encoding.UTF8).ReadToEndAsync().ConfigureAwait(false);
 
         if (!string.IsNullOrEmpty(body)
-            && body.Contains("</body>", StringComparison.OrdinalIgnoreCase)
-            && !body.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase)
-            && !body.Contains("FullCrew-early", StringComparison.OrdinalIgnoreCase))
+            && body.Contains("</body>", StringComparison.OrdinalIgnoreCase))
         {
-            body = InsertScript(body);
-
-            if (!_loggedOnce)
+            var updated = ScriptInjectionService.EnsureClientInjection(body);
+            if (!ReferenceEquals(updated, body) && updated != body)
             {
-                _loggedOnce = true;
-                _logger.LogInformation("Full Crew: injected client script via request-time middleware.");
+                body = updated;
+
+                if (!_loggedOnce)
+                {
+                    _loggedOnce = true;
+                    _logger.LogInformation("Full Crew: injected client script via request-time middleware.");
+                }
             }
         }
 
@@ -92,21 +94,6 @@ public sealed class IndexHtmlInjectionMiddleware
 
     private static string InsertScript(string html)
     {
-        const string tag = ScriptInjectionService.ScriptTag;
-
-        // Prefer sitting next to Jellyfin Enhanced's injected tag when present.
-        const string enhancedMarker = "JellyfinEnhanced/script";
-        var enhancedIdx = html.IndexOf(enhancedMarker, StringComparison.OrdinalIgnoreCase);
-        if (enhancedIdx >= 0)
-        {
-            var scriptEnd = html.IndexOf("</script>", enhancedIdx, StringComparison.OrdinalIgnoreCase);
-            if (scriptEnd >= 0)
-            {
-                return html.Insert(scriptEnd + "</script>".Length, tag);
-            }
-        }
-
-        var bodyIdx = html.IndexOf("</body>", StringComparison.OrdinalIgnoreCase);
-        return bodyIdx < 0 ? html : html.Insert(bodyIdx, tag);
+        return ScriptInjectionService.EnsureClientInjection(html);
     }
 }

@@ -178,6 +178,12 @@
         applyRouteChrome(route, { pending: true, setTitle: true });
     })();
 
+    // Guard against duplicate <script src="/FullCrew/fullcrew.js"> tags after upgrades.
+    if (window.__fullCrewMain) {
+        return;
+    }
+    window.__fullCrewMain = true;
+
     var Core = (function () {
         function ensureStyles() {
             ensureCriticalStyles();
