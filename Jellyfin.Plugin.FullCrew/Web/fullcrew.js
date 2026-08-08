@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.5.0.0';
+    var PLUGIN_VERSION = '1.5.2.0';
     var CRITICAL_STYLE_ID = 'fullCrewCritical';
     var STYLE_ID = 'fullCrewStyles';
     var ROUTE_PENDING_CLASS = 'fullCrewRoutePending';
@@ -46,6 +46,153 @@
         }
         return { kind: 'other', title: 'Full Crew', bodyClass: STATS_BODY_CLASS };
     }
+
+    /**
+     * Synchronous document.title lock for Full Crew hashes.
+     * MutationObserver alone is async → one paint of "Page not found" in the tab.
+     * Shared via window so inline early-boot + deferred fullcrew.js share one hook.
+     */
+    var TitleLock = (function () {
+        var existing = window.__fullCrewTitleLock;
+        if (existing && existing.__fullCrewTitleLockV2) {
+            return existing;
+        }
+
+        var desired = (existing && typeof existing.desired === 'function')
+            ? existing.desired()
+            : (window.__fcTitleDesired != null ? window.__fcTitleDesired : null);
+        var hooked = !!(window.__fcTitleHooked || (existing && existing.isHooked && existing.isHooked()));
+        var nativeGet = window.__fcTitleNativeGet || null;
+        var nativeSet = window.__fcTitleNativeSet || null;
+        var rafId = 0;
+
+        function resolveNative() {
+            if (typeof nativeGet === 'function' && typeof nativeSet === 'function') {
+                return true;
+            }
+            var desc = Object.getOwnPropertyDescriptor(Document.prototype, 'title') ||
+                Object.getOwnPropertyDescriptor(HTMLDocument.prototype, 'title');
+            if (!desc || typeof desc.get !== 'function' || typeof desc.set !== 'function') {
+                return false;
+            }
+            nativeGet = desc.get;
+            nativeSet = desc.set;
+            window.__fcTitleNativeGet = nativeGet;
+            window.__fcTitleNativeSet = nativeSet;
+            return true;
+        }
+
+        function writeNative(value) {
+            var text = value == null ? '' : String(value);
+            if (resolveNative()) {
+                nativeSet.call(document, text);
+                return;
+            }
+            try {
+                var el = document.querySelector('head > title') || document.querySelector('title');
+                if (el) {
+                    el.textContent = text;
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        function ensureHook() {
+            if (hooked) {
+                return true;
+            }
+            if (!resolveNative()) {
+                return false;
+            }
+            try {
+                Object.defineProperty(document, 'title', {
+                    configurable: true,
+                    enumerable: true,
+                    get: function () {
+                        return nativeGet.call(document);
+                    },
+                    set: function (value) {
+                        if (desired != null && peekFullCrewRoute()) {
+                            var next = value == null ? '' : String(value);
+                            if (next !== desired) {
+                                // Swallow Jellyfin "Page not found" (and any other overwrite).
+                                writeNative(desired);
+                                return;
+                            }
+                        }
+                        writeNative(value);
+                    }
+                });
+                hooked = true;
+                window.__fcTitleHooked = true;
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function stopRaf() {
+            if (rafId) {
+                try {
+                    window.cancelAnimationFrame(rafId);
+                } catch (e) { /* ignore */ }
+                rafId = 0;
+            }
+        }
+
+        function startRaf() {
+            if (rafId || typeof window.requestAnimationFrame !== 'function') {
+                return;
+            }
+            function tick() {
+                rafId = 0;
+                if (desired == null) {
+                    return;
+                }
+                if (!peekFullCrewRoute()) {
+                    // Route left without release — drop lock so Home can own the title.
+                    desired = null;
+                    window.__fcTitleDesired = null;
+                    return;
+                }
+                try {
+                    var cur = resolveNative() ? nativeGet.call(document) : (document.title || '');
+                    if (cur !== desired) {
+                        writeNative(desired);
+                    }
+                } catch (e) { /* ignore */ }
+                rafId = window.requestAnimationFrame(tick);
+            }
+            rafId = window.requestAnimationFrame(tick);
+        }
+
+        function hold(title) {
+            desired = title || 'Full Crew';
+            window.__fcTitleDesired = desired;
+            ensureHook();
+            writeNative(desired);
+            startRaf();
+        }
+
+        function release() {
+            desired = null;
+            window.__fcTitleDesired = null;
+            stopRaf();
+        }
+
+        var api = {
+            __fullCrewTitleLockV2: true,
+            hold: hold,
+            release: release,
+            desired: function () {
+                return desired;
+            },
+            isHooked: function () {
+                return hooked;
+            }
+        };
+        window.__fullCrewTitleLock = api;
+        return api;
+    })();
 
     function criticalCssText() {
         return (
@@ -157,9 +304,7 @@
         }
 
         if (opts.setTitle && route.title) {
-            try {
-                document.title = route.title;
-            } catch (e) { /* ignore */ }
+            TitleLock.hold(route.title);
         }
     }
 
@@ -356,8 +501,9 @@
         /**
          * First-class document + skinHeader pageTitle ownership.
          * Only while on #/fullcrew/* — never rewrite Home brand/"Jellyfin" chrome.
-         * claim()/release() set intent; a MutationObserver re-applies only when
-         * Jellyfin overwrites (avoids Stats↔404 oscillation without Home stickers).
+         * claim()/release() set intent; TitleLock intercepts document.title writes
+         * synchronously (MutationObserver alone still allows one tab-title frame of
+         * "Page not found"). Header text is re-applied via MutationObserver.
          */
         var PageTitle = (function () {
             var owned = false;
@@ -420,14 +566,19 @@
                 node.removeAttribute(OWNED);
             }
 
+            function dropOwnership() {
+                owned = false;
+                label = '';
+                TitleLock.release();
+            }
+
             function apply() {
                 if (!owned || applying) {
                     return;
                 }
                 // Never keep title ownership off Full Crew routes (Home/Favourites/etc.).
                 if (!onFullCrewRoute()) {
-                    owned = false;
-                    label = '';
+                    dropOwnership();
                     restore();
                     return;
                 }
@@ -442,9 +593,7 @@
                             document.documentElement.setAttribute(PREV_DOC, 'Jellyfin');
                         }
                     }
-                    if (document.title !== label) {
-                        document.title = label;
-                    }
+                    TitleLock.hold(label);
 
                     var primary = primaryHeaderNode();
                     // Drop ownership on any stale/extra nodes so Home never shows dual stickers.
@@ -480,6 +629,7 @@
                 try {
                     var prev = document.documentElement.getAttribute(PREV_DOC);
                     if (prev != null) {
+                        // TitleLock must already be released so this write sticks.
                         document.title = prev;
                         document.documentElement.removeAttribute(PREV_DOC);
                     }
@@ -509,13 +659,14 @@
                         return;
                     }
                     if (!onFullCrewRoute()) {
-                        owned = false;
-                        label = '';
+                        dropOwnership();
                         restore();
                         return;
                     }
                     var primary = primaryHeaderNode();
-                    if (document.title !== label || !primary || primary.getAttribute(OWNED) !== '1' ||
+                    var titleWrong = (document.title || '') !== label ||
+                        /page not found/i.test(document.title || '');
+                    if (titleWrong || !primary || primary.getAttribute(OWNED) !== '1' ||
                         primary.textContent !== label) {
                         apply();
                     }
@@ -525,6 +676,17 @@
                     childList: true,
                     characterData: true
                 });
+                // Also watch <title> directly when present (some skins replace the node).
+                try {
+                    var titleEl = document.querySelector('head > title') || document.querySelector('title');
+                    if (titleEl) {
+                        titleObserver.observe(titleEl, {
+                            characterData: true,
+                            childList: true,
+                            subtree: true
+                        });
+                    }
+                } catch (e) { /* ignore */ }
             }
 
             return {
@@ -535,12 +697,12 @@
                     }
                     owned = true;
                     label = titleText || 'Full Crew';
+                    TitleLock.hold(label);
                     apply();
                     startObserver();
                 },
                 release: function () {
-                    owned = false;
-                    label = '';
+                    dropOwnership();
                     restore();
                 },
                 tick: function () {
@@ -1739,7 +1901,28 @@
     var statsCachedData = null;
     var statsCategoryCache = {};
     var statsCategoryFetchInFlight = {};
+    var statsBucketItemsCache = {};
+    var statsBucketItemsFetchInFlight = {};
     var statsDetailBuckets = null;
+    var statsDetailCategoryKey = null;
+
+    /** Categories that expose per-bucket title lists via /stats/{cat}/items. */
+    var BUCKET_ITEMS_CATEGORY_KEYS = {
+        types: 1,
+        resolutions: 1,
+        hdr: 1,
+        videoCodecs: 1,
+        audioChannels: 1,
+        audioCodecs: 1,
+        genres: 1,
+        studios: 1,
+        collections: 1,
+        decades: 1,
+        ratings: 1,
+        community: 1,
+        tags: 1,
+        languages: 1
+    };
 
     function normalizeStatsHash(hash) {
         return Core.normalizeHash(hash);
@@ -1749,6 +1932,24 @@
         var hash = normalizeStatsHash(window.location.hash || '');
         if (hash === STATS_HASH) {
             return { kind: 'overview' };
+        }
+        var itemsMatch = /^#\/fullcrew\/stats\/([^/]+)\/items\/(.+)$/.exec(hash);
+        if (itemsMatch) {
+            var catRaw = itemsMatch[1];
+            var bucketRaw = itemsMatch[2];
+            var cat;
+            var bucket;
+            try {
+                cat = decodeURIComponent(catRaw);
+            } catch (e1) {
+                cat = catRaw;
+            }
+            try {
+                bucket = decodeURIComponent(bucketRaw);
+            } catch (e2) {
+                bucket = bucketRaw;
+            }
+            return { kind: 'bucket', category: cat, bucket: bucket };
         }
         var match = /^#\/fullcrew\/stats\/([^/]+)$/.exec(hash);
         if (match) {
@@ -1767,6 +1968,29 @@
 
     function statsDetailHash(categoryKey) {
         return STATS_HASH + '/' + encodeURIComponent(categoryKey);
+    }
+
+    function statsBucketItemsHash(categoryKey, bucketName) {
+        return (
+            STATS_HASH +
+            '/' +
+            encodeURIComponent(categoryKey) +
+            '/items/' +
+            encodeURIComponent(String(bucketName || ''))
+        );
+    }
+
+    function categorySupportsBucketItems(categoryKey) {
+        if (!categoryKey) {
+            return false;
+        }
+        if (BUCKET_ITEMS_CATEGORY_KEYS[categoryKey]) {
+            return true;
+        }
+        var values = Object.keys(PEOPLE_CATEGORY_KEYS).map(function (k) {
+            return PEOPLE_CATEGORY_KEYS[k];
+        });
+        return values.indexOf(categoryKey) !== -1;
     }
 
     function peopleCategoryKey(kind) {
@@ -1878,7 +2102,7 @@
         return Core.navigateToItem(itemId);
     }
 
-    function createBucketNameEl(tagName, className, bucket) {
+    function createBucketNameEl(tagName, className, bucket, categoryKey) {
         var label = displayBucketName(bucket.name);
         var el;
 
@@ -1909,11 +2133,41 @@
                     ev.preventDefault();
                 }
             });
-        } else {
-            el = createElement(tagName, className, label);
-            if (label !== bucket.name) {
-                el.title = bucket.name;
-            }
+            return el;
+        }
+
+        if (categoryKey && String(bucket.name || '') === 'Other') {
+            el = createElement('a', className + ' fullCrewStatsItemLink', label);
+            el.href = statsDetailHash(categoryKey);
+            el.setAttribute('title', 'View full ' + categoryKey + ' list');
+            el.addEventListener('click', function (ev) {
+                if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) {
+                    return;
+                }
+                ev.preventDefault();
+                window.location.hash = statsDetailHash(categoryKey);
+            });
+            return el;
+        }
+
+        if (categoryKey && categorySupportsBucketItems(categoryKey) && bucket.name) {
+            var itemsHash = statsBucketItemsHash(categoryKey, bucket.name);
+            el = createElement('a', className + ' fullCrewStatsItemLink', label);
+            el.href = itemsHash;
+            el.setAttribute('title', bucket.name + ' — list titles in this bucket');
+            el.addEventListener('click', function (ev) {
+                if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) {
+                    return;
+                }
+                ev.preventDefault();
+                window.location.hash = itemsHash;
+            });
+            return el;
+        }
+
+        el = createElement(tagName, className, label);
+        if (label !== bucket.name) {
+            el.title = bucket.name;
         }
         return el;
     }
@@ -1931,7 +2185,7 @@
         return btn;
     }
 
-    function appendClusteredRankItem(list, bucket, depth) {
+    function appendClusteredRankItem(list, bucket, depth, categoryKey) {
         var hasKids = bucketHasChildren(bucket);
         var li = createElement('li', 'fullCrewStatsRankItem' + (hasKids ? ' fullCrewStatsRankItem--cluster' : '') + (depth ? ' fullCrewStatsRankItem--child' : ''));
         if (depth) {
@@ -1948,7 +2202,7 @@
             nameWrap.appendChild(toggle);
         }
 
-        nameWrap.appendChild(createBucketNameEl('span', 'fullCrewStatsRankName', bucket));
+        nameWrap.appendChild(createBucketNameEl('span', 'fullCrewStatsRankName', bucket, categoryKey));
         row.appendChild(nameWrap);
         row.appendChild(
             createElement(
@@ -1963,7 +2217,7 @@
         if (hasKids) {
             childList = createElement('ol', 'fullCrewStatsRankList fullCrewStatsRankList--nested is-collapsed');
             bucket.children.forEach(function (child) {
-                appendClusteredRankItem(childList, child, (depth || 0) + 1);
+                appendClusteredRankItem(childList, child, (depth || 0) + 1, categoryKey);
             });
             li.appendChild(childList);
             toggle.addEventListener('click', function (ev) {
@@ -1984,7 +2238,7 @@
         list.appendChild(li);
     }
 
-    function appendClusteredBarRow(bars, bucket, max, depth, colorIndex) {
+    function appendClusteredBarRow(bars, bucket, max, depth, colorIndex, categoryKey) {
         var hasKids = bucketHasChildren(bucket);
         var wrap = createElement('div', 'fullCrewStatsBarCluster' + (depth ? ' fullCrewStatsBarCluster--child' : ''));
         var row = createElement('div', 'fullCrewStatsBarRow');
@@ -1997,7 +2251,7 @@
             labelWrap.appendChild(toggle);
         }
 
-        labelWrap.appendChild(createBucketNameEl('div', 'fullCrewStatsBarLabel', bucket));
+        labelWrap.appendChild(createBucketNameEl('div', 'fullCrewStatsBarLabel', bucket, categoryKey));
         row.appendChild(labelWrap);
 
         var track = createElement('div', 'fullCrewStatsBarTrack');
@@ -2018,7 +2272,7 @@
         if (hasKids) {
             childHost = createElement('div', 'fullCrewStatsBarChildren is-collapsed');
             bucket.children.forEach(function (child, idx) {
-                appendClusteredBarRow(childHost, child, max, (depth || 0) + 1, colorIndex);
+                appendClusteredBarRow(childHost, child, max, (depth || 0) + 1, colorIndex, categoryKey);
             });
             wrap.appendChild(childHost);
             toggle.addEventListener('click', function (ev) {
@@ -2671,6 +2925,7 @@
             tearDownStudioPage();
             removeStatsTab();
             applyRouteChrome(null);
+            Core.PageTitle.release();
             return;
         }
 

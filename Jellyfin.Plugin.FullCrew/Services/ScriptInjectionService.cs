@@ -34,7 +34,7 @@ public class ScriptInjectionService : IHostedService
     internal static string EarlyBootTag =>
         "<script plugin=\"FullCrew-early\">(function(){try{var h=(location.hash||'').split('?')[0];if(h.indexOf('#!/')===0)h='#'+h.slice(2);if(h.indexOf('#/fullcrew/')!==0)return;var stats=h==='#/fullcrew/stats'||h.indexOf('#/fullcrew/stats/')===0;var studio=h.indexOf('#/fullcrew/studio/')===0;var cls=stats?'fullCrewStatsActive':'fullCrewStudioActive';var root=document.documentElement;root.classList.add('fullCrewRoutePending',cls);var css='html.fullCrewRoutePending,html.fullCrewStatsActive,html.fullCrewStudioActive{background:var(--background-color,#101010)!important}html.fullCrewRoutePending body,body.fullCrewStatsActive,body.fullCrewStudioActive{background:var(--background-color,#101010)!important}html.fullCrewRoutePending .mainAnimatedPages>.page,html.fullCrewRoutePending .mainAnimatedPages>.mainAnimatedPage,html.fullCrewStatsActive .mainAnimatedPages>.page,html.fullCrewStudioActive .mainAnimatedPages>.page,body.fullCrewStatsActive .mainAnimatedPages>.page,body.fullCrewStatsActive .mainAnimatedPages>.mainAnimatedPage,body.fullCrewStudioActive .mainAnimatedPages>.page,body.fullCrewStudioActive .mainAnimatedPages>.mainAnimatedPage,html.fullCrewRoutePending .mainAnimatedPages .emptyMessage{visibility:hidden!important;pointer-events:none!important;opacity:0!important}html.fullCrewRoutePending .skinHeader .pageTitle,html.fullCrewRoutePending .skinHeader .headerTitle,html.fullCrewRoutePending .headerTop .pageTitle{visibility:hidden!important}body.fullCrewStatsActive .mainAnimatedPages,body.fullCrewStudioActive .mainAnimatedPages,html.fullCrewRoutePending .mainAnimatedPages{position:relative!important;min-height:70vh!important}';var s=document.createElement('style');s.id='fullCrewCritical';s.textContent=css;(document.head||root).appendChild(s);var l=document.createElement('link');l.id='fullCrewStyles';l.rel='stylesheet';l.href='"
         + StylesHref
-        + "';(document.head||root).appendChild(l);function apply(){if(document.body){document.body.classList.add(cls,'fullCrewRoutePending');}}apply();if(!document.body)document.addEventListener('DOMContentLoaded',apply);try{if(stats){document.title='Stats';}else if(studio){var n=h.slice('#/fullcrew/studio/'.length);try{n=decodeURIComponent(n)||n;}catch(e0){}document.title=n||'Studio';}}catch(e1){}}catch(e){}})();</script>";
+        + "';(document.head||root).appendChild(l);function apply(){if(document.body){document.body.classList.add(cls,'fullCrewRoutePending');}}apply();if(!document.body)document.addEventListener('DOMContentLoaded',apply);try{var want=stats?'Stats':(studio?(function(){var n=h.slice('#/fullcrew/studio/'.length);try{n=decodeURIComponent(n)||n;}catch(e0){}return n||'Studio';})():'Full Crew');window.__fcTitleDesired=want;if(!window.__fcTitleHooked){var D=Object.getOwnPropertyDescriptor(Document.prototype,'title')||Object.getOwnPropertyDescriptor(HTMLDocument.prototype,'title');if(D&&D.get&&D.set){window.__fcTitleNativeGet=D.get;window.__fcTitleNativeSet=D.set;Object.defineProperty(document,'title',{configurable:true,enumerable:true,get:function(){return D.get.call(document);},set:function(v){if(window.__fcTitleDesired!=null&&(location.hash||'').indexOf('/fullcrew/')>=0&&String(v)!==window.__fcTitleDesired){D.set.call(document,window.__fcTitleDesired);return;}D.set.call(document,v);}});window.__fcTitleHooked=true;}}if(window.__fcTitleNativeSet){window.__fcTitleNativeSet.call(document,want);}else{document.title=want;}}catch(e1){}}catch(e){}})();</script>";
 
     internal static string ScriptTag =>
         EarlyBootTag + "<script plugin=\"FullCrew\" src=\"" + ScriptSrc + "\" defer></script>";
@@ -261,11 +261,39 @@ public class ScriptInjectionService : IHostedService
         (document.head || document.documentElement).appendChild(st);
       }
       try {
-        if (stats) { document.title = 'Stats'; }
-        else if (studio) {
+        var want = stats ? 'Stats' : (studio ? (function () {
           var n = h.slice('#/fullcrew/studio/'.length);
           try { n = decodeURIComponent(n) || n; } catch (e1) {}
-          document.title = n || 'Studio';
+          return n || 'Studio';
+        })() : 'Full Crew');
+        window.__fcTitleDesired = want;
+        if (!window.__fcTitleHooked) {
+          var D = Object.getOwnPropertyDescriptor(Document.prototype, 'title')
+            || Object.getOwnPropertyDescriptor(HTMLDocument.prototype, 'title');
+          if (D && D.get && D.set) {
+            window.__fcTitleNativeGet = D.get;
+            window.__fcTitleNativeSet = D.set;
+            Object.defineProperty(document, 'title', {
+              configurable: true,
+              enumerable: true,
+              get: function () { return D.get.call(document); },
+              set: function (v) {
+                if (window.__fcTitleDesired != null
+                    && (location.hash || '').indexOf('/fullcrew/') >= 0
+                    && String(v) !== window.__fcTitleDesired) {
+                  D.set.call(document, window.__fcTitleDesired);
+                  return;
+                }
+                D.set.call(document, v);
+              }
+            });
+            window.__fcTitleHooked = true;
+          }
+        }
+        if (window.__fcTitleNativeSet) {
+          window.__fcTitleNativeSet.call(document, want);
+        } else {
+          document.title = want;
         }
       } catch (e2) {}
     }

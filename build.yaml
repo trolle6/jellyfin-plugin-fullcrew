@@ -1,7 +1,7 @@
 ---
 name: "Full Crew"
 guid: "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f"
-version: "1.5.0.0"
+version: "1.5.1.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Full cast and crew by department, break bumpers, library stats, and studio pages"
@@ -16,7 +16,6 @@ owner: "trolle6"
 artifacts:
 - "Jellyfin.Plugin.FullCrew.dll"
 changelog: >
-  Professional structure pass (1.5.0): shared department defaults and HTTP
-  User-Agent, credits cache keys include config, versioned JS/CSS asset URLs,
-  JS Core primitives for navigate/page-load/mount, remove dead helpers. Keeps
-  Stats, studio anti-blink, person-page gating, bumpers, and Home title ownership.
+  Fix tab-title flicker (1.5.1): synchronous document.title lock on Full Crew
+  hashes so Jellyfin cannot flash "Page not found" in the browser tab. Early-boot
+  and PageTitle share one hook; clean release when leaving FC routes.
