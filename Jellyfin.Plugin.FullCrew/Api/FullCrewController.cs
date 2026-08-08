@@ -127,7 +127,28 @@ public class FullCrewController : ControllerBase
         return Ok(result);
     }
 
-    /// <summary>
+        /// <summary>
+    /// Gets every Movie/Series title that contributes to one stats bucket.
+    /// </summary>
+    [HttpGet("stats/{category}/items")]
+    [Authorize]
+    [ProducesResponseType(typeof(LibraryStatsBucketItemsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult<LibraryStatsBucketItemsResponse> GetLibraryStatsBucketItems(
+        [FromRoute] string category,
+        [FromQuery] string? bucket)
+    {
+        var user = TryGetCurrentUser();
+        var result = _libraryStatsService.GetBucketItems(user, category, bucket);
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(result);
+    }
+
+/// <summary>
     /// Studio detail page via query string (preferred by the client to avoid path double-encoding).
     /// </summary>
     [HttpGet("studio")]

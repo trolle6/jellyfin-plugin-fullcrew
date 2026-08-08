@@ -27,13 +27,15 @@ public class LibraryStatsService
     /// <summary>Per-series people cap after series+episode merge (once per person/kind).</summary>
     private const int MaxPeoplePerSeries = 200;
     private const int MaxCategoryBuckets = 2000;
+    /// <summary>Safety cap for bucket item lists.</summary>
+    private const int MaxBucketItems = 20000;
     private const int SeriesEpisodeSampleLimit = 12;
     /// <summary>Episodes sampled to fill series cast (always merged, still once per series).</summary>
     private const int SeriesPeopleEpisodeSampleLimit = 24;
     private const int MaxInsights = 14;
     /// <summary>When Other would exceed this share on overview charts, omit it (detail page still has full list).</summary>
     private const double OmitOtherPercentThreshold = 40.0;
-    private const string CacheKeyPrefix = "fullcrew:library-stats:v8:";
+    private const string CacheKeyPrefix = "fullcrew:library-stats:v9:";
     private const string AnimationGenre = "Animation";
     private const string OtherBucketName = "Other";
     private const string UnknownBucketName = "Unknown";
@@ -144,6 +146,81 @@ public class LibraryStatsService
         return ProjectCategory(aggregate, category);
     }
 
+    /// <summary>
+    /// Gets every Movie/Series title that contributes to one stats bucket.
+    /// </summary>
+    public LibraryStatsBucketItemsResponse? GetBucketItems(User? user, string category, string? bucket)
+    {
+        var config = Plugin.Instance?.Configuration;
+        if (config is { EnableLibraryStats: false })
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(category) || string.IsNullOrWhiteSpace(bucket))
+        {
+            return null;
+        }
+
+        var aggregate = GetOrBuildAggregate(user);
+        var catInfo = ProjectCategory(aggregate, category);
+        if (catInfo is null)
+        {
+            return null;
+        }
+
+        var catKey = NormalizeCategoryKey(catInfo.Category);
+        if (string.IsNullOrEmpty(catKey))
+        {
+            catKey = NormalizeCategoryKey(category);
+        }
+
+        IReadOnlyList<BucketItemRef> matches = [];
+        if (aggregate.BucketItems.TryGetValue(catKey, out var byBucket))
+        {
+            List<BucketItemRef>? list = null;
+            if (!byBucket.TryGetValue(bucket.Trim(), out list))
+            {
+                foreach (var kv in byBucket)
+                {
+                    if (kv.Key.Equals(bucket.Trim(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        list = kv.Value;
+                        break;
+                    }
+                }
+            }
+
+            if (list is { Count: > 0 })
+            {
+                matches = list;
+            }
+        }
+
+        var ordered = matches
+            .OrderByDescending(i => i.Year ?? 0)
+            .ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var totalCount = ordered.Count;
+        var truncated = totalCount > MaxBucketItems;
+        if (truncated)
+        {
+            ordered = ordered.Take(MaxBucketItems).ToList();
+        }
+
+        return new LibraryStatsBucketItemsResponse
+        {
+            Category = catInfo.Category,
+            CategoryTitle = catInfo.Title,
+            Bucket = bucket.Trim(),
+            GeneratedAt = aggregate.GeneratedAt,
+            TotalCount = totalCount,
+            Truncated = truncated,
+            Items = ordered.Select(ToBucketItemDto).ToList()
+        };
+    }
+
     private LibraryStatsAggregate GetOrBuildAggregate(User? user)
     {
         var cacheKey = CacheKeyPrefix + (user?.Id.ToString("N", CultureInfo.InvariantCulture) ?? "all");
@@ -210,10 +287,14 @@ public class LibraryStatsService
             var libraryItemIds = items.Select(i => i.Id).ToHashSet();
             var (collectionCounts, collectionItemIds, collectionMemberships) = BuildCollectionData(user, libraryItemIds);
             var actorCollectionSets = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+            var bucketItems = new Dictionary<string, Dictionary<string, List<BucketItemRef>>>(StringComparer.Ordinal);
 
             foreach (var item in items)
             {
                 var kind = item.GetBaseItemKind();
+                var itemRef = ToBucketItemRef(item);
+                RecordBucketItem(bucketItems, "types", kind == BaseItemKind.Series ? "Series" : "Movie", itemRef);
+
                 var itemGenres = item.Genres ?? [];
                 if (itemGenres.Any(g => g.Equals(AnimationGenre, StringComparison.OrdinalIgnoreCase)))
                 {
@@ -222,17 +303,23 @@ public class LibraryStatsService
 
                 foreach (var genre in itemGenres.Where(g => !string.IsNullOrWhiteSpace(g)))
                 {
-                    Increment(genreCounts, genre.Trim());
+                    var g = genre.Trim();
+                    Increment(genreCounts, g);
+                    RecordBucketItem(bucketItems, "genres", g, itemRef);
                 }
 
                 foreach (var studio in (item.Studios ?? []).Where(s => !string.IsNullOrWhiteSpace(s)))
                 {
-                    Increment(studioCounts, studio.Trim());
+                    var s = studio.Trim();
+                    Increment(studioCounts, s);
+                    RecordBucketItem(bucketItems, "studios", s, itemRef);
                 }
 
                 foreach (var tag in (item.Tags ?? []).Where(t => !string.IsNullOrWhiteSpace(t)))
                 {
-                    Increment(tagCounts, tag.Trim());
+                    var t = tag.Trim();
+                    Increment(tagCounts, t);
+                    RecordBucketItem(bucketItems, "tags", t, itemRef);
                 }
 
                 foreach (var location in (item.ProductionLocations ?? []).Where(l => !string.IsNullOrWhiteSpace(l)))
@@ -244,24 +331,31 @@ public class LibraryStatsService
                     ? UnknownBucketName
                     : item.OfficialRating.Trim();
                 Increment(ratingCounts, rating);
+                RecordBucketItem(bucketItems, "ratings", rating, itemRef);
 
                 if (item.ProductionYear is int year && year >= 1000)
                 {
                     productionYears.Add(year);
-                    var decadeStart = (year / 10) * 10;
-                    Increment(decadeCounts, decadeStart.ToString(CultureInfo.InvariantCulture) + "s");
+                    var decadeLabel = ((year / 10) * 10).ToString(CultureInfo.InvariantCulture) + "s";
+                    Increment(decadeCounts, decadeLabel);
+                    RecordBucketItem(bucketItems, "decades", decadeLabel, itemRef);
                 }
                 else
                 {
                     Increment(decadeCounts, UnknownBucketName);
+                    RecordBucketItem(bucketItems, "decades", UnknownBucketName, itemRef);
                 }
 
-                Increment(communityCounts, CommunityRatingBucket(item.CommunityRating));
+                var communityBucket = CommunityRatingBucket(item.CommunityRating);
+                Increment(communityCounts, communityBucket);
+                RecordBucketItem(bucketItems, "community", communityBucket, itemRef);
 
                 var language = item.PreferredMetadataLanguage;
                 if (!string.IsNullOrWhiteSpace(language))
                 {
-                    Increment(languageCounts, language.Trim());
+                    var lang = language.Trim();
+                    Increment(languageCounts, lang);
+                    RecordBucketItem(bucketItems, "languages", lang, itemRef);
                 }
 
                 if (item.RunTimeTicks is > 0 and long ticks)
@@ -289,12 +383,21 @@ public class LibraryStatsService
 
                 if (item.SupportsPeople || kind is BaseItemKind.Movie or BaseItemKind.Series)
                 {
-                    AggregatePeople(item, user, peopleByKind, personIdsFromCredits);
+                    AggregatePeople(item, user, peopleByKind, personIdsFromCredits, bucketItems, itemRef);
 
-                    if (collectionMemberships.TryGetValue(item.Id, out var memberOf)
-                        && memberOf.Count > 0)
+                    if (collectionMemberships.TryGetValue(item.Id, out var memberOfForActors)
+                        && memberOfForActors.Count > 0)
                     {
-                        AggregateActorCollections(item, user, memberOf, actorCollectionSets);
+                        AggregateActorCollections(item, user, memberOfForActors, actorCollectionSets);
+                    }
+                }
+
+                if (collectionMemberships.TryGetValue(item.Id, out var memberOf)
+                    && memberOf.Count > 0)
+                {
+                    foreach (var collectionName in memberOf)
+                    {
+                        RecordBucketItem(bucketItems, "collections", collectionName, itemRef);
                     }
                 }
 
@@ -305,7 +408,9 @@ public class LibraryStatsService
                         videoRangeCounts,
                         videoCodecCounts,
                         audioChannelCounts,
-                        audioCodecCounts))
+                        audioCodecCounts,
+                        bucketItems,
+                        itemRef))
                 {
                     mediaInfoSampleCount++;
                 }
@@ -369,6 +474,7 @@ public class LibraryStatsService
                 // Jellyfin has no Tag BaseItemKind / detail page — leave unlinked.
                 TagItemIds = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase),
                 CollectionItemIds = collectionItemIds,
+                BucketItems = bucketItems,
                 MedianProductionYear = MedianYear(productionYears),
                 OldestMovie = oldestMovie,
                 NewestMovie = newestMovie,
@@ -467,7 +573,9 @@ public class LibraryStatsService
         IDictionary<string, int> videoRangeCounts,
         IDictionary<string, int> videoCodecCounts,
         IDictionary<string, int> audioChannelCounts,
-        IDictionary<string, int> audioCodecCounts)
+        IDictionary<string, int> audioCodecCounts,
+        Dictionary<string, Dictionary<string, List<BucketItemRef>>>? bucketItems = null,
+        BucketItemRef? itemRef = null)
     {
         try
         {
@@ -490,18 +598,37 @@ public class LibraryStatsService
                 return false;
             }
 
-            Increment(resolutionCounts, ResolutionBucket(video.Width, video.Height));
-            Increment(videoRangeCounts, VideoRangeBucket(video.VideoRangeType));
-            Increment(videoCodecCounts, NormalizeVideoCodec(video.Codec));
+            var resolution = ResolutionBucket(video.Width, video.Height);
+            var range = VideoRangeBucket(video.VideoRangeType);
+            var videoCodec = NormalizeVideoCodec(video.Codec);
+            Increment(resolutionCounts, resolution);
+            Increment(videoRangeCounts, range);
+            Increment(videoCodecCounts, videoCodec);
+            if (itemRef is not null && bucketItems is not null)
+            {
+                RecordBucketItem(bucketItems, "resolutions", resolution, itemRef);
+                RecordBucketItem(bucketItems, "hdr", range, itemRef);
+                RecordBucketItem(bucketItems, "videocodecs", videoCodec, itemRef);
+            }
 
             var audio = PickPrimaryAudioStream(streams);
             if (audio is not null)
             {
-                Increment(audioChannelCounts, AudioChannelBucket(audio));
+                var channels = AudioChannelBucket(audio);
+                Increment(audioChannelCounts, channels);
+                if (itemRef is not null && bucketItems is not null)
+                {
+                    RecordBucketItem(bucketItems, "audiochannels", channels, itemRef);
+                }
+
                 var audioCodec = NormalizeAudioCodec(audio.Codec);
                 if (!string.IsNullOrWhiteSpace(audioCodec))
                 {
                     Increment(audioCodecCounts, audioCodec);
+                    if (itemRef is not null && bucketItems is not null)
+                    {
+                        RecordBucketItem(bucketItems, "audiocodecs", audioCodec, itemRef);
+                    }
                 }
             }
 
@@ -950,7 +1077,9 @@ public class LibraryStatsService
         BaseItem item,
         User? user,
         IDictionary<PersonKind, Dictionary<string, int>> peopleByKind,
-        IDictionary<string, Guid> personItemIds)
+        IDictionary<string, Guid> personItemIds,
+        Dictionary<string, Dictionary<string, List<BucketItemRef>>>? bucketItems = null,
+        BucketItemRef? itemRef = null)
     {
         IReadOnlyList<PersonInfo> people;
         try
@@ -968,8 +1097,6 @@ public class LibraryStatsService
             return;
         }
 
-        // Cap per title; prioritize leads so partial series cast + Take() cannot drop Carell-style
-        // episode-only actors. Series people are already de-duped once-per-person-per-kind.
         var cap = item.GetBaseItemKind() == BaseItemKind.Series ? MaxPeoplePerSeries : MaxPeoplePerMovie;
         foreach (var person in PrioritizePeople(people, cap))
         {
@@ -988,10 +1115,16 @@ public class LibraryStatsService
 
             Increment(map, name);
 
-            // PersonInfo.Id is the People/Person entity id used by Jellyfin detail pages.
             if (person.Id != Guid.Empty && !personItemIds.ContainsKey(name))
             {
                 personItemIds[name] = person.Id;
+            }
+
+            if (itemRef is not null
+                && bucketItems is not null
+                && TryPersonKindCategoryKey(type, out var peopleCat))
+            {
+                RecordBucketItem(bucketItems, peopleCat, name, itemRef);
             }
         }
     }
@@ -2598,6 +2731,11 @@ public class LibraryStatsService
 
         public Dictionary<string, Guid> CollectionItemIds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Normalized category key → bucket name → contributing titles.
+        /// </summary>
+        public Dictionary<string, Dictionary<string, List<BucketItemRef>>> BucketItems { get; set; } = new(StringComparer.Ordinal);
+
         public int? MedianProductionYear { get; set; }
 
         public TitleYearFact? OldestMovie { get; set; }
@@ -2634,5 +2772,98 @@ public class LibraryStatsService
         public string Name { get; set; } = string.Empty;
 
         public int Count { get; set; }
+    }
+
+    /// <summary>
+    /// Compact title reference stored per stats bucket for drill-down lists.
+    /// </summary>
+    private sealed class BucketItemRef
+    {
+        public Guid Id { get; init; }
+
+        public string Name { get; init; } = string.Empty;
+
+        public string Type { get; init; } = string.Empty;
+
+        public int? Year { get; init; }
+
+        public bool HasPrimaryImage { get; init; }
+    }
+
+    private static BucketItemRef ToBucketItemRef(BaseItem item)
+    {
+        var kind = item.GetBaseItemKind();
+        return new BucketItemRef
+        {
+            Id = item.Id,
+            Name = item.Name ?? string.Empty,
+            Type = kind == BaseItemKind.Series ? "Series" : "Movie",
+            Year = item.ProductionYear,
+            HasPrimaryImage = item.HasImage(ImageType.Primary)
+        };
+    }
+
+    private static LibraryStatsBucketItem ToBucketItemDto(BucketItemRef item)
+        => new()
+        {
+            Id = item.Id.ToString("N", CultureInfo.InvariantCulture),
+            Name = item.Name,
+            Type = item.Type,
+            ProductionYear = item.Year,
+            ImageTag = item.HasPrimaryImage ? "primary" : null
+        };
+
+    private static void RecordBucketItem(
+        Dictionary<string, Dictionary<string, List<BucketItemRef>>> map,
+        string categoryKey,
+        string bucket,
+        BucketItemRef item)
+    {
+        if (string.IsNullOrWhiteSpace(categoryKey) || string.IsNullOrWhiteSpace(bucket))
+        {
+            return;
+        }
+
+        var cat = NormalizeCategoryKey(categoryKey);
+        if (string.IsNullOrEmpty(cat))
+        {
+            return;
+        }
+
+        if (!map.TryGetValue(cat, out var byBucket))
+        {
+            byBucket = new Dictionary<string, List<BucketItemRef>>(StringComparer.OrdinalIgnoreCase);
+            map[cat] = byBucket;
+        }
+
+        if (!byBucket.TryGetValue(bucket, out var list))
+        {
+            list = [];
+            byBucket[bucket] = list;
+        }
+
+        list.Add(item);
+    }
+
+    private static bool TryPersonKindCategoryKey(PersonKind kind, out string categoryKey)
+    {
+        categoryKey = kind switch
+        {
+            PersonKind.Actor => "actors",
+            PersonKind.Director => "directors",
+            PersonKind.Writer => "writers",
+            PersonKind.Creator => "creators",
+            PersonKind.Producer => "producers",
+            PersonKind.GuestStar => "gueststars",
+            PersonKind.Composer => "composers",
+            PersonKind.Editor => "editors",
+            PersonKind.Artist => "artists",
+            PersonKind.Author => "authors",
+            PersonKind.AlbumArtist => "albumartists",
+            PersonKind.CoverArtist => "coverartists",
+            PersonKind.Unknown => "unknown",
+            _ => string.Empty
+        };
+        return categoryKey.Length > 0;
     }
 }

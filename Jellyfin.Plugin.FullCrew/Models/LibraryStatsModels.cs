@@ -261,3 +261,43 @@ public class LibraryStatsCategoryResponse
     /// </summary>
     public IReadOnlyList<LibraryStatsBucket> Buckets { get; set; } = [];
 }
+
+/// <summary>
+/// Library Movie/Series titles that contribute to one stats bucket (e.g. audioChannels · Stereo).
+/// </summary>
+public class LibraryStatsBucketItemsResponse
+{
+    /// <summary>Canonical category key (e.g. audioChannels).</summary>
+    public string Category { get; set; } = string.Empty;
+    /// <summary>Category display title.</summary>
+    public string CategoryTitle { get; set; } = string.Empty;
+    /// <summary>Bucket name (e.g. Stereo).</summary>
+    public string Bucket { get; set; } = string.Empty;
+    /// <summary>When generated (UTC).</summary>
+    public DateTime GeneratedAt { get; set; }
+    /// <summary>Matches before safety cap.</summary>
+    public int TotalCount { get; set; }
+    /// <summary>Whether capped.</summary>
+    public bool Truncated { get; set; }
+    /// <summary>Contributing titles.</summary>
+    public IReadOnlyList<LibraryStatsBucketItem> Items { get; set; } = [];
+}
+
+/// <summary>A single library title in a stats bucket item list.</summary>
+public class LibraryStatsBucketItem
+{
+    /// <summary>Jellyfin item id (N format).</summary>
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>Display name.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Movie or Series.</summary>
+    public string Type { get; set; } = string.Empty;
+
+    /// <summary>Production year when known.</summary>
+    public int? ProductionYear { get; set; }
+
+    /// <summary>Primary-image presence flag for the client.</summary>
+    public string? ImageTag { get; set; }
+}
