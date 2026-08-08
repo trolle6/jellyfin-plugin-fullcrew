@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.5.1.0';
+    var PLUGIN_VERSION = '1.5.2.0';
     var CRITICAL_STYLE_ID = 'fullCrewCritical';
     var STYLE_ID = 'fullCrewStyles';
     var ROUTE_PENDING_CLASS = 'fullCrewRoutePending';
@@ -219,11 +219,16 @@
             'html.' + STATS_BODY_CLASS + '.' + ROUTE_PENDING_CLASS + ' .skinHeader .pageTitle,' +
             'html.' + STUDIO_BODY_CLASS + '.' + ROUTE_PENDING_CLASS + ' .skinHeader .pageTitle' +
             '{visibility:hidden!important}' +
-            /* Keep overlay host sized while our absolute page mounts */
+            /* Full-viewport host under header (avoid ~30% Jellyfin bleed from 70vh) */
             'body.' + STATS_BODY_CLASS + ' .mainAnimatedPages,' +
             'body.' + STUDIO_BODY_CLASS + ' .mainAnimatedPages,' +
+            'html.' + STATS_BODY_CLASS + ' .mainAnimatedPages,' +
+            'html.' + STUDIO_BODY_CLASS + ' .mainAnimatedPages,' +
             'html.' + ROUTE_PENDING_CLASS + ' .mainAnimatedPages' +
-            '{position:relative!important;min-height:70vh!important}'
+            '{position:relative!important;' +
+            'min-height:calc(100vh - var(--header-height,3.5rem))!important;' +
+            'min-height:calc(100dvh - var(--header-height,3.5rem))!important;' +
+            'background:var(--background-color,#101010)!important}'
         );
     }
 

@@ -38,6 +38,7 @@
     z-index: 20;
     overflow: auto;
     box-sizing: border-box;
+    min-height: 100%;
     padding: var(--fc-space-3) var(--fc-space-4) var(--fc-space-5);
     background: var(--fc-page-bg);
     color: inherit;
@@ -398,12 +399,16 @@ html.fullCrewRoutePending .mainAnimatedPages > .mainAnimatedPage {
     opacity: 0 !important;
 }
 
-/* Ensure absolute Full Crew overlays have a sized containing block */
+/* Full-viewport containing block under the skin header (was 70vh → ~30% Jellyfin bleed) */
 body.fullCrewStatsActive .mainAnimatedPages,
 body.fullCrewStudioActive .mainAnimatedPages,
+html.fullCrewStatsActive .mainAnimatedPages,
+html.fullCrewStudioActive .mainAnimatedPages,
 html.fullCrewRoutePending .mainAnimatedPages {
     position: relative !important;
-    min-height: 70vh !important;
+    min-height: calc(100vh - var(--header-height, 3.5rem)) !important;
+    min-height: calc(100dvh - var(--header-height, 3.5rem)) !important;
+    background: var(--fc-page-bg, var(--background-color, #101010)) !important;
 }
 
 /* Keep our overlay visible above the hidden 404 shell */
