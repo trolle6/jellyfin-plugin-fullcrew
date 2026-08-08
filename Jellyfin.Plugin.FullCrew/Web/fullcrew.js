@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.5.2.0';
+    var PLUGIN_VERSION = '1.5.1.0';
     var CRITICAL_STYLE_ID = 'fullCrewCritical';
     var STYLE_ID = 'fullCrewStyles';
     var ROUTE_PENDING_CLASS = 'fullCrewRoutePending';
@@ -1901,28 +1901,7 @@
     var statsCachedData = null;
     var statsCategoryCache = {};
     var statsCategoryFetchInFlight = {};
-    var statsBucketItemsCache = {};
-    var statsBucketItemsFetchInFlight = {};
     var statsDetailBuckets = null;
-    var statsDetailCategoryKey = null;
-
-    /** Categories that expose per-bucket title lists via /stats/{cat}/items. */
-    var BUCKET_ITEMS_CATEGORY_KEYS = {
-        types: 1,
-        resolutions: 1,
-        hdr: 1,
-        videoCodecs: 1,
-        audioChannels: 1,
-        audioCodecs: 1,
-        genres: 1,
-        studios: 1,
-        collections: 1,
-        decades: 1,
-        ratings: 1,
-        community: 1,
-        tags: 1,
-        languages: 1
-    };
 
     function normalizeStatsHash(hash) {
         return Core.normalizeHash(hash);
@@ -1932,24 +1911,6 @@
         var hash = normalizeStatsHash(window.location.hash || '');
         if (hash === STATS_HASH) {
             return { kind: 'overview' };
-        }
-        var itemsMatch = /^#\/fullcrew\/stats\/([^/]+)\/items\/(.+)$/.exec(hash);
-        if (itemsMatch) {
-            var catRaw = itemsMatch[1];
-            var bucketRaw = itemsMatch[2];
-            var cat;
-            var bucket;
-            try {
-                cat = decodeURIComponent(catRaw);
-            } catch (e1) {
-                cat = catRaw;
-            }
-            try {
-                bucket = decodeURIComponent(bucketRaw);
-            } catch (e2) {
-                bucket = bucketRaw;
-            }
-            return { kind: 'bucket', category: cat, bucket: bucket };
         }
         var match = /^#\/fullcrew\/stats\/([^/]+)$/.exec(hash);
         if (match) {
@@ -1968,29 +1929,6 @@
 
     function statsDetailHash(categoryKey) {
         return STATS_HASH + '/' + encodeURIComponent(categoryKey);
-    }
-
-    function statsBucketItemsHash(categoryKey, bucketName) {
-        return (
-            STATS_HASH +
-            '/' +
-            encodeURIComponent(categoryKey) +
-            '/items/' +
-            encodeURIComponent(String(bucketName || ''))
-        );
-    }
-
-    function categorySupportsBucketItems(categoryKey) {
-        if (!categoryKey) {
-            return false;
-        }
-        if (BUCKET_ITEMS_CATEGORY_KEYS[categoryKey]) {
-            return true;
-        }
-        var values = Object.keys(PEOPLE_CATEGORY_KEYS).map(function (k) {
-            return PEOPLE_CATEGORY_KEYS[k];
-        });
-        return values.indexOf(categoryKey) !== -1;
     }
 
     function peopleCategoryKey(kind) {
@@ -2102,7 +2040,7 @@
         return Core.navigateToItem(itemId);
     }
 
-    function createBucketNameEl(tagName, className, bucket, categoryKey) {
+    function createBucketNameEl(tagName, className, bucket) {
         var label = displayBucketName(bucket.name);
         var el;
 
@@ -2133,41 +2071,11 @@
                     ev.preventDefault();
                 }
             });
-            return el;
-        }
-
-        if (categoryKey && String(bucket.name || '') === 'Other') {
-            el = createElement('a', className + ' fullCrewStatsItemLink', label);
-            el.href = statsDetailHash(categoryKey);
-            el.setAttribute('title', 'View full ' + categoryKey + ' list');
-            el.addEventListener('click', function (ev) {
-                if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) {
-                    return;
-                }
-                ev.preventDefault();
-                window.location.hash = statsDetailHash(categoryKey);
-            });
-            return el;
-        }
-
-        if (categoryKey && categorySupportsBucketItems(categoryKey) && bucket.name) {
-            var itemsHash = statsBucketItemsHash(categoryKey, bucket.name);
-            el = createElement('a', className + ' fullCrewStatsItemLink', label);
-            el.href = itemsHash;
-            el.setAttribute('title', bucket.name + ' — list titles in this bucket');
-            el.addEventListener('click', function (ev) {
-                if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) {
-                    return;
-                }
-                ev.preventDefault();
-                window.location.hash = itemsHash;
-            });
-            return el;
-        }
-
-        el = createElement(tagName, className, label);
-        if (label !== bucket.name) {
-            el.title = bucket.name;
+        } else {
+            el = createElement(tagName, className, label);
+            if (label !== bucket.name) {
+                el.title = bucket.name;
+            }
         }
         return el;
     }
@@ -2185,7 +2093,7 @@
         return btn;
     }
 
-    function appendClusteredRankItem(list, bucket, depth, categoryKey) {
+    function appendClusteredRankItem(list, bucket, depth) {
         var hasKids = bucketHasChildren(bucket);
         var li = createElement('li', 'fullCrewStatsRankItem' + (hasKids ? ' fullCrewStatsRankItem--cluster' : '') + (depth ? ' fullCrewStatsRankItem--child' : ''));
         if (depth) {
@@ -2202,7 +2110,7 @@
             nameWrap.appendChild(toggle);
         }
 
-        nameWrap.appendChild(createBucketNameEl('span', 'fullCrewStatsRankName', bucket, categoryKey));
+        nameWrap.appendChild(createBucketNameEl('span', 'fullCrewStatsRankName', bucket));
         row.appendChild(nameWrap);
         row.appendChild(
             createElement(
@@ -2217,7 +2125,7 @@
         if (hasKids) {
             childList = createElement('ol', 'fullCrewStatsRankList fullCrewStatsRankList--nested is-collapsed');
             bucket.children.forEach(function (child) {
-                appendClusteredRankItem(childList, child, (depth || 0) + 1, categoryKey);
+                appendClusteredRankItem(childList, child, (depth || 0) + 1);
             });
             li.appendChild(childList);
             toggle.addEventListener('click', function (ev) {
@@ -2238,7 +2146,7 @@
         list.appendChild(li);
     }
 
-    function appendClusteredBarRow(bars, bucket, max, depth, colorIndex, categoryKey) {
+    function appendClusteredBarRow(bars, bucket, max, depth, colorIndex) {
         var hasKids = bucketHasChildren(bucket);
         var wrap = createElement('div', 'fullCrewStatsBarCluster' + (depth ? ' fullCrewStatsBarCluster--child' : ''));
         var row = createElement('div', 'fullCrewStatsBarRow');
@@ -2251,7 +2159,7 @@
             labelWrap.appendChild(toggle);
         }
 
-        labelWrap.appendChild(createBucketNameEl('div', 'fullCrewStatsBarLabel', bucket, categoryKey));
+        labelWrap.appendChild(createBucketNameEl('div', 'fullCrewStatsBarLabel', bucket));
         row.appendChild(labelWrap);
 
         var track = createElement('div', 'fullCrewStatsBarTrack');
@@ -2272,7 +2180,7 @@
         if (hasKids) {
             childHost = createElement('div', 'fullCrewStatsBarChildren is-collapsed');
             bucket.children.forEach(function (child, idx) {
-                appendClusteredBarRow(childHost, child, max, (depth || 0) + 1, colorIndex, categoryKey);
+                appendClusteredBarRow(childHost, child, max, (depth || 0) + 1, colorIndex);
             });
             wrap.appendChild(childHost);
             toggle.addEventListener('click', function (ev) {
@@ -2783,7 +2691,12 @@
         document.documentElement.classList.add(STATS_BODY_CLASS);
         clearRoutePending();
 
-        var routeKey = route.kind === 'detail' ? 'detail:' + route.category : 'overview';
+        var routeKey =
+            route.kind === 'bucket'
+                ? 'bucket:' + route.category + ':' + route.bucket
+                : route.kind === 'detail'
+                  ? 'detail:' + route.category
+                  : 'overview';
         var mount = findStatsMountPoint();
         var page = document.getElementById(STATS_PAGE_ID);
         if (page && page.getAttribute('data-route') === routeKey) {
@@ -2798,6 +2711,39 @@
             page = null;
         }
         statsDetailBuckets = null;
+        statsDetailCategoryKey = null;
+
+        if (route.kind === 'bucket') {
+            page = createStatsBucketShell(route.category, route.bucket);
+            page.setAttribute('data-route', routeKey);
+            page.setAttribute('data-loading', '1');
+            mount.appendChild(page);
+            Core.bindPageLoad(page, fetchStatsBucketItems(route.category, route.bucket), {
+                stillValid: isStatsRoute,
+                warn: '[FullCrew] failed to load stats bucket items ' + route.category + '/' + route.bucket,
+                onSuccess: function (data) {
+                    renderStatsBucketContent(page, data, route);
+                },
+                onError: function () {
+                    var body = page.querySelector('.fullCrewStatsBody');
+                    if (body) {
+                        body.innerHTML = '';
+                        body.appendChild(
+                            createElement(
+                                'div',
+                                'fullCrewStatsStatus fullCrewStatsStatus--error',
+                                'Could not load titles for this bucket.'
+                            )
+                        );
+                    }
+                    var titleEl = page.querySelector('.fullCrewStatsTitle');
+                    if (titleEl) {
+                        titleEl.textContent = route.bucket;
+                    }
+                }
+            });
+            return;
+        }
 
         if (route.kind === 'detail') {
             page = createStatsDetailShell(route.category);
@@ -3322,7 +3268,7 @@
                     return null;
                 }).filter(Boolean);
             }
-            renderChartInto(detailHost, buckets, mode);
+            renderChartInto(detailHost, buckets, mode, false, statsDetailCategoryKey);
             return;
         }
 
@@ -3333,6 +3279,7 @@
         Array.prototype.forEach.call(hosts, function (host) {
             var section = host.closest('.fullCrewStatsChartSection');
             var buckets = section && section._buckets;
+            var categoryKey = host.getAttribute('data-category') || null;
             if (!buckets) {
                 var key = host.getAttribute('data-section');
                 var map = {
@@ -3361,11 +3308,14 @@
                             break;
                         }
                     }
+                    if (!categoryKey) {
+                        categoryKey = peopleCategoryKey(kind);
+                    }
                 } else {
                     buckets = normalizeBuckets(prop(statsCachedData, key, map[key]));
                 }
             }
-            renderChartInto(host, buckets || [], mode, true);
+            renderChartInto(host, buckets || [], mode, true, categoryKey);
         });
     }
 
