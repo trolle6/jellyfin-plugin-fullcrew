@@ -20,6 +20,9 @@ public class PluginConfiguration : BasePluginConfiguration
         EnableBumpers = true;
         EnableYouTubeBumpers = true;
         EnableLibraryStats = true;
+        EnableSceneIdentify = false;
+        OpenAiApiKey = string.Empty;
+        OpenAiVisionModel = "gpt-4o-mini";
         BumpersCollectionName = "Bumpers";
         EnabledDepartments = (string[])CrewDepartments.DefaultOrder.Clone();
     }
@@ -54,6 +57,22 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets a value indicating whether the Library Stats page and API are enabled.
     /// </summary>
     public bool EnableLibraryStats { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether pause/hotkey scene identify (OpenAI Vision) is enabled.
+    /// Opt-in: sends a video frame to OpenAI when the user asks.
+    /// </summary>
+    public bool EnableSceneIdentify { get; set; }
+
+    /// <summary>
+    /// Gets or sets the OpenAI API key used for scene identify. Required when the feature is enabled.
+    /// </summary>
+    public string OpenAiApiKey { get; set; }
+
+    /// <summary>
+    /// Gets or sets the OpenAI vision-capable chat model (default gpt-4o-mini).
+    /// </summary>
+    public string OpenAiVisionModel { get; set; }
 
     /// <summary>
     /// Gets or sets the local collection/folder name to prefer for bumpers.

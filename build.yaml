@@ -1,20 +1,22 @@
 ---
 name: "Full Crew"
 guid: "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f"
-version: "1.5.5.0"
+version: "1.6.0.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
-overview: "Full cast and crew by department, break bumpers, library stats, and studio pages"
+overview: "Full cast and crew by department, break bumpers, library stats, studio pages, and optional scene identify"
 description: >
   Fetches complete TMDB cast and crew for movies and series, groups people by
   department, and shows them in a polished accordion on Jellyfin Web item detail
   pages. Includes a nostalgia Break Bumper action, a Library Stats page
-  (genres, people, collections, resolution/HDR/codecs, and more), and studio
-  detail pages with TMDB company metadata plus library titles.
+  (genres, people, collections, resolution/HDR/codecs, and more), studio
+  detail pages with TMDB company metadata plus library titles, and optional
+  opt-in scene identify (OpenAI Vision) during web playback.
 category: "Metadata"
 owner: "trolle6"
 artifacts:
 - "Jellyfin.Plugin.FullCrew.dll"
 changelog: >
-  Collapse redundant cast/crew roles (1.5.5): unique character/job names with
-  “+N more” and tooltip; CSS clamp on cards; series aggregate credits stay readable.
+  Scene identify 1.6.0: opt-in “Who’s on screen” on Jellyfin Web playback
+  (hotkey I / OSD button). Captures one frame, sends it to OpenAI Vision only
+  when asked, and matches against this title’s TMDB cast — not continuous X-Ray.

@@ -50,6 +50,33 @@
                     </div>
 
                     <div class="verticalSection">
+                        <h3 class="sectionTitle">Scene identify (Who’s on screen)</h3>
+                        <p class="fieldDescription">
+                            Opt-in. On Jellyfin Web playback, press <strong>I</strong> (or the player button) to capture the
+                            current frame and ask OpenAI Vision which people from <em>this title’s TMDB cast</em> appear.
+                            The still is sent to OpenAI only when you ask — not continuously. This is not Amazon X-Ray.
+                        </p>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="EnableSceneIdentify" />
+                                <span>Enable scene identify (sends frames to OpenAI when you ask)</span>
+                            </label>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" type="password" id="OpenAiApiKey" label="OpenAI API Key" autocomplete="off" />
+                            <div class="fieldDescription">
+                                Required when scene identify is enabled. Stored in plugin config like other secrets.
+                                Keys from
+                                <a is="emby-linkbutton" class="button-link" target="_blank" rel="noopener noreferrer" href="https://platform.openai.com/api-keys">platform.openai.com/api-keys</a>.
+                            </div>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" type="text" id="OpenAiVisionModel" label="OpenAI vision model" />
+                            <div class="fieldDescription">Default <code>gpt-4o-mini</code>. Use a vision-capable chat model.</div>
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
                         <h3 class="sectionTitle">Break bumpers</h3>
                         <div class="checkboxContainer">
                             <label>
@@ -163,6 +190,9 @@
                         document.querySelector('#MaxPeoplePerDepartment').value =
                             config.MaxPeoplePerDepartment != null ? config.MaxPeoplePerDepartment : 100;
                         document.querySelector('#EnableLibraryStats').checked = config.EnableLibraryStats !== false;
+                        document.querySelector('#EnableSceneIdentify').checked = !!config.EnableSceneIdentify;
+                        document.querySelector('#OpenAiApiKey').value = config.OpenAiApiKey || '';
+                        document.querySelector('#OpenAiVisionModel').value = config.OpenAiVisionModel || 'gpt-4o-mini';
                         document.querySelector('#EnableBumpers').checked = config.EnableBumpers !== false;
                         document.querySelector('#EnableYouTubeBumpers').checked = config.EnableYouTubeBumpers !== false;
                         document.querySelector('#BumpersCollectionName').value = config.BumpersCollectionName || 'Bumpers';
@@ -180,6 +210,9 @@
                         config.MaxPeoplePerDepartment =
                             parseInt(document.querySelector('#MaxPeoplePerDepartment').value, 10) || 100;
                         config.EnableLibraryStats = !!document.querySelector('#EnableLibraryStats').checked;
+                        config.EnableSceneIdentify = !!document.querySelector('#EnableSceneIdentify').checked;
+                        config.OpenAiApiKey = document.querySelector('#OpenAiApiKey').value;
+                        config.OpenAiVisionModel = document.querySelector('#OpenAiVisionModel').value || 'gpt-4o-mini';
                         config.EnableBumpers = !!document.querySelector('#EnableBumpers').checked;
                         config.EnableYouTubeBumpers = !!document.querySelector('#EnableYouTubeBumpers').checked;
                         config.BumpersCollectionName = document.querySelector('#BumpersCollectionName').value || 'Bumpers';

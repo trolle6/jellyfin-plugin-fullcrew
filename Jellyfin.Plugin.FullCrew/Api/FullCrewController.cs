@@ -27,6 +27,7 @@ public class FullCrewController : ControllerBase
     private readonly BumperService _bumperService;
     private readonly LibraryStatsService _libraryStatsService;
     private readonly StudioPageService _studioPageService;
+    private readonly SceneIdentifyService _sceneIdentifyService;
     private readonly IUserManager _userManager;
     private readonly ILogger<FullCrewController> _logger;
 
@@ -38,6 +39,7 @@ public class FullCrewController : ControllerBase
         BumperService bumperService,
         LibraryStatsService libraryStatsService,
         StudioPageService studioPageService,
+        SceneIdentifyService sceneIdentifyService,
         IUserManager userManager,
         ILogger<FullCrewController> logger)
     {
@@ -45,6 +47,7 @@ public class FullCrewController : ControllerBase
         _bumperService = bumperService;
         _libraryStatsService = libraryStatsService;
         _studioPageService = studioPageService;
+        _sceneIdentifyService = sceneIdentifyService;
         _userManager = userManager;
         _logger = logger;
     }
@@ -91,6 +94,37 @@ public class FullCrewController : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _bumperService.GetTrailerAsync(itemId, cancellationToken).ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Scene identify status (enabled + model; never returns the API key).
+    /// </summary>
+    [HttpGet("scene-identify/status")]
+    [Authorize]
+    [ProducesResponseType(typeof(SceneIdentifyStatusResponse), StatusCodes.Status200OK)]
+    public ActionResult<SceneIdentifyStatusResponse> GetSceneIdentifyStatus()
+    {
+        return Ok(_sceneIdentifyService.GetStatus());
+    }
+
+    /// <summary>
+    /// Identifies billed cast members visible in a captured playback frame (OpenAI Vision, opt-in).
+    /// </summary>
+    [HttpPost("{itemId:guid}/identify-frame")]
+    [Authorize]
+    [RequestSizeLimit(600_000)]
+    [ProducesResponseType(typeof(SceneIdentifyResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<SceneIdentifyResponse>> IdentifyFrame(
+        [FromRoute] Guid itemId,
+        [FromBody] SceneIdentifyRequest request,
+        CancellationToken cancellationToken)
+    {
+        var user = TryGetCurrentUser();
+        var rateKey = user?.Id.ToString("N") ?? HttpContext.Connection.RemoteIpAddress?.ToString() ?? "anon";
+        var result = await _sceneIdentifyService
+            .IdentifyAsync(itemId, request ?? new SceneIdentifyRequest(), rateKey, cancellationToken)
+            .ConfigureAwait(false);
         return Ok(result);
     }
 

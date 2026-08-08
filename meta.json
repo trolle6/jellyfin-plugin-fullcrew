@@ -1,12 +1,12 @@
 {
   "category": "Metadata",
-  "changelog": "Collapse redundant cast/crew role lines on accordion cards (unique names + “+N more” / tooltip), with CSS clamp so series aggregate credits stay readable.",
-  "description": "Fetches complete TMDB cast and crew for movies and series, groups people by department, and shows them in a polished accordion on Jellyfin Web item detail pages. Includes a nostalgia Break Bumper action, Library Stats, and studio detail pages.",
+  "changelog": "Scene identify (Who’s on screen): opt-in OpenAI Vision on pause/hotkey I, grounded to this title’s TMDB cast. Frames are sent only when you ask.",
+  "description": "Fetches complete TMDB cast and crew for movies and series, groups people by department, and shows them in a polished accordion on Jellyfin Web item detail pages. Includes a nostalgia Break Bumper action, Library Stats, studio detail pages, and optional scene identify during playback.",
   "guid": "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f",
   "name": "Full Crew",
-  "overview": "Full cast and crew by department, break bumpers, library stats, and studio pages",
+  "overview": "Full cast and crew by department, break bumpers, library stats, studio pages, and optional scene identify",
   "owner": "trolle6",
   "targetAbi": "10.11.0.0",
   "timestamp": "2026-08-08T00:00:00Z",
-  "version": "1.5.5.0"
+  "version": "1.6.0.0"
 }

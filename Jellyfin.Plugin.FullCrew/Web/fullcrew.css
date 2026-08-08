@@ -1262,3 +1262,101 @@ a.fullCrewStatsItemLink:focus,
         justify-self: end;
     }
 }
+
+/* Scene identify (Who’s on screen) */
+.fullCrewSceneOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10050;
+    display: flex;
+    justify-content: flex-end;
+    align-items: stretch;
+}
+
+.fullCrewSceneBackdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+}
+
+.fullCrewScenePanel {
+    position: relative;
+    z-index: 1;
+    width: min(22rem, 92vw);
+    max-width: 100%;
+    background: var(--background-color, #101010);
+    color: inherit;
+    box-shadow: -8px 0 28px rgba(0, 0, 0, 0.45);
+    display: flex;
+    flex-direction: column;
+    padding: 0.85rem 0.9rem 1rem;
+    overflow: auto;
+}
+
+.fullCrewSceneHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.fullCrewSceneTitle {
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.fullCrewSceneClose {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.8;
+    padding: 0.15rem 0.35rem;
+}
+
+.fullCrewSceneClose:hover,
+.fullCrewSceneClose:focus-visible {
+    opacity: 1;
+}
+
+.fullCrewSceneBody {
+    flex: 1;
+    min-height: 4rem;
+}
+
+.fullCrewSceneStatus {
+    opacity: 0.85;
+    line-height: 1.4;
+    font-size: 0.95rem;
+}
+
+.fullCrewScenePrivacy {
+    margin-top: 0.85rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.75rem;
+    opacity: 0.65;
+    line-height: 1.35;
+}
+
+.fullCrewScenePeople {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.fullCrewSceneConfidence {
+    font-size: 0.75rem;
+    opacity: 0.65;
+    margin-top: 0.15rem;
+}
+
+.fullCrewSceneOsdBtn {
+    opacity: 0.92;
+}

@@ -9,12 +9,12 @@
     /*   Core.el / Core.prop / Core.getJson / Core.PageTitle / Core.Ui    */
     /*   Core.CustomPage — mount/teardown for hash-routed overlays        */
     /*   Core.navigateToItem / Core.bindPageLoad / Core.findMount         */
-    /* Features: Crew accordion · Bumper/Trailer · Stats · Studio         */
+    /* Features: Crew accordion · Bumper/Trailer · Stats · Studio · SceneIdentify */
     /* Route chrome (peek/apply) runs before the duplicate-script guard.  */
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.5.5.0';
+    var PLUGIN_VERSION = '1.6.0.0';
     var ROLE_PREVIEW_MAX = 3;
     var ROLE_NAME_SUFFIXES = {
         jr: 1, 'jr.': 1, sr: 1, 'sr.': 1, ii: 1, iii: 1, iv: 1, v: 1, phd: 1, md: 1, esq: 1, 'esq.': 1
@@ -398,6 +398,50 @@
                 return Promise.resolve(client.getJSON(client.getUrl(relative)));
             }
             return fetch('/' + relative, { credentials: 'same-origin' }).then(function (res) {
+                if (!res.ok) {
+                    throw new Error('HTTP ' + res.status);
+                }
+                return res.json();
+            });
+        }
+
+        function postJson(path, body) {
+            var client = apiClient();
+            var relative = String(path || '').replace(/^\//, '');
+            var payload = body == null ? {} : body;
+
+            if (client && typeof client.ajax === 'function') {
+                return Promise.resolve(
+                    client.ajax({
+                        url: client.getUrl(relative),
+                        type: 'POST',
+                        dataType: 'json',
+                        contentType: 'application/json',
+                        data: JSON.stringify(payload)
+                    })
+                );
+            }
+
+            var headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+            try {
+                if (client && typeof client.getTokenHeader === 'function') {
+                    var auth = client.getTokenHeader();
+                    if (auth) {
+                        headers.Authorization = auth;
+                        headers['X-Emby-Token'] = auth;
+                    }
+                }
+            } catch (e) {
+                /* ignore */
+            }
+
+            var url = client && typeof client.getUrl === 'function' ? client.getUrl(relative) : '/' + relative;
+            return fetch(url, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: headers,
+                body: JSON.stringify(payload)
+            }).then(function (res) {
                 if (!res.ok) {
                     throw new Error('HTTP ' + res.status);
                 }
@@ -932,6 +976,7 @@
             prop: prop,
             apiClient: apiClient,
             getJson: getJson,
+            postJson: postJson,
             normalizeHash: normalizeHash,
             parseQuery: parseQuery,
             detailsHashForItem: detailsHashForItem,
@@ -4230,9 +4275,426 @@
         return true;
     }
 
+    /* ================================================================== */
+    /* Feature: Scene identify (Who’s on screen)                          */
+    /* ================================================================== */
+
+    var SCENE_OVERLAY_ID = 'fullCrewSceneOverlay';
+    var SCENE_BTN_ID = 'fullCrewSceneIdentifyBtn';
+    var sceneIdentifyEnabled = null;
+    var sceneIdentifyBusy = false;
+    var sceneOverlayReturnFocus = null;
+
+    function refreshSceneIdentifyEnabled() {
+        return Core.getJson('FullCrew/scene-identify/status')
+            .then(function (status) {
+                sceneIdentifyEnabled = !!(status && (status.Enabled || status.enabled));
+                return sceneIdentifyEnabled;
+            })
+            .catch(function () {
+                sceneIdentifyEnabled = false;
+                return false;
+            });
+    }
+
+    function getPlaybackManager() {
+        try {
+            if (window.PlaybackManager) {
+                return window.PlaybackManager;
+            }
+        } catch (e) { /* ignore */ }
+        try {
+            if (typeof window.require === 'function') {
+                var pm = window.require('playbackManager');
+                return pm && (pm.default || pm);
+            }
+        } catch (e2) { /* ignore */ }
+        return null;
+    }
+
+    function getCurrentlyPlayingItemId() {
+        var pm = getPlaybackManager();
+        if (!pm) {
+            return null;
+        }
+        try {
+            var item = typeof pm.getCurrentlyPlayingItem === 'function' ? pm.getCurrentlyPlayingItem() : null;
+            if (item) {
+                return item.Id || item.id || null;
+            }
+        } catch (e) { /* ignore */ }
+        try {
+            var state = typeof pm.getPlayerState === 'function' ? pm.getPlayerState() : null;
+            var now = state && (state.NowPlayingItem || state.nowPlayingItem);
+            if (now) {
+                return now.Id || now.id || null;
+            }
+        } catch (e2) { /* ignore */ }
+        return null;
+    }
+
+    function getPlaybackVideoElement() {
+        var candidates = document.querySelectorAll('video');
+        var i;
+        var best = null;
+        var bestArea = 0;
+        for (i = 0; i < candidates.length; i++) {
+            var v = candidates[i];
+            if (!v || v.readyState < 2) {
+                continue;
+            }
+            var rect = v.getBoundingClientRect();
+            var area = Math.max(0, rect.width) * Math.max(0, rect.height);
+            if (area > bestArea) {
+                bestArea = area;
+                best = v;
+            }
+        }
+        return best;
+    }
+
+    function capturePlaybackFrameDataUrl() {
+        var video = getPlaybackVideoElement();
+        if (!video) {
+            return null;
+        }
+
+        var srcW = video.videoWidth || 0;
+        var srcH = video.videoHeight || 0;
+        if (srcW < 16 || srcH < 16) {
+            return null;
+        }
+
+        var maxEdge = 768;
+        var scale = Math.min(1, maxEdge / Math.max(srcW, srcH));
+        var w = Math.max(16, Math.round(srcW * scale));
+        var h = Math.max(16, Math.round(srcH * scale));
+
+        var canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        if (!ctx) {
+            return null;
+        }
+        try {
+            ctx.drawImage(video, 0, 0, w, h);
+            return canvas.toDataURL('image/jpeg', 0.72);
+        } catch (e) {
+            console.warn('[FullCrew] frame capture failed (likely CORS/protected media)', e);
+            return null;
+        }
+    }
+
+    function closeSceneOverlay() {
+        var overlay = document.getElementById(SCENE_OVERLAY_ID);
+        if (overlay && overlay.parentNode) {
+            overlay.parentNode.removeChild(overlay);
+        }
+        document.removeEventListener('keydown', onSceneOverlayKeydown, true);
+        var restore = sceneOverlayReturnFocus;
+        sceneOverlayReturnFocus = null;
+        if (restore && typeof restore.focus === 'function' && document.contains(restore)) {
+            try {
+                restore.focus();
+            } catch (e) { /* ignore */ }
+        }
+    }
+
+    function onSceneOverlayKeydown(e) {
+        if (!e) {
+            return;
+        }
+        if (e.key === 'Escape' || e.keyCode === 27) {
+            closeSceneOverlay();
+        }
+    }
+
+    function openSceneOverlay(title, bodyNode) {
+        var returnFocus = document.activeElement;
+        sceneOverlayReturnFocus = null;
+        closeSceneOverlay();
+        sceneOverlayReturnFocus = returnFocus;
+
+        var overlay = document.createElement('div');
+        overlay.id = SCENE_OVERLAY_ID;
+        overlay.className = 'fullCrewSceneOverlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-label', title || 'Who’s on screen');
+
+        var backdrop = document.createElement('div');
+        backdrop.className = 'fullCrewSceneBackdrop';
+        backdrop.addEventListener('click', closeSceneOverlay);
+
+        var panel = document.createElement('div');
+        panel.className = 'fullCrewScenePanel';
+
+        var header = document.createElement('div');
+        header.className = 'fullCrewSceneHeader';
+        header.appendChild(createElement('div', 'fullCrewSceneTitle', title || 'Who’s on screen'));
+
+        var closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'fullCrewSceneClose';
+        closeBtn.setAttribute('aria-label', 'Close');
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', closeSceneOverlay);
+        header.appendChild(closeBtn);
+
+        var body = document.createElement('div');
+        body.className = 'fullCrewSceneBody';
+        if (bodyNode) {
+            body.appendChild(bodyNode);
+        }
+
+        var privacy = createElement(
+            'div',
+            'fullCrewScenePrivacy',
+            'This still was sent to OpenAI and matched only against this title’s TMDB cast.'
+        );
+
+        panel.appendChild(header);
+        panel.appendChild(body);
+        panel.appendChild(privacy);
+        overlay.appendChild(backdrop);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+        document.addEventListener('keydown', onSceneOverlayKeydown, true);
+        closeBtn.focus();
+    }
+
+    function renderSceneMatches(data) {
+        var wrap = document.createElement('div');
+        wrap.className = 'fullCrewSceneResults';
+
+        var error = data && (data.Error || data.error);
+        var note = data && (data.Note || data.note);
+        var matches = (data && (data.Matches || data.matches)) || [];
+
+        if (error) {
+            wrap.appendChild(createElement('div', 'fullCrewSceneStatus', error));
+            return wrap;
+        }
+
+        if (note) {
+            wrap.appendChild(createElement('div', 'fullCrewSceneStatus', note));
+        }
+
+        if (!matches.length) {
+            if (!note) {
+                wrap.appendChild(createElement('div', 'fullCrewSceneStatus', 'No cast matches for this frame.'));
+            }
+            return wrap;
+        }
+
+        var list = document.createElement('ul');
+        list.className = 'fullCrewPeople fullCrewScenePeople';
+        matches.forEach(function (person) {
+            var name = prop(person, 'Name', 'name') || 'Unknown';
+            var role = prop(person, 'Role', 'role') || '';
+            var profile = prop(person, 'ProfileUrl', 'profileUrl');
+            var tmdbId = prop(person, 'TmdbPersonId', 'tmdbPersonId');
+            var confidence = prop(person, 'Confidence', 'confidence');
+
+            var card;
+            if (tmdbId) {
+                card = document.createElement('a');
+                card.className = 'fullCrewPerson';
+                card.href = 'https://www.themoviedb.org/person/' + encodeURIComponent(String(tmdbId));
+                card.target = '_blank';
+                card.rel = 'noopener noreferrer';
+            } else {
+                card = document.createElement('div');
+                card.className = 'fullCrewPerson';
+            }
+
+            if (profile) {
+                var img = document.createElement('img');
+                img.className = 'fullCrewAvatar';
+                img.alt = '';
+                img.loading = 'lazy';
+                img.src = profile;
+                img.addEventListener('error', function () {
+                    img.replaceWith(createElement('div', 'fullCrewAvatar fullCrewAvatarFallback', initials(name)));
+                });
+                card.appendChild(img);
+            } else {
+                card.appendChild(createElement('div', 'fullCrewAvatar fullCrewAvatarFallback', initials(name)));
+            }
+
+            var text = document.createElement('div');
+            text.className = 'fullCrewPersonText';
+            text.appendChild(createElement('div', 'fullCrewPersonName', name));
+            if (role) {
+                text.appendChild(createElement('div', 'fullCrewPersonRole', role));
+            }
+            if (confidence != null && !isNaN(Number(confidence))) {
+                text.appendChild(
+                    createElement(
+                        'div',
+                        'fullCrewSceneConfidence',
+                        Math.round(Number(confidence) * 100) + '% confidence'
+                    )
+                );
+            }
+            card.appendChild(text);
+
+            var li = document.createElement('li');
+            li.appendChild(card);
+            list.appendChild(li);
+        });
+        wrap.appendChild(list);
+        return wrap;
+    }
+
+    function runSceneIdentify() {
+        if (sceneIdentifyBusy) {
+            return;
+        }
+        if (sceneIdentifyEnabled === false) {
+            return;
+        }
+
+        var itemId = getCurrentlyPlayingItemId();
+        if (!itemId) {
+            openSceneOverlay('Who’s on screen', createElement('div', 'fullCrewSceneStatus', 'No playing item detected.'));
+            return;
+        }
+
+        var dataUrl = capturePlaybackFrameDataUrl();
+        if (!dataUrl) {
+            openSceneOverlay(
+                'Who’s on screen',
+                createElement(
+                    'div',
+                    'fullCrewSceneStatus',
+                    'Could not capture this frame (no video, or protected media blocks canvas capture).'
+                )
+            );
+            return;
+        }
+
+        sceneIdentifyBusy = true;
+        openSceneOverlay(
+            'Who’s on screen',
+            createElement('div', 'fullCrewSceneStatus', 'Identifying… this still will be sent to OpenAI.')
+        );
+
+        var pm = getPlaybackManager();
+        var positionTicks = null;
+        try {
+            if (pm && typeof pm.getCurrentTimeTicks === 'function') {
+                positionTicks = pm.getCurrentTimeTicks();
+            }
+        } catch (e) { /* ignore */ }
+
+        Core.postJson('FullCrew/' + encodeURIComponent(itemId) + '/identify-frame', {
+            ImageBase64: dataUrl,
+            PositionTicks: positionTicks
+        })
+            .then(function (data) {
+                openSceneOverlay('Who’s on screen', renderSceneMatches(data));
+            })
+            .catch(function (err) {
+                console.warn('[FullCrew] scene identify failed', err);
+                openSceneOverlay(
+                    'Who’s on screen',
+                    createElement('div', 'fullCrewSceneStatus', 'Identify request failed.')
+                );
+            })
+            .then(function () {
+                sceneIdentifyBusy = false;
+                syncSceneIdentifyButton();
+            });
+    }
+
+    function ensureSceneIdentifyButton() {
+        if (sceneIdentifyEnabled !== true) {
+            var existing = document.getElementById(SCENE_BTN_ID);
+            if (existing && existing.parentNode) {
+                existing.parentNode.removeChild(existing);
+            }
+            return;
+        }
+
+        var video = getPlaybackVideoElement();
+        if (!video) {
+            return;
+        }
+
+        var osd =
+            document.querySelector('.videoOsdBottom-mainControls')
+            || document.querySelector('.videoOsdBottom .buttons')
+            || document.querySelector('.videoOsdBottom')
+            || document.querySelector('.osdControls');
+
+        if (!osd) {
+            return;
+        }
+
+        if (document.getElementById(SCENE_BTN_ID)) {
+            return;
+        }
+
+        var btn = document.createElement('button');
+        btn.id = SCENE_BTN_ID;
+        btn.type = 'button';
+        btn.className = 'paper-icon-button-light fullCrewSceneOsdBtn';
+        btn.title = 'Who’s on screen (I) — sends this frame to OpenAI';
+        btn.setAttribute('aria-label', 'Who’s on screen');
+        btn.innerHTML = '<span class="material-icons" aria-hidden="true">face</span>';
+        btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            runSceneIdentify();
+        });
+        osd.appendChild(btn);
+    }
+
+    function syncSceneIdentifyButton() {
+        if (sceneIdentifyEnabled == null) {
+            refreshSceneIdentifyEnabled().then(function () {
+                ensureSceneIdentifyButton();
+            });
+            return;
+        }
+        ensureSceneIdentifyButton();
+    }
+
+    function onSceneIdentifyHotkey(e) {
+        if (!e || sceneIdentifyEnabled !== true) {
+            return;
+        }
+        if (e.key !== 'i' && e.key !== 'I' && e.keyCode !== 73) {
+            return;
+        }
+        if (e.ctrlKey || e.metaKey || e.altKey) {
+            return;
+        }
+        var tag = (e.target && e.target.tagName) || '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) {
+            return;
+        }
+        if (!getPlaybackVideoElement()) {
+            return;
+        }
+        e.preventDefault();
+        runSceneIdentify();
+    }
+
+    function initSceneIdentify() {
+        refreshSceneIdentifyEnabled().then(function () {
+            syncSceneIdentifyButton();
+        });
+        document.addEventListener('keydown', onSceneIdentifyHotkey, true);
+        window.setInterval(syncSceneIdentifyButton, 2500);
+    }
+
     function scanAll() {
         scan();
         syncStatsUi();
+        syncSceneIdentifyButton();
         if (peekFullCrewRoute()) {
             Core.PageTitle.tick();
         } else if (Core.PageTitle.isOwned()) {
@@ -4253,6 +4715,7 @@
         refreshStatsEnabled().then(function () {
             scanAll();
         });
+        initSceneIdentify();
         scanAll();
 
         var observer = new MutationObserver(function (mutations) {
