@@ -1,6 +1,6 @@
 # Full Crew
 
-**Complete TMDB cast & crew on Jellyfin Web — plus Library Stats, studio profiles, break bumpers, and optional scene identify.**
+**Complete TMDB cast & crew on Jellyfin Web — Library Stats, studio profiles, break bumpers, and a local scene index you grow while watching.**
 
 [![Version](https://img.shields.io/badge/version-1.7.0.0-00a4dc)](meta.json)
 [![Jellyfin](https://img.shields.io/badge/Jellyfin-10.11%2B-00a4dc?logo=jellyfin&logoColor=white)](https://jellyfin.org)
@@ -8,6 +8,8 @@
 [![Repo](https://img.shields.io/badge/github-trolle6%2Fjellyfin--plugin--fullcrew-181717?logo=github)](https://github.com/trolle6/jellyfin-plugin-fullcrew)
 
 Jellyfin’s built-in TMDb importer keeps a thin slice of people. Full Crew loads live TMDB credits for the item you already identified, groups them by department, and renders a polished accordion on **Movie / Series / Season / Episode** detail pages — not on Person, Genre, Studio, or BoxSet pages.
+
+During playback, **Y** opens scene info: title cast anytime, plus indexed “this moment” hits you build over time. Optional OpenAI Vision scans are opt-in and saved locally so revisits do not call the API again.
 
 ---
 
@@ -20,6 +22,7 @@ Screenshots are not in the repo yet. Suggested paths once you capture them:
 | `docs/screenshots/cast-accordion.png` | Department accordion on a movie or series |
 | `docs/screenshots/library-stats.png` | Library Stats overview (`#/fullcrew/stats`) |
 | `docs/screenshots/studio-page.png` | Studio profile (`#/fullcrew/studio/...`) |
+| `docs/screenshots/scene-info.png` | Playback scene info panel (Y) |
 | `docs/screenshots/bumper-button.png` | Bumper / Trailer detail buttons |
 
 ---
@@ -28,13 +31,13 @@ Screenshots are not in the repo yet. Suggested paths once you capture them:
 
 - **Full cast & crew accordion** — Cast, Directing, Writing, Production, Camera, Editing, Sound, Art, Costume & Make-Up, Visual Effects, Lighting, Crew, and Other, with roles collapsed per person (unique names, “+N more”, tooltip)
 - **Media-only injection** — mounts on Movie, Series, Season, and Episode; deliberately skipped on Person and other entity detail shells
-- **Library Stats** — Home header tab next to Favourites → `#/fullcrew/stats` with charts, auto insights, and per-category drill-downs (`#/fullcrew/stats/{category}`)
+- **Library Stats** — Home header tab next to Favourites → `#/fullcrew/stats` with charts, auto insights, per-category drill-downs, and bucket item lists (e.g. every title that is Stereo / HEVC)
 - **Studio pages** — `#/fullcrew/studio/...` profile layout: TMDB company metadata, library titles, studio-scoped stats, name-root clusters from Stats
 - **Break bumpers** — detail-page Bumper button; prefers a local “Bumpers” collection/folder, then curated/search YouTube when enabled
-- **Trailer companion** — adds a Trailer button when Jellyfin’s native trailer control is missing; uses local/remote trailer metadata first, then YouTube lookup
-- **Scene info / index** — during Jellyfin Web playback, press **Y** (or the OSD face button) for title cast plus any indexed “this moment” hits. Opt-in Vision scans persist into a local scene index (10s buckets) so revisits skip OpenAI
-- **Self-hosted injection** — registers with File Transformation and JavaScript Injector when present, patches `index.html` when writable, and ships an **early-boot** snippet so `#/fullcrew/*` routes don’t flash Jellyfin’s “page not found” chrome
-- **Configurable** — optional personal TMDB key, OpenAI key for scene identify, cache TTL, per-department toggles, bumper/YouTube/stats switches
+- **Trailer companion** — adds a Trailer button when Jellyfin’s native trailer control is missing
+- **Scene info + local scene index** — press **Y** (or the OSD face button) for title cast and nearby indexed moments; opt-in Vision scans persist in 10s buckets under the plugin data folder
+- **Self-hosted injection** — File Transformation / JavaScript Injector / `index.html` patch, plus **early-boot** so `#/fullcrew/*` routes do not flash “page not found”
+- **Configurable** — optional TMDB key, OpenAI key for scene identify, cache TTL, department toggles, bumper/YouTube/stats switches
 
 Credits are fetched on demand and **not** written into Jellyfin’s people library.
 
@@ -42,11 +45,11 @@ Credits are fetched on demand and **not** written into Jellyfin’s people libra
 
 ## Requirements
 
-- **Jellyfin 10.11+** (plugin targets `net9.0` / ABI `10.11.0.0`)
+- **Jellyfin 10.11+** (`net9.0` / ABI `10.11.0.0`)
 - Items identified with **TheMovieDb** provider IDs
 - **Jellyfin Web** (browser). Native TV / mobile apps do not load the injected UI.
 
-No personal TMDB API key is required. By default the plugin uses the same shared key as Jellyfin’s built-in TheMovieDb provider. You can set your own key in plugin settings for separate rate limits.
+No personal TMDB API key is required by default (shared key, same idea as Jellyfin’s TheMovieDb provider). Scene identify needs your own OpenAI key when enabled.
 
 ---
 
@@ -63,9 +66,9 @@ https://raw.githubusercontent.com/trolle6/jellyfin-plugin-fullcrew/master/manife
 2. Catalog → **Full Crew** → Install → restart Jellyfin.
 3. Hard-refresh the web client (`Ctrl+Shift+R` / `Cmd+Shift+R`).
 
-The plugin tries to inject itself automatically (File Transformation → JavaScript Injector → `index.html` patch). Prefer **File Transformation** on Docker hosts where the web root is read-only.
+Prefer **File Transformation** on Docker hosts where the web root is read-only.
 
-If the UI still never appears, add a one-shot injector script:
+If the UI never appears, inject once:
 
 ```js
 (function () {
@@ -75,19 +78,17 @@ If the UI still never appears, add a one-shot injector script:
 })();
 ```
 
-Or insert before `</body>` in `index.html`:
+Or before `</body>` in `index.html`:
 
 ```html
 <script plugin="FullCrew" src="/FullCrew/fullcrew.js"></script>
 ```
 
-(Current releases also inject a synchronous **FullCrew-early** boot script ahead of the deferred main bundle for Stats/studio routes.)
-
 ### Manual
 
 1. Build (see [Building from source](#building-from-source)).
-2. Copy `Jellyfin.Plugin.FullCrew.dll` (and, if present, the extracted `Web/` assets next to it) into your Jellyfin plugins folder, e.g. `plugins/Jellyfin.Plugin.FullCrew/`.
-3. Restart Jellyfin and hard-refresh the web client.
+2. Copy `Jellyfin.Plugin.FullCrew.dll` and `Web/` assets into your Jellyfin plugins folder.
+3. **Stop → Start** Jellyfin, then hard-refresh the web client.
 
 ---
 
@@ -98,7 +99,7 @@ Dashboard → Plugins → **Full Crew**
 | Setting | Default | What it does |
 | --- | --- | --- |
 | TMDB API Key | *(empty)* | Optional; blank uses Jellyfin’s shared TMDB key |
-| Enable scene identify | Off | Opt-in; sends a still to OpenAI when you press **Y** / OSD button |
+| Enable scene identify | Off | Opt-in Vision scans when you choose Scan / first visit a moment |
 | OpenAI API Key | *(empty)* | Required when scene identify is enabled |
 | OpenAI vision model | `gpt-4o-mini` | Vision-capable chat model |
 | Cache hours | `12` | In-memory credits cache (1–168) |
@@ -115,52 +116,39 @@ Dashboard → Plugins → **Full Crew**
 
 ### Cast & crew
 
-Open a movie, series, season, or episode in Jellyfin Web. Below the usual detail content you’ll get a **Full Cast & Crew** accordion. Expand a department to browse people (avatars when TMDB provides them; TMDB person links when IDs are present).
+Open a movie, series, season, or episode in Jellyfin Web. Below the usual detail content you’ll get a **Full Cast & Crew** accordion.
 
 | Item | TMDB source |
 | --- | --- |
 | Movie | `/movie/{id}/credits` |
-| Series / Episode | `/tv/{id}/aggregate_credits` (episodes resolve via the parent series TMDB id when needed) |
-| Season | `/tv/{id}/season/{n}/credits`, falling back to series aggregate credits |
+| Series / Episode | `/tv/{id}/aggregate_credits` |
+| Season | `/tv/{id}/season/{n}/credits`, falling back to series aggregate |
 
 ### Library Stats
 
-With Library Stats enabled, a **Stats** tab appears in the Home header next to Favourites.
-
-- Overview: `#/fullcrew/stats` — counts, insights, genres, studios, people-by-role, ratings, decades, tags, languages, collections, resolution / HDR / codecs / audio
-- Detail: `#/fullcrew/stats/{category}` — full ranked list for one category (e.g. `actors`, `genres`, `hdr`)
-- Rows that map to library entities navigate into Jellyfin (or Full Crew studio pages for studios)
+- Overview: `#/fullcrew/stats`
+- Detail: `#/fullcrew/stats/{category}`
+- Bucket titles: `#/fullcrew/stats/{category}/items/{bucket}` (every contributing Movie/Series)
 
 ### Studio pages
 
-From Stats (or a direct hash), open `#/fullcrew/studio/{name}` for a person-style profile: logo/overview from TMDB when available, titles in your library, studio-scoped breakdowns, and optional “missing popular” titles not in the library. Name-root clusters from Stats can expand into exact studio credit branches.
+`#/fullcrew/studio/{name}` — person-style profile, library grid, optional missing popular titles.
 
-### Scene identify (Who’s on screen)
+### Scene info (playback)
 
-Opt-in in plugin settings (API key required). During **Jellyfin Web** playback:
+During **Jellyfin Web** playback:
 
-1. Pause or leave the video visible
-2. Press **Y**, or the face icon on the player OSD
-3. Full Crew captures a downscaled JPEG of the current frame, sends it to OpenAI **only for that ask**, and shows matches from this title’s TMDB cast in a side sheet
+1. Press **Y**, or the face icon on the player OSD
+2. Side sheet shows **Title cast** (TMDB, no OpenAI) and **This moment** if indexed
+3. With scene identify enabled, unscanned moments can auto-scan once; results are stored in the local **scene index**
+4. Revisit the same timestamp (±10s) → index hit, **no new OpenAI call**
+5. Use **Rescan this frame** to force a fresh Vision pass
 
-Not continuous, not music/trivia X-Ray. Accuracy is best on clear close-ups of billed actors; crowds, anime, and lookalikes will miss or stay empty.
+Not Amazon X-Ray. Best on clear close-ups of billed actors.
 
 ### Bumpers & trailers
 
-On media detail pages:
-
-- **Bumper** — short nostalgia clip keyed to the show/movie (local library first, then YouTube if allowed)
-- **Trailer** — only when Jellyfin’s native trailer button isn’t visible; plays native/remote trailers when present, otherwise YouTube lookup/search
-
-### Scene identify (Who’s on screen)
-
-Opt-in in plugin settings (API key required). During **Jellyfin Web** playback:
-
-1. Pause or leave the video visible
-2. Press **Y**, or the face icon on the player OSD
-3. Full Crew captures a downscaled JPEG of the current frame, sends it to OpenAI **only for that ask**, and shows matches from this title’s TMDB cast in a side sheet
-
-Not continuous, not music/trivia X-Ray. Accuracy is best on clear close-ups of billed actors; crowds, anime, and lookalikes will miss or stay empty.
+On media detail pages: **Bumper** (local first, then YouTube if allowed) and **Trailer** when Jellyfin’s native control is missing.
 
 ---
 
@@ -168,6 +156,7 @@ Not continuous, not music/trivia X-Ray. Accuracy is best on clear close-ups of b
 
 ```bash
 dotnet build Jellyfin.Plugin.FullCrew/Jellyfin.Plugin.FullCrew.csproj -c Release
+dotnet test -c Release
 ```
 
 Output DLL:
@@ -176,11 +165,9 @@ Output DLL:
 Jellyfin.Plugin.FullCrew/bin/Release/net9.0/Jellyfin.Plugin.FullCrew.dll
 ```
 
-Client assets (`fullcrew.js` / `fullcrew.css`) are embedded and extracted beside the DLL on startup. Asset URLs are version-queried (`?v=…`) for cache busting after upgrades.
+Client assets (`fullcrew.js` / `fullcrew.css`) are embedded; URLs are version-queried (`?v=…`) for cache busting.
 
 ### Release packaging
-
-Push a version tag to run the GitHub Actions release workflow:
 
 ```bash
 git tag v1.7.0.0
@@ -191,49 +178,41 @@ git push origin v1.7.0.0
 
 ## Privacy & network
 
-Full Crew is self-hosted, but some features call out of your server:
-
 | Destination | When |
 | --- | --- |
-| **api.themoviedb.org** / **image.tmdb.org** | Credits, studio company metadata, profile/logo images |
-| **YouTube** | Break bumpers and trailer fallback when YouTube lookups are enabled |
-| **api.openai.com** | Scene identify only — when you enable it and press **Y** / OSD (one frame per ask) |
+| **api.themoviedb.org** / **image.tmdb.org** | Credits, studio metadata, profile/logo images |
+| **YouTube** | Bumpers/trailers when YouTube lookups are enabled |
+| **api.openai.com** | Scene identify only — when enabled and you scan a frame |
 
-Disable **Allow YouTube bumpers** to stop outbound YouTube requests for bumpers and trailers. Leave **Enable scene identify** off (default) to never send frames to OpenAI. Library Stats aggregates your local library only (no TMDB round-trip for the overview charts).
+Scene index JSON is stored on your server under the plugin data folder (`scene-index/`). Leave **Enable scene identify** off to never send frames to OpenAI. **Y** still shows title cast and any already-indexed moments.
 
 ---
 
 ## API (for integrators)
-
-Authenticated:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/FullCrew/{itemId}` | Categorized cast/crew |
 | `GET` | `/FullCrew/{itemId}/bumper` | Resolve break bumper |
 | `GET` | `/FullCrew/{itemId}/trailer` | Resolve trailer companion |
-| `GET` | `/FullCrew/scene-identify/status` | Whether scene identify is enabled (no secrets) |
-| `GET` | `/FullCrew/{itemId}/playback-scene` | Title cast + nearby scene-index hit (no OpenAI) |
-| `POST` | `/FullCrew/{itemId}/identify-frame` | Cast-grounded OpenAI Vision match; saves to scene index |
+| `GET` | `/FullCrew/scene-identify/status` | Vision enabled? (no secrets) |
+| `GET` | `/FullCrew/{itemId}/playback-scene` | Title cast + nearby scene-index hit |
+| `POST` | `/FullCrew/{itemId}/identify-frame` | Vision match; saves to scene index |
 | `GET` | `/FullCrew/stats` | Library stats overview |
 | `GET` | `/FullCrew/stats/{category}` | Full ranked category list |
-| `GET` | `/FullCrew/studio?name=…` | Studio page (query form preferred by the client) |
-| `GET` | `/FullCrew/studio/{name}` | Studio page (path form) |
+| `GET` | `/FullCrew/stats/{category}/items` | Titles in one bucket |
+| `GET` | `/FullCrew/studio?name=…` | Studio page (preferred) |
+| `GET` | `/FullCrew/studio/{name}` | Studio page (path) |
 | `GET` | `/FullCrew/studio/item/{itemId}` | Studio page by Jellyfin studio id |
-
-Public assets:
-
-| Method | Path |
-| --- | --- |
-| `GET` | `/FullCrew/fullcrew.js` |
-| `GET` | `/FullCrew/fullcrew.css` |
+| `GET` | `/FullCrew/fullcrew.js` | Client script (public) |
+| `GET` | `/FullCrew/fullcrew.css` | Client styles (public) |
 
 ---
 
 ## Contributing
 
-Issues and pull requests are welcome at [trolle6/jellyfin-plugin-fullcrew](https://github.com/trolle6/jellyfin-plugin-fullcrew). Keep changes concrete and test against Jellyfin Web 10.11+ — especially Stats/studio routing (early-boot anti-blink) and Person-page gating.
+Issues and PRs welcome at [trolle6/jellyfin-plugin-fullcrew](https://github.com/trolle6/jellyfin-plugin-fullcrew). Test against Jellyfin Web 10.11+ — especially Stats/studio routing, Person-page gating, and playback **Y**.
 
 ## License
 
-No license file is published in this repository yet. Check the [GitHub repo](https://github.com/trolle6/jellyfin-plugin-fullcrew) for updates before redistributing.
+No license file is published in this repository yet. Check the [GitHub repo](https://github.com/trolle6/jellyfin-plugin-fullcrew) before redistributing.
