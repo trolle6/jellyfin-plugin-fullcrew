@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.6.1.0';
+    var PLUGIN_VERSION = '1.7.0.0';
     var ROLE_PREVIEW_MAX = 3;
     var ROLE_NAME_SUFFIXES = {
         jr: 1, 'jr.': 1, sr: 1, 'sr.': 1, ii: 1, iii: 1, iv: 1, v: 1, phd: 1, md: 1, esq: 1, 'esq.': 1
@@ -4284,6 +4284,7 @@
     var sceneIdentifyEnabled = null;
     var sceneIdentifyBusy = false;
     var sceneOverlayReturnFocus = null;
+    var sceneOverlayContext = null;
 
     function refreshSceneIdentifyEnabled() {
         return Core.getJson('FullCrew/scene-identify/status')
@@ -4330,6 +4331,20 @@
                 return now.Id || now.id || null;
             }
         } catch (e2) { /* ignore */ }
+        return null;
+    }
+
+    function getPlaybackPositionTicks() {
+        var pm = getPlaybackManager();
+        try {
+            if (pm && typeof pm.getCurrentTimeTicks === 'function') {
+                return pm.getCurrentTimeTicks();
+            }
+        } catch (e) { /* ignore */ }
+        var video = getPlaybackVideoElement();
+        if (video && isFinite(video.currentTime)) {
+            return Math.round(video.currentTime * 10000000);
+        }
         return null;
     }
 
@@ -4392,6 +4407,7 @@
             overlay.parentNode.removeChild(overlay);
         }
         document.removeEventListener('keydown', onSceneOverlayKeydown, true);
+        sceneOverlayContext = null;
         var restore = sceneOverlayReturnFocus;
         sceneOverlayReturnFocus = null;
         if (restore && typeof restore.focus === 'function' && document.contains(restore)) {
@@ -4410,7 +4426,7 @@
         }
     }
 
-    function openSceneOverlay(title, bodyNode) {
+    function openSceneOverlay(title, bodyNode, privacyText) {
         var returnFocus = document.activeElement;
         sceneOverlayReturnFocus = null;
         closeSceneOverlay();
@@ -4421,7 +4437,7 @@
         overlay.className = 'fullCrewSceneOverlay';
         overlay.setAttribute('role', 'dialog');
         overlay.setAttribute('aria-modal', 'true');
-        overlay.setAttribute('aria-label', title || 'Who’s on screen');
+        overlay.setAttribute('aria-label', title || 'Scene info');
 
         var backdrop = document.createElement('div');
         backdrop.className = 'fullCrewSceneBackdrop';
@@ -4432,7 +4448,7 @@
 
         var header = document.createElement('div');
         header.className = 'fullCrewSceneHeader';
-        header.appendChild(createElement('div', 'fullCrewSceneTitle', title || 'Who’s on screen'));
+        header.appendChild(createElement('div', 'fullCrewSceneTitle', title || 'Scene info'));
 
         var closeBtn = document.createElement('button');
         closeBtn.type = 'button';
@@ -4451,7 +4467,7 @@
         var privacy = createElement(
             'div',
             'fullCrewScenePrivacy',
-            'This still was sent to OpenAI and matched only against this title’s TMDB cast.'
+            privacyText || 'Title cast comes from TMDB. Scanned moments are stored in your Full Crew scene index.'
         );
 
         panel.appendChild(header);
@@ -4464,33 +4480,16 @@
         closeBtn.focus();
     }
 
-    function renderSceneMatches(data) {
+    function renderPersonList(people, emptyText) {
         var wrap = document.createElement('div');
-        wrap.className = 'fullCrewSceneResults';
-
-        var error = data && (data.Error || data.error);
-        var note = data && (data.Note || data.note);
-        var matches = (data && (data.Matches || data.matches)) || [];
-
-        if (error) {
-            wrap.appendChild(createElement('div', 'fullCrewSceneStatus', error));
-            return wrap;
-        }
-
-        if (note) {
-            wrap.appendChild(createElement('div', 'fullCrewSceneStatus', note));
-        }
-
-        if (!matches.length) {
-            if (!note) {
-                wrap.appendChild(createElement('div', 'fullCrewSceneStatus', 'No cast matches for this frame.'));
-            }
+        if (!people || !people.length) {
+            wrap.appendChild(createElement('div', 'fullCrewSceneStatus', emptyText || 'None'));
             return wrap;
         }
 
         var list = document.createElement('ul');
         list.className = 'fullCrewPeople fullCrewScenePeople';
-        matches.forEach(function (person) {
+        people.forEach(function (person) {
             var name = prop(person, 'Name', 'name') || 'Unknown';
             var role = prop(person, 'Role', 'role') || '';
             var profile = prop(person, 'ProfileUrl', 'profileUrl');
@@ -4548,24 +4547,115 @@
         return wrap;
     }
 
-    function runSceneIdentify() {
+    function renderPlaybackScenePanel(playback, identify) {
+        var wrap = document.createElement('div');
+        wrap.className = 'fullCrewSceneResults';
+
+        var itemName = playback && (playback.ItemName || playback.itemName);
+        if (itemName) {
+            wrap.appendChild(createElement('div', 'fullCrewSceneItemName', itemName));
+        }
+
+        var indexed = playback && (playback.IndexedSceneCount || playback.indexedSceneCount);
+        if (indexed) {
+            wrap.appendChild(
+                createElement('div', 'fullCrewSceneIndexMeta', indexed + ' indexed moment' + (indexed === 1 ? '' : 's') + ' for this title')
+            );
+        }
+
+        var scene = identify || (playback && (playback.Scene || playback.scene));
+        var momentSection = document.createElement('div');
+        momentSection.className = 'fullCrewSceneSection';
+        momentSection.appendChild(createElement('div', 'fullCrewSceneSectionTitle', 'This moment'));
+
+        if (scene && (scene.Error || scene.error) && !(scene.Matches || scene.matches || []).length) {
+            momentSection.appendChild(createElement('div', 'fullCrewSceneStatus', scene.Error || scene.error));
+        } else if (scene && (scene.Matches || scene.matches || []).length) {
+            var fromIndex = !!(scene.FromSceneIndex || scene.fromSceneIndex || scene.FromCache || scene.fromCache);
+            var source = scene.Source || scene.source || (fromIndex ? 'index' : 'vision');
+            momentSection.appendChild(
+                createElement(
+                    'div',
+                    'fullCrewSceneStatus',
+                    source === 'index' || fromIndex
+                        ? 'From your scene index (no new OpenAI call).'
+                        : source === 'memory'
+                            ? 'From short-term cache.'
+                            : 'Fresh Vision scan — saved to your scene index.'
+                )
+            );
+            if (scene.Note || scene.note) {
+                momentSection.appendChild(createElement('div', 'fullCrewSceneStatus', scene.Note || scene.note));
+            }
+            momentSection.appendChild(renderPersonList(scene.Matches || scene.matches));
+        } else {
+            momentSection.appendChild(
+                createElement('div', 'fullCrewSceneStatus', 'No indexed match for this timestamp yet.')
+            );
+        }
+
+        var actions = document.createElement('div');
+        actions.className = 'fullCrewSceneActions';
+        var visionOn = !!(playback && (playback.VisionEnabled || playback.visionEnabled));
+        if (visionOn) {
+            var scanBtn = document.createElement('button');
+            scanBtn.type = 'button';
+            scanBtn.className = 'raised button-submit fullCrewSceneScanBtn';
+            scanBtn.textContent = scene && (scene.Matches || scene.matches || []).length
+                ? 'Rescan this frame (OpenAI)'
+                : 'Scan this frame (OpenAI)';
+            scanBtn.addEventListener('click', function () {
+                runSceneVisionScan(true);
+            });
+            actions.appendChild(scanBtn);
+        } else {
+            actions.appendChild(
+                createElement(
+                    'div',
+                    'fullCrewSceneStatus',
+                    'Enable scene identify + OpenAI key in plugin settings to scan frames.'
+                )
+            );
+        }
+        momentSection.appendChild(actions);
+        wrap.appendChild(momentSection);
+
+        var cast = (playback && (playback.Cast || playback.cast)) || [];
+        var castSection = document.createElement('div');
+        castSection.className = 'fullCrewSceneSection';
+        castSection.appendChild(createElement('div', 'fullCrewSceneSectionTitle', 'Title cast'));
+        if (playback && (playback.Error || playback.error) && !cast.length) {
+            castSection.appendChild(createElement('div', 'fullCrewSceneStatus', playback.Error || playback.error));
+        } else {
+            castSection.appendChild(renderPersonList(cast, 'No cast available.'));
+        }
+        wrap.appendChild(castSection);
+
+        return wrap;
+    }
+
+    function fetchPlaybackScene(itemId, positionTicks) {
+        var q = 'FullCrew/' + encodeURIComponent(itemId) + '/playback-scene';
+        if (positionTicks != null) {
+            q += '?positionTicks=' + encodeURIComponent(String(positionTicks));
+        }
+        return Core.getJson(q);
+    }
+
+    function runSceneVisionScan(forceRefresh) {
         if (sceneIdentifyBusy) {
             return;
         }
-        if (sceneIdentifyEnabled === false) {
-            return;
-        }
-
-        var itemId = getCurrentlyPlayingItemId();
+        var ctx = sceneOverlayContext || {};
+        var itemId = ctx.itemId || getCurrentlyPlayingItemId();
         if (!itemId) {
-            openSceneOverlay('Who’s on screen', createElement('div', 'fullCrewSceneStatus', 'No playing item detected.'));
             return;
         }
 
         var dataUrl = capturePlaybackFrameDataUrl();
         if (!dataUrl) {
             openSceneOverlay(
-                'Who’s on screen',
+                'Scene info',
                 createElement(
                     'div',
                     'fullCrewSceneStatus',
@@ -4577,29 +4667,28 @@
 
         sceneIdentifyBusy = true;
         openSceneOverlay(
-            'Who’s on screen',
-            createElement('div', 'fullCrewSceneStatus', 'Identifying… this still will be sent to OpenAI.')
+            'Scene info',
+            createElement('div', 'fullCrewSceneStatus', 'Scanning… this still will be sent to OpenAI.')
         );
 
-        var pm = getPlaybackManager();
-        var positionTicks = null;
-        try {
-            if (pm && typeof pm.getCurrentTimeTicks === 'function') {
-                positionTicks = pm.getCurrentTimeTicks();
-            }
-        } catch (e) { /* ignore */ }
+        var positionTicks = getPlaybackPositionTicks();
+        sceneOverlayContext = { itemId: itemId, positionTicks: positionTicks };
 
         Core.postJson('FullCrew/' + encodeURIComponent(itemId) + '/identify-frame', {
             ImageBase64: dataUrl,
-            PositionTicks: positionTicks
+            PositionTicks: positionTicks,
+            ForceRefresh: !!forceRefresh
         })
-            .then(function (data) {
-                openSceneOverlay('Who’s on screen', renderSceneMatches(data));
+            .then(function (identify) {
+                return fetchPlaybackScene(itemId, positionTicks).then(function (playback) {
+                    openSceneOverlay('Scene info', renderPlaybackScenePanel(playback, identify));
+                    sceneOverlayContext = { itemId: itemId, positionTicks: positionTicks };
+                });
             })
             .catch(function (err) {
                 console.warn('[FullCrew] scene identify failed', err);
                 openSceneOverlay(
-                    'Who’s on screen',
+                    'Scene info',
                     createElement('div', 'fullCrewSceneStatus', 'Identify request failed.')
                 );
             })
@@ -4609,17 +4698,62 @@
             });
     }
 
-    function ensureSceneIdentifyButton() {
-        if (sceneIdentifyEnabled !== true) {
-            var existing = document.getElementById(SCENE_BTN_ID);
-            if (existing && existing.parentNode) {
-                existing.parentNode.removeChild(existing);
-            }
+    function runSceneIdentify() {
+        if (sceneIdentifyBusy) {
             return;
         }
 
+        var itemId = getCurrentlyPlayingItemId();
+        if (!itemId) {
+            openSceneOverlay('Scene info', createElement('div', 'fullCrewSceneStatus', 'No playing item detected.'));
+            return;
+        }
+
+        var positionTicks = getPlaybackPositionTicks();
+        sceneIdentifyBusy = true;
+        sceneOverlayContext = { itemId: itemId, positionTicks: positionTicks };
+        openSceneOverlay('Scene info', createElement('div', 'fullCrewSceneStatus', 'Loading cast & scene index…'));
+
+        fetchPlaybackScene(itemId, positionTicks)
+            .then(function (playback) {
+                var scene = playback && (playback.Scene || playback.scene);
+                var hasScene = !!(scene && (scene.Matches || scene.matches || []).length);
+                openSceneOverlay('Scene info', renderPlaybackScenePanel(playback, null));
+                sceneOverlayContext = { itemId: itemId, positionTicks: positionTicks };
+
+                // Auto-scan only when vision is on and this moment is not indexed yet.
+                var visionOn = !!(playback && (playback.VisionEnabled || playback.visionEnabled));
+                if (visionOn && !hasScene) {
+                    sceneIdentifyBusy = false;
+                    runSceneVisionScan(false);
+                    return 'scanning';
+                }
+                return 'done';
+            })
+            .catch(function (err) {
+                console.warn('[FullCrew] playback-scene failed', err);
+                openSceneOverlay(
+                    'Scene info',
+                    createElement('div', 'fullCrewSceneStatus', 'Could not load playback scene info.')
+                );
+                return 'done';
+            })
+            .then(function (state) {
+                if (state !== 'scanning') {
+                    sceneIdentifyBusy = false;
+                }
+                syncSceneIdentifyButton();
+            });
+    }
+
+    function ensureSceneIdentifyButton() {
+        // Always offer the OSD button during playback — cast/index work without Vision.
         var video = getPlaybackVideoElement();
         if (!video) {
+            var existingGone = document.getElementById(SCENE_BTN_ID);
+            if (existingGone && existingGone.parentNode && !getCurrentlyPlayingItemId()) {
+                existingGone.parentNode.removeChild(existingGone);
+            }
             return;
         }
 
@@ -4641,8 +4775,8 @@
         btn.id = SCENE_BTN_ID;
         btn.type = 'button';
         btn.className = 'paper-icon-button-light fullCrewSceneOsdBtn';
-        btn.title = 'Who’s on screen (Y) — sends this frame to OpenAI';
-        btn.setAttribute('aria-label', 'Who’s on screen');
+        btn.title = 'Scene info (Y) — cast + indexed moments; scan uses OpenAI when enabled';
+        btn.setAttribute('aria-label', 'Scene info');
         btn.innerHTML = '<span class="material-icons" aria-hidden="true">face</span>';
         btn.addEventListener('click', function (e) {
             e.preventDefault();
@@ -4663,7 +4797,7 @@
     }
 
     function onSceneIdentifyHotkey(e) {
-        if (!e || sceneIdentifyEnabled !== true) {
+        if (!e) {
             return;
         }
         if (e.key !== 'y' && e.key !== 'Y' && e.keyCode !== 89) {
@@ -4676,7 +4810,7 @@
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) {
             return;
         }
-        if (!getPlaybackVideoElement()) {
+        if (!getPlaybackVideoElement() && !getCurrentlyPlayingItemId()) {
             return;
         }
         e.preventDefault();

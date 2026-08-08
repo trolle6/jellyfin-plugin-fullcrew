@@ -2,7 +2,7 @@
 
 **Complete TMDB cast & crew on Jellyfin Web — plus Library Stats, studio profiles, break bumpers, and optional scene identify.**
 
-[![Version](https://img.shields.io/badge/version-1.6.1.0-00a4dc)](meta.json)
+[![Version](https://img.shields.io/badge/version-1.7.0.0-00a4dc)](meta.json)
 [![Jellyfin](https://img.shields.io/badge/Jellyfin-10.11%2B-00a4dc?logo=jellyfin&logoColor=white)](https://jellyfin.org)
 [![.NET](https://img.shields.io/badge/.NET-9.0-512BD4)](Jellyfin.Plugin.FullCrew/Jellyfin.Plugin.FullCrew.csproj)
 [![Repo](https://img.shields.io/badge/github-trolle6%2Fjellyfin--plugin--fullcrew-181717?logo=github)](https://github.com/trolle6/jellyfin-plugin-fullcrew)
@@ -32,7 +32,7 @@ Screenshots are not in the repo yet. Suggested paths once you capture them:
 - **Studio pages** — `#/fullcrew/studio/...` profile layout: TMDB company metadata, library titles, studio-scoped stats, name-root clusters from Stats
 - **Break bumpers** — detail-page Bumper button; prefers a local “Bumpers” collection/folder, then curated/search YouTube when enabled
 - **Trailer companion** — adds a Trailer button when Jellyfin’s native trailer control is missing; uses local/remote trailer metadata first, then YouTube lookup
-- **Scene identify (opt-in)** — during Jellyfin Web playback, press **Y** or the OSD face button to capture the current frame and ask OpenAI Vision which people from *this title’s TMDB cast* appear. Not Amazon X-Ray; frames are sent only when you ask
+- **Scene info / index** — during Jellyfin Web playback, press **Y** (or the OSD face button) for title cast plus any indexed “this moment” hits. Opt-in Vision scans persist into a local scene index (10s buckets) so revisits skip OpenAI
 - **Self-hosted injection** — registers with File Transformation and JavaScript Injector when present, patches `index.html` when writable, and ships an **early-boot** snippet so `#/fullcrew/*` routes don’t flash Jellyfin’s “page not found” chrome
 - **Configurable** — optional personal TMDB key, OpenAI key for scene identify, cache TTL, per-department toggles, bumper/YouTube/stats switches
 
@@ -183,8 +183,8 @@ Client assets (`fullcrew.js` / `fullcrew.css`) are embedded and extracted beside
 Push a version tag to run the GitHub Actions release workflow:
 
 ```bash
-git tag v1.6.1.0
-git push origin v1.6.1.0
+git tag v1.7.0.0
+git push origin v1.7.0.0
 ```
 
 ---
@@ -213,7 +213,8 @@ Authenticated:
 | `GET` | `/FullCrew/{itemId}/bumper` | Resolve break bumper |
 | `GET` | `/FullCrew/{itemId}/trailer` | Resolve trailer companion |
 | `GET` | `/FullCrew/scene-identify/status` | Whether scene identify is enabled (no secrets) |
-| `POST` | `/FullCrew/{itemId}/identify-frame` | Cast-grounded OpenAI Vision match for a captured frame |
+| `GET` | `/FullCrew/{itemId}/playback-scene` | Title cast + nearby scene-index hit (no OpenAI) |
+| `POST` | `/FullCrew/{itemId}/identify-frame` | Cast-grounded OpenAI Vision match; saves to scene index |
 | `GET` | `/FullCrew/stats` | Library stats overview |
 | `GET` | `/FullCrew/stats/{category}` | Full ranked category list |
 | `GET` | `/FullCrew/studio?name=…` | Studio page (query form preferred by the client) |

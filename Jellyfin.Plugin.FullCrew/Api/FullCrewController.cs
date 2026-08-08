@@ -109,7 +109,25 @@ public class FullCrewController : ControllerBase
     }
 
     /// <summary>
+    /// Playback companion: title cast + nearby scene-index hit (no OpenAI).
+    /// </summary>
+    [HttpGet("{itemId:guid}/playback-scene")]
+    [Authorize]
+    [ProducesResponseType(typeof(PlaybackSceneResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<PlaybackSceneResponse>> GetPlaybackScene(
+        [FromRoute] Guid itemId,
+        [FromQuery] long? positionTicks,
+        CancellationToken cancellationToken)
+    {
+        var result = await _sceneIdentifyService
+            .GetPlaybackSceneAsync(itemId, positionTicks, cancellationToken)
+            .ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Identifies billed cast members visible in a captured playback frame (OpenAI Vision, opt-in).
+    /// Prefer <see cref="GetPlaybackScene"/> first — indexed moments skip OpenAI.
     /// </summary>
     [HttpPost("{itemId:guid}/identify-frame")]
     [Authorize]

@@ -28,6 +28,7 @@ public sealed class SceneIdentifyService
     private static readonly TimeSpan FrameCacheTtl = TimeSpan.FromMinutes(10);
 
     private readonly CreditsService _creditsService;
+    private readonly SceneIndexStore _sceneIndex;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IMemoryCache _memoryCache;
     private readonly ILogger<SceneIdentifyService> _logger;
@@ -38,11 +39,13 @@ public sealed class SceneIdentifyService
     /// </summary>
     public SceneIdentifyService(
         CreditsService creditsService,
+        SceneIndexStore sceneIndex,
         IHttpClientFactory httpClientFactory,
         IMemoryCache memoryCache,
         ILogger<SceneIdentifyService> logger)
     {
         _creditsService = creditsService;
+        _sceneIndex = sceneIndex;
         _httpClientFactory = httpClientFactory;
         _memoryCache = memoryCache;
         _logger = logger;
@@ -81,6 +84,44 @@ public sealed class SceneIdentifyService
     }
 
     /// <summary>
+    /// Title cast + nearby indexed scene for playback (no OpenAI call).
+    /// </summary>
+    public async Task<PlaybackSceneResponse> GetPlaybackSceneAsync(
+        Guid itemId,
+        long? positionTicks,
+        CancellationToken cancellationToken)
+    {
+        var vision = GetStatus();
+        var credits = await _creditsService.GetCreditsAsync(itemId, cancellationToken).ConfigureAwait(false);
+        var cast = ExtractCastCandidates(credits)
+            .Select(c => new SceneIdentifyMatch
+            {
+                Name = c.Name,
+                Role = c.Role,
+                TmdbPersonId = c.TmdbPersonId,
+                ProfileUrl = c.ProfileUrl
+            })
+            .ToList();
+
+        SceneIdentifyResponse? scene = null;
+        if (positionTicks is long ticks)
+        {
+            scene = _sceneIndex.FindNearby(itemId, ticks);
+        }
+
+        return new PlaybackSceneResponse
+        {
+            ItemId = itemId.ToString("N"),
+            ItemName = string.IsNullOrWhiteSpace(credits.ItemName) ? null : credits.ItemName,
+            Cast = cast,
+            Scene = scene,
+            IndexedSceneCount = _sceneIndex.Count(itemId),
+            VisionEnabled = vision.Enabled,
+            Error = credits.Error
+        };
+    }
+
+    /// <summary>
     /// Identifies which billed cast members appear in a captured frame.
     /// </summary>
     public async Task<SceneIdentifyResponse> IdentifyAsync(
@@ -89,13 +130,24 @@ public sealed class SceneIdentifyService
         string? rateLimitKey,
         CancellationToken cancellationToken)
     {
+        // Prefer persistent scene index when we know the playback position (unless forced).
+        if (!request.ForceRefresh && request.PositionTicks is long posTicks)
+        {
+            var indexed = _sceneIndex.FindNearby(itemId, posTicks);
+            if (indexed is not null)
+            {
+                return indexed;
+            }
+        }
+
         var status = GetStatus();
         if (!status.Enabled)
         {
             return new SceneIdentifyResponse
             {
                 ItemId = itemId.ToString("N"),
-                Error = status.Reason ?? "Scene identify is not enabled."
+                Error = status.Reason ?? "Scene identify is not enabled.",
+                PositionTicks = request.PositionTicks
             };
         }
 
@@ -110,7 +162,8 @@ public sealed class SceneIdentifyService
             return new SceneIdentifyResponse
             {
                 ItemId = itemId.ToString("N"),
-                Error = decodeError
+                Error = decodeError,
+                PositionTicks = request.PositionTicks
             };
         }
 
@@ -119,7 +172,8 @@ public sealed class SceneIdentifyService
             return new SceneIdentifyResponse
             {
                 ItemId = itemId.ToString("N"),
-                Error = "Frame too large. Capture a smaller still (max ~450 KB)."
+                Error = "Frame too large. Capture a smaller still (max ~450 KB).",
+                PositionTicks = request.PositionTicks
             };
         }
 
@@ -129,7 +183,8 @@ public sealed class SceneIdentifyService
             return new SceneIdentifyResponse
             {
                 ItemId = itemId.ToString("N"),
-                Error = "Rate limit: try again in a minute."
+                Error = "Rate limit: try again in a minute.",
+                PositionTicks = request.PositionTicks
             };
         }
 
@@ -137,14 +192,18 @@ public sealed class SceneIdentifyService
         var cacheKey = $"fullcrew-scene-v1-{itemId:N}-{frameHash}";
         if (_memoryCache.TryGetValue(cacheKey, out SceneIdentifyResponse? cached) && cached is not null)
         {
-            return new SceneIdentifyResponse
+            var memHit = new SceneIdentifyResponse
             {
                 ItemId = cached.ItemId,
                 Matches = cached.Matches,
                 Note = cached.Note,
                 Error = cached.Error,
-                FromCache = true
+                FromCache = true,
+                Source = "memory",
+                PositionTicks = request.PositionTicks
             };
+            TryPersistIndex(itemId, request.PositionTicks, memHit);
+            return memHit;
         }
 
         var credits = await _creditsService.GetCreditsAsync(itemId, cancellationToken).ConfigureAwait(false);
@@ -153,7 +212,8 @@ public sealed class SceneIdentifyService
             return new SceneIdentifyResponse
             {
                 ItemId = itemId.ToString("N"),
-                Error = credits.Error
+                Error = credits.Error,
+                PositionTicks = request.PositionTicks
             };
         }
 
@@ -164,7 +224,8 @@ public sealed class SceneIdentifyService
             {
                 ItemId = itemId.ToString("N"),
                 Error = "No cast list available for this title.",
-                Note = "Scene identify only matches people from this item's TMDB cast."
+                Note = "Scene identify only matches people from this item's TMDB cast.",
+                PositionTicks = request.PositionTicks
             };
         }
 
@@ -186,10 +247,13 @@ public sealed class SceneIdentifyService
                 Matches = matches,
                 Note = matches.Count == 0
                     ? "No confident cast matches in this frame."
-                    : null
+                    : null,
+                Source = "vision",
+                PositionTicks = request.PositionTicks
             };
 
             _memoryCache.Set(cacheKey, response, FrameCacheTtl);
+            TryPersistIndex(itemId, request.PositionTicks, response);
             return response;
         }
         catch (Exception ex)
@@ -198,8 +262,26 @@ public sealed class SceneIdentifyService
             return new SceneIdentifyResponse
             {
                 ItemId = itemId.ToString("N"),
-                Error = "OpenAI identify request failed. Check the API key and server logs."
+                Error = "OpenAI identify request failed. Check the API key and server logs.",
+                PositionTicks = request.PositionTicks
             };
+        }
+    }
+
+    private void TryPersistIndex(Guid itemId, long? positionTicks, SceneIdentifyResponse response)
+    {
+        if (positionTicks is not long ticks || !string.IsNullOrEmpty(response.Error))
+        {
+            return;
+        }
+
+        try
+        {
+            _sceneIndex.Upsert(itemId, ticks, response.Matches, response.Note);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Scene index persist skipped for {ItemId}", itemId);
         }
     }
 

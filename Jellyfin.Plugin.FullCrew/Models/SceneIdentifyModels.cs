@@ -35,10 +35,15 @@ public class SceneIdentifyRequest
     public string ImageBase64 { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets optional playback position in ticks (for logging / future use).
+    /// Gets or sets optional playback position in ticks (for scene index).
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? PositionTicks { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to skip the scene index and call Vision again.
+    /// </summary>
+    public bool ForceRefresh { get; set; }
 }
 
 /// <summary>
@@ -60,6 +65,23 @@ public class SceneIdentifyResponse
     /// Gets or sets a value indicating whether the result came from the short frame-hash cache.
     /// </summary>
     public bool FromCache { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the result came from the persistent scene index.
+    /// </summary>
+    public bool FromSceneIndex { get; set; }
+
+    /// <summary>
+    /// Gets or sets playback position ticks associated with this result.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? PositionTicks { get; set; }
+
+    /// <summary>
+    /// Gets or sets the result source: vision, memory, or index.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Source { get; set; }
 
     /// <summary>
     /// Gets or sets a non-fatal note (e.g. uncertain / empty).
