@@ -1,7 +1,7 @@
 ---
 name: "Full Crew"
 guid: "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f"
-version: "1.6.0.0"
+version: "1.6.1.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Full cast and crew by department, break bumpers, library stats, studio pages, and optional scene identify"
@@ -17,6 +17,5 @@ owner: "trolle6"
 artifacts:
 - "Jellyfin.Plugin.FullCrew.dll"
 changelog: >
-  Scene identify 1.6.0: opt-in “Who’s on screen” on Jellyfin Web playback
-  (hotkey I / OSD button). Captures one frame, sends it to OpenAI Vision only
-  when asked, and matches against this title’s TMDB cast — not continuous X-Ray.
+  Scene identify 1.6.1: hotkey is Y (not I/K) so it does not clash with Jellyfin
+  settings. Still opt-in, one frame per ask, cast-grounded OpenAI Vision.

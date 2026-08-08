@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.6.0.0';
+    var PLUGIN_VERSION = '1.6.1.0';
     var ROLE_PREVIEW_MAX = 3;
     var ROLE_NAME_SUFFIXES = {
         jr: 1, 'jr.': 1, sr: 1, 'sr.': 1, ii: 1, iii: 1, iv: 1, v: 1, phd: 1, md: 1, esq: 1, 'esq.': 1
@@ -4641,7 +4641,7 @@
         btn.id = SCENE_BTN_ID;
         btn.type = 'button';
         btn.className = 'paper-icon-button-light fullCrewSceneOsdBtn';
-        btn.title = 'Who’s on screen (I) — sends this frame to OpenAI';
+        btn.title = 'Who’s on screen (Y) — sends this frame to OpenAI';
         btn.setAttribute('aria-label', 'Who’s on screen');
         btn.innerHTML = '<span class="material-icons" aria-hidden="true">face</span>';
         btn.addEventListener('click', function (e) {
@@ -4666,7 +4666,7 @@
         if (!e || sceneIdentifyEnabled !== true) {
             return;
         }
-        if (e.key !== 'i' && e.key !== 'I' && e.keyCode !== 73) {
+        if (e.key !== 'y' && e.key !== 'Y' && e.keyCode !== 89) {
             return;
         }
         if (e.ctrlKey || e.metaKey || e.altKey) {
