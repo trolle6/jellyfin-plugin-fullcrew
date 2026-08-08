@@ -14,7 +14,11 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.5.4.0';
+    var PLUGIN_VERSION = '1.5.5.0';
+    var ROLE_PREVIEW_MAX = 3;
+    var ROLE_NAME_SUFFIXES = {
+        jr: 1, 'jr.': 1, sr: 1, 'sr.': 1, ii: 1, iii: 1, iv: 1, v: 1, phd: 1, md: 1, esq: 1, 'esq.': 1
+    };
     var CRITICAL_STYLE_ID = 'fullCrewCritical';
     var STYLE_ID = 'fullCrewStyles';
     var ROUTE_PENDING_CLASS = 'fullCrewRoutePending';
@@ -1110,6 +1114,133 @@
             .join('');
     }
 
+    /** Strip trailing (voice)/(uncredited)/… notes for comparison and cleaner cards. */
+    function stripRoleNotes(text) {
+        var s = String(text || '').trim();
+        while (/\s*\([^)]*\)\s*$/.test(s)) {
+            s = s.replace(/\s*\([^)]*\)\s*$/, '').trim();
+        }
+        return s.replace(/\s+/g, ' ').trim();
+    }
+
+    function splitRoleSegments(credit) {
+        var out = [];
+        String(credit || '')
+            .split('/')
+            .map(function (part) { return part.trim(); })
+            .filter(Boolean)
+            .forEach(function (slashPart) {
+                if (slashPart.indexOf(',') < 0) {
+                    out.push(slashPart);
+                    return;
+                }
+                var pieces = slashPart.split(',').map(function (p) { return p.trim(); }).filter(Boolean);
+                if (!pieces.length) {
+                    return;
+                }
+                var buffer = pieces[0];
+                for (var i = 1; i < pieces.length; i++) {
+                    var next = pieces[i];
+                    // "Jr. (uncredited)" must still count as a name suffix, not a second role.
+                    var nextSuffix = stripRoleNotes(next);
+                    if (ROLE_NAME_SUFFIXES[next.toLowerCase()] || ROLE_NAME_SUFFIXES[(nextSuffix || '').toLowerCase()]) {
+                        buffer += ', ' + (nextSuffix || next);
+                        continue;
+                    }
+                    if (buffer) {
+                        out.push(buffer);
+                    }
+                    buffer = next;
+                }
+                if (buffer) {
+                    out.push(buffer);
+                }
+            });
+        return out;
+    }
+
+    /**
+     * Collapse redundant character/job strings into unique display names
+     * (mirrors RoleCollapse.cs — keep algorithms aligned).
+     */
+    function collapseRoles(credits) {
+        var stats = Object.create(null);
+        var order = [];
+
+        (credits || []).forEach(function (credit) {
+            if (!credit) {
+                return;
+            }
+            var segments = splitRoleSegments(credit);
+            segments.forEach(function (segment, index) {
+                var display = stripRoleNotes(segment);
+                if (!display) {
+                    return;
+                }
+                var key = display.toLowerCase().replace(/\s+/g, ' ');
+                if (!key) {
+                    return;
+                }
+                var entry = stats[key];
+                if (!entry) {
+                    entry = { display: display, primary: 0, secondary: 0 };
+                    stats[key] = entry;
+                    order.push(key);
+                } else if (display.length > entry.display.length) {
+                    entry.display = display;
+                }
+                if (index === 0) {
+                    entry.primary += 1;
+                } else {
+                    entry.secondary += 1;
+                }
+            });
+        });
+
+        return order
+            .map(function (key) { return stats[key]; })
+            .sort(function (a, b) {
+                if (b.primary !== a.primary) {
+                    return b.primary - a.primary;
+                }
+                if (b.secondary !== a.secondary) {
+                    return b.secondary - a.secondary;
+                }
+                if (b.display.length !== a.display.length) {
+                    return b.display.length - a.display.length;
+                }
+                return a.display.localeCompare(b.display, undefined, { sensitivity: 'base' });
+            })
+            .map(function (entry) { return entry.display; });
+    }
+
+    function formatRolePreview(uniqueRoles, maxVisible) {
+        var roles = uniqueRoles || [];
+        var limit = Math.max(1, maxVisible || ROLE_PREVIEW_MAX);
+        var tooltip = roles.join(' · ');
+        if (roles.length <= limit) {
+            return { label: tooltip, tooltip: tooltip, hidden: 0 };
+        }
+        return {
+            label: roles.slice(0, limit).join(' · '),
+            tooltip: tooltip,
+            hidden: roles.length - limit
+        };
+    }
+
+    function resolvePersonRoles(person) {
+        var roles = person.Roles || person.roles;
+        if (roles && roles.length) {
+            return collapseRoles(roles);
+        }
+        var role = person.Role || person.role || '';
+        var parts = String(role)
+            .split(/\s*·\s*|\n+/)
+            .map(function (part) { return part.trim(); })
+            .filter(Boolean);
+        return collapseRoles(parts.length ? parts : [role]);
+    }
+
     function createElement(tag, className, text) {
         return Core.el(tag, className, text);
     }
@@ -1189,14 +1320,7 @@
 
             people.forEach(function (person) {
                 var personName = person.Name || person.name || 'Unknown';
-                var role = person.Role || person.role || '';
-                var roles = person.Roles || person.roles;
-                if (!roles || !roles.length) {
-                    roles = String(role)
-                        .split(/\s*·\s*|\n+/)
-                        .map(function (part) { return part.trim(); })
-                        .filter(Boolean);
-                }
+                var roles = resolvePersonRoles(person);
                 var profileUrl = person.ProfileUrl || person.profileUrl;
                 var tmdbId = person.TmdbPersonId || person.tmdbPersonId;
                 var card;
@@ -1231,11 +1355,23 @@
                 var text = createElement('div', 'fullCrewPersonText');
                 text.appendChild(createElement('div', 'fullCrewPersonName', personName));
                 if (roles.length) {
+                    var preview = formatRolePreview(roles, ROLE_PREVIEW_MAX);
                     var roleList = createElement('div', 'fullCrewPersonRoles');
-                    roles.forEach(function (entry) {
-                        roleList.appendChild(createElement('div', 'fullCrewPersonRole', entry));
-                    });
+                    if (preview.tooltip) {
+                        roleList.title = preview.tooltip;
+                    }
+                    if (preview.label) {
+                        roleList.appendChild(createElement('div', 'fullCrewPersonRole', preview.label));
+                    }
+                    if (preview.hidden > 0) {
+                        roleList.appendChild(
+                            createElement('div', 'fullCrewPersonRoleMore', '+' + preview.hidden + ' more')
+                        );
+                    }
                     text.appendChild(roleList);
+                    if (preview.tooltip) {
+                        card.title = (tmdbId ? personName + ' on TMDB — ' : personName + ' — ') + preview.tooltip;
+                    }
                 }
                 card.appendChild(text);
 

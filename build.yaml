@@ -1,7 +1,7 @@
 ---
 name: "Full Crew"
 guid: "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f"
-version: "1.5.4.0"
+version: "1.5.5.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Full cast and crew by department, break bumpers, library stats, and studio pages"
@@ -16,5 +16,5 @@ owner: "trolle6"
 artifacts:
 - "Jellyfin.Plugin.FullCrew.dll"
 changelog: >
-  Fix cast/crew blink loop (1.5.4): after credits failure or empty, leave native
-  cast alone and do not remount until navigation; ignore plugin self-mutations.
+  Collapse redundant cast/crew roles (1.5.5): unique character/job names with
+  “+N more” and tooltip; CSS clamp on cards; series aggregate credits stay readable.

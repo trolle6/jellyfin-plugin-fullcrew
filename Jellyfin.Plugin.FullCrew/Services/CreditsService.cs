@@ -128,8 +128,8 @@ public class CreditsService
         var maxPeople = Math.Clamp(config?.MaxPeoplePerDepartment ?? 100, 1, 500);
         var enabledDepts = string.Join('|', config?.EnabledDepartments ?? DepartmentOrder);
         var cacheKey = lookup.SeasonNumber is int seasonNumber
-            ? $"fullcrew-v3-{lookup.MediaKind}-{lookup.TmdbId}-s{seasonNumber}-m{maxPeople}-[{enabledDepts}]"
-            : $"fullcrew-v3-{lookup.MediaKind}-{lookup.TmdbId}-m{maxPeople}-[{enabledDepts}]";
+            ? $"fullcrew-v4-{lookup.MediaKind}-{lookup.TmdbId}-s{seasonNumber}-m{maxPeople}-[{enabledDepts}]"
+            : $"fullcrew-v4-{lookup.MediaKind}-{lookup.TmdbId}-m{maxPeople}-[{enabledDepts}]";
         if (_memoryCache.TryGetValue(cacheKey, out FullCrewResponse? cached) && cached is not null)
         {
             return CloneForItem(cached, item);
@@ -374,13 +374,21 @@ public class CreditsService
                 .ThenBy(d => d, StringComparer.OrdinalIgnoreCase)
                 .First();
 
-            var stackedRoles = credits
+            var isCast = string.Equals(primaryDepartment, "Cast", StringComparison.OrdinalIgnoreCase);
+            var rawRoles = credits
                 .Select(c => c.Person.Role)
-                .Where(r => !string.IsNullOrWhiteSpace(r))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(RoleSortIndex)
-                .ThenBy(r => r, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+                .Where(r => !string.IsNullOrWhiteSpace(r));
+
+            // Aggregate TV credits often list dozens of near-duplicate character strings
+            // (“Mr. Slate (voice)”, “Mr. Slate / Announcer (voice)”, …). Collapse those.
+            IReadOnlyList<string> stackedRoles = RoleCollapse.Collapse(rawRoles);
+            if (!isCast && stackedRoles.Count > 1)
+            {
+                stackedRoles = stackedRoles
+                    .OrderBy(RoleSortIndex)
+                    .ThenBy(r => r, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
 
             var best = credits
                 .OrderBy(c => string.IsNullOrWhiteSpace(c.Person.ProfileUrl) ? 1 : 0)
@@ -398,6 +406,7 @@ public class CreditsService
             {
                 Name = best.Name,
                 Role = string.Join(" · ", stackedRoles),
+                Roles = stackedRoles.Count > 0 ? stackedRoles : null,
                 TmdbPersonId = best.TmdbPersonId,
                 ProfileUrl = best.ProfileUrl ?? credits.Select(c => c.Person.ProfileUrl).FirstOrDefault(u => !string.IsNullOrWhiteSpace(u)),
                 Order = billingOrders.Count > 0 ? billingOrders.Min() : null

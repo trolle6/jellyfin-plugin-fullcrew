@@ -2,7 +2,7 @@
 
 **Complete TMDB cast & crew on Jellyfin Web — plus Library Stats, studio profiles, and nostalgia break bumpers.**
 
-[![Version](https://img.shields.io/badge/version-1.5.4.0-00a4dc)](meta.json)
+[![Version](https://img.shields.io/badge/version-1.5.5.0-00a4dc)](meta.json)
 [![Jellyfin](https://img.shields.io/badge/Jellyfin-10.11%2B-00a4dc?logo=jellyfin&logoColor=white)](https://jellyfin.org)
 [![.NET](https://img.shields.io/badge/.NET-9.0-512BD4)](Jellyfin.Plugin.FullCrew/Jellyfin.Plugin.FullCrew.csproj)
 [![Repo](https://img.shields.io/badge/github-trolle6%2Fjellyfin--plugin--fullcrew-181717?logo=github)](https://github.com/trolle6/jellyfin-plugin-fullcrew)
@@ -26,7 +26,7 @@ Screenshots are not in the repo yet. Suggested paths once you capture them:
 
 ## Features
 
-- **Full cast & crew accordion** — Cast, Directing, Writing, Production, Camera, Editing, Sound, Art, Costume & Make-Up, Visual Effects, Lighting, Crew, and Other, with roles stacked per person
+- **Full cast & crew accordion** — Cast, Directing, Writing, Production, Camera, Editing, Sound, Art, Costume & Make-Up, Visual Effects, Lighting, Crew, and Other, with roles collapsed per person (unique names, “+N more”, tooltip)
 - **Media-only injection** — mounts on Movie, Series, Season, and Episode; deliberately skipped on Person and other entity detail shells
 - **Library Stats** — Home header tab next to Favourites → `#/fullcrew/stats` with charts, auto insights, and per-category drill-downs (`#/fullcrew/stats/{category}`)
 - **Studio pages** — `#/fullcrew/studio/...` profile layout: TMDB company metadata, library titles, studio-scoped stats, name-root clusters from Stats
@@ -159,8 +159,8 @@ Client assets (`fullcrew.js` / `fullcrew.css`) are embedded and extracted beside
 Push a version tag to run the GitHub Actions release workflow:
 
 ```bash
-git tag v1.5.4.0
-git push origin v1.5.4.0
+git tag v1.5.5.0
+git push origin v1.5.5.0
 ```
 
 ---

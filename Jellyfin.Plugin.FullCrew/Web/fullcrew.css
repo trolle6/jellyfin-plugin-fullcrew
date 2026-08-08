@@ -256,6 +256,8 @@ a.fullCrewPerson:focus-visible .fullCrewPersonName {
     flex-direction: column;
     gap: 0.1em;
     min-width: 0;
+    max-height: 3.75em;
+    overflow: hidden;
 }
 
 .fullCrewPersonRole {
@@ -263,8 +265,17 @@ a.fullCrewPerson:focus-visible .fullCrewPersonName {
     opacity: 0.62;
     line-height: 1.25;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    word-break: break-word;
+}
+
+.fullCrewPersonRoleMore {
+    font-size: 0.72em;
+    opacity: 0.5;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
 }
 
 .fullCrewBumperButton .fullCrewBumperIcon {
