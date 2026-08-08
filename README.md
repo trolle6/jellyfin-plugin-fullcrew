@@ -213,6 +213,10 @@ Scene index JSON is stored on your server under the plugin data folder (`scene-i
 
 Issues and PRs welcome at [trolle6/jellyfin-plugin-fullcrew](https://github.com/trolle6/jellyfin-plugin-fullcrew). Test against Jellyfin Web 10.11+ — especially Stats/studio routing, Person-page gating, and playback **Y**.
 
+## Built with AI
+
+This project was developed **with substantial help from AI coding assistants** (Cursor / similar tools): design discussion, implementation, refactors, and docs. Human direction, review, and self-hosted testing still steer what ships. If that matters to you as a user or contributor, now you know.
+
 ## License
 
 No license file is published in this repository yet. Check the [GitHub repo](https://github.com/trolle6/jellyfin-plugin-fullcrew) before redistributing.
