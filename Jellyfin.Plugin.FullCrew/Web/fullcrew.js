@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.5.3.0';
+    var PLUGIN_VERSION = '1.5.4.0';
     var CRITICAL_STYLE_ID = 'fullCrewCritical';
     var STYLE_ID = 'fullCrewStyles';
     var ROUTE_PENDING_CLASS = 'fullCrewRoutePending';
@@ -954,6 +954,26 @@
     /* ================================================================== */
 
     var SECTION_ID = 'fullCrewSection';
+    /** itemId → true after credits failed/empty for this navigation (no remount thrash). */
+    var creditsGaveUp = Object.create(null);
+    /** Track detail item from the hash so we clear the circuit breaker on navigate. */
+    var creditsNavItemId = null;
+    var creditsFetchEpoch = 0;
+
+    function syncCreditsNavState() {
+        var id = getItemIdFromLocation();
+        if (id !== creditsNavItemId) {
+            creditsNavItemId = id;
+            creditsGaveUp = Object.create(null);
+            creditsFetchEpoch += 1;
+        }
+    }
+
+    function noteCreditsGaveUp(itemId) {
+        if (itemId) {
+            creditsGaveUp[itemId] = true;
+        }
+    }
 
     function ensureStyles() {
         Core.ensureStyles();
@@ -1270,6 +1290,8 @@
             return;
         }
 
+        syncCreditsNavState();
+
         var itemId = getItemIdFromView(view) || getItemIdFromLocation();
         if (!itemId) {
             return;
@@ -1299,9 +1321,30 @@
         });
     }
 
+    function settleCreditsFailure(view, section, itemId) {
+        noteCreditsGaveUp(itemId);
+        showNativeCast(view);
+        if (section && section.parentNode) {
+            section.remove();
+        }
+    }
+
     function mountCreditsSection(view, itemId) {
+        if (!itemId || creditsGaveUp[itemId]) {
+            return;
+        }
+
         var existing = view.querySelector('#' + SECTION_ID);
         if (existing && existing.getAttribute('data-item-id') === itemId) {
+            // Same item: skip while loading, loaded, or sticky error — never remount-thrash.
+            if (
+                existing.getAttribute('data-loaded') === '1' ||
+                existing.getAttribute('data-loading') === '1' ||
+                existing.getAttribute('data-error') === '1'
+            ) {
+                return;
+            }
+            // Legacy section without state attrs — treat as settled for this id.
             return;
         }
 
@@ -1309,6 +1352,9 @@
 
         var section = createSection();
         section.setAttribute('data-item-id', itemId);
+        section.setAttribute('data-loading', '1');
+        var fetchGen = String(creditsFetchEpoch) + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        section.setAttribute('data-fetch-gen', fetchGen);
         renderStatus(section, 'Loading cast & crew…', false);
 
         var anchor = findInsertionPoint(view);
@@ -1319,36 +1365,44 @@
             view.appendChild(section);
         }
 
+        function stillCurrent() {
+            return (
+                document.body.contains(section) &&
+                section.getAttribute('data-fetch-gen') === fetchGen &&
+                !creditsGaveUp[itemId]
+            );
+        }
+
         fetchCredits(itemId)
             .then(function (data) {
-                if (!document.body.contains(section)) {
+                if (!stillCurrent()) {
                     return;
                 }
 
                 var error = data.Error || data.error;
                 if (error) {
-                    showNativeCast(view);
-                    section.remove();
+                    settleCreditsFailure(view, section, itemId);
                     return;
                 }
 
                 var departments = data.Departments || data.departments || [];
                 if (!departments.length) {
-                    showNativeCast(view);
-                    section.remove();
+                    // Empty is terminal for this navigation — leave Jellyfin native cast alone.
+                    settleCreditsFailure(view, section, itemId);
                     return;
                 }
 
                 hideNativeCast(view);
                 renderDepartments(section, data);
+                section.setAttribute('data-loaded', '1');
+                section.removeAttribute('data-loading');
             })
             .catch(function (err) {
-                if (!document.body.contains(section)) {
+                if (!stillCurrent()) {
                     return;
                 }
                 console.warn('[FullCrew] failed to load credits', err);
-                showNativeCast(view);
-                section.remove();
+                settleCreditsFailure(view, section, itemId);
             });
     }
 
@@ -4023,14 +4077,15 @@
                     return false;
                 }
                 if (n.id === STATS_PAGE_ID || n.id === STUDIO_PAGE_ID || n.id === STATS_TAB_ID ||
-                    n.id === CRITICAL_STYLE_ID || n.id === STYLE_ID) {
+                    n.id === CRITICAL_STYLE_ID || n.id === STYLE_ID || n.id === SECTION_ID) {
+                    continue;
+                }
+                if (n.classList && (n.classList.contains('fullCrewPage') || n.classList.contains('fullCrewStatsPage') ||
+                    n.classList.contains('fullCrewSection'))) {
                     continue;
                 }
                 if (n.closest && (n.closest('#' + STATS_PAGE_ID) || n.closest('#' + STUDIO_PAGE_ID) ||
-                    n.closest('#' + STATS_TAB_ID))) {
-                    continue;
-                }
-                if (n.classList && (n.classList.contains('fullCrewPage') || n.classList.contains('fullCrewStatsPage'))) {
+                    n.closest('#' + STATS_TAB_ID) || n.closest('#' + SECTION_ID))) {
                     continue;
                 }
                 return false;
@@ -4083,6 +4138,7 @@
         }
 
         window.addEventListener('hashchange', function () {
+            syncCreditsNavState();
             var route = peekFullCrewRoute();
             if (route) {
                 applyRouteChrome(route, { pending: true, setTitle: true });
