@@ -1,12 +1,12 @@
 {
   "category": "Metadata",
-  "changelog": "Scene index: Y opens cast + indexed moments; Vision scans persist per timestamp so replays skip OpenAI. Playback-scene API builds your own X-Ray metadata over time.",
+  "changelog": "1.7.1: Playback Title cast always includes TMDB Cast (even if Cast is disabled in accordion settings) and prefers series aggregate credits for episodes so season-sparse cast no longer empties the Y panel. Clearer Vision-off / missing-TMDB messaging.",
   "description": "Fetches complete TMDB cast and crew for movies and series, groups people by department, and shows them in a polished accordion on Jellyfin Web item detail pages. Includes a nostalgia Break Bumper action, Library Stats, studio detail pages, and optional scene identify during playback.",
   "guid": "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f",
   "name": "Full Crew",
   "overview": "Full cast and crew, stats, studio pages, scene identify, and a local scene index",
   "owner": "trolle6",
   "targetAbi": "10.11.0.0",
-  "timestamp": "2026-08-08T00:00:00Z",
-  "version": "1.7.0.0"
+  "timestamp": "2026-08-12T00:00:00Z",
+  "version": "1.7.1.0"
 }

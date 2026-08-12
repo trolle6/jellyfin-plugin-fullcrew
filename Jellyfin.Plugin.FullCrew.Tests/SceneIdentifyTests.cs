@@ -81,4 +81,30 @@ public class SceneIdentifyTests
         Assert.Equal(2, cast.Count);
         Assert.Equal("A", cast[0].Name);
     }
+
+    [Fact]
+    public void ExtractCastCandidates_FallsBackWhenCastDepartmentMissing()
+    {
+        var credits = new FullCrewResponse
+        {
+            Departments =
+            [
+                new CrewDepartment
+                {
+                    Name = "Directing",
+                    People = [new CrewPerson { Name = "Director Person", TmdbPersonId = 1, Order = 0 }]
+                },
+                new CrewDepartment
+                {
+                    Name = "Writing",
+                    People = [new CrewPerson { Name = "Writer Person", TmdbPersonId = 2, Order = 1 }]
+                }
+            ]
+        };
+
+        var cast = SceneIdentifyService.ExtractCastCandidates(credits);
+        Assert.Equal(2, cast.Count);
+        Assert.Contains(cast, c => c.Name == "Director Person");
+        Assert.Contains(cast, c => c.Name == "Writer Person");
+    }
 }

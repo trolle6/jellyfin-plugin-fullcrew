@@ -87,7 +87,14 @@ public class PlaybackSceneResponse
     public bool VisionEnabled { get; set; }
 
     /// <summary>
+    /// Gets or sets why Vision is unavailable when <see cref="VisionEnabled"/> is false.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? VisionReason { get; set; }
+
+    /// <summary>
     /// Gets or sets a credits error when cast could not load.
     /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Error { get; set; }
 }

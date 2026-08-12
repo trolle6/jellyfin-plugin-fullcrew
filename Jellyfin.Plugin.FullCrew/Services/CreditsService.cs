@@ -84,8 +84,20 @@ public class CreditsService
     /// </summary>
     /// <param name="itemId">The Jellyfin item id.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="forceIncludeCast">
+    /// When true, always include the Cast department even if disabled in accordion settings
+    /// (used by playback / scene identify).
+    /// </param>
+    /// <param name="preferSeriesAggregate">
+    /// When true, skip season-scoped credits and use series <c>aggregate_credits</c>
+    /// (richer cast for episode playback).
+    /// </param>
     /// <returns>Categorized credits response.</returns>
-    public async Task<FullCrewResponse> GetCreditsAsync(Guid itemId, CancellationToken cancellationToken)
+    public async Task<FullCrewResponse> GetCreditsAsync(
+        Guid itemId,
+        CancellationToken cancellationToken,
+        bool forceIncludeCast = false,
+        bool preferSeriesAggregate = false)
     {
         var item = _libraryManager.GetItemById(itemId);
         if (item is null)
@@ -124,12 +136,19 @@ public class CreditsService
             };
         }
 
+        if (preferSeriesAggregate && lookup.MediaKind == TmdbMediaKind.Tv && lookup.SeasonNumber is not null)
+        {
+            lookup = lookup with { SeasonNumber = null };
+        }
+
         // Include display config so department toggles / caps take effect without waiting for TTL.
         var maxPeople = Math.Clamp(config?.MaxPeoplePerDepartment ?? 100, 1, 500);
         var enabledDepts = string.Join('|', config?.EnabledDepartments ?? DepartmentOrder);
+        var forceFlag = forceIncludeCast ? "1" : "0";
+        var aggFlag = preferSeriesAggregate ? "1" : "0";
         var cacheKey = lookup.SeasonNumber is int seasonNumber
-            ? $"fullcrew-v4-{lookup.MediaKind}-{lookup.TmdbId}-s{seasonNumber}-m{maxPeople}-[{enabledDepts}]"
-            : $"fullcrew-v4-{lookup.MediaKind}-{lookup.TmdbId}-m{maxPeople}-[{enabledDepts}]";
+            ? $"fullcrew-v5-{lookup.MediaKind}-{lookup.TmdbId}-s{seasonNumber}-m{maxPeople}-c{forceFlag}-a{aggFlag}-[{enabledDepts}]"
+            : $"fullcrew-v5-{lookup.MediaKind}-{lookup.TmdbId}-m{maxPeople}-c{forceFlag}-a{aggFlag}-[{enabledDepts}]";
         if (_memoryCache.TryGetValue(cacheKey, out FullCrewResponse? cached) && cached is not null)
         {
             return CloneForItem(cached, item);
@@ -137,7 +156,8 @@ public class CreditsService
 
         try
         {
-            var response = await FetchFromTmdbAsync(item, lookup, apiKey, cancellationToken).ConfigureAwait(false);
+            var response = await FetchFromTmdbAsync(item, lookup, apiKey, forceIncludeCast, cancellationToken)
+                .ConfigureAwait(false);
             var cacheHours = Math.Clamp(config?.CacheHours ?? 12, 1, 168);
             _memoryCache.Set(cacheKey, response, TimeSpan.FromHours(cacheHours));
             return response;
@@ -160,6 +180,7 @@ public class CreditsService
         BaseItem item,
         TmdbLookup lookup,
         string apiKey,
+        bool forceIncludeCast,
         CancellationToken cancellationToken)
     {
         var client = _httpClientFactory.CreateClient();
@@ -176,10 +197,12 @@ public class CreditsService
 
             var fallbackPath = BuildTmdbCreditsUrl(lookup with { SeasonNumber = null }, apiKey);
             using var fallbackResponse = await SendGetAsync(client, fallbackPath, cancellationToken).ConfigureAwait(false);
-            return await ParseCreditsResponseAsync(item, lookup, fallbackResponse, cancellationToken).ConfigureAwait(false);
+            return await ParseCreditsResponseAsync(item, lookup, fallbackResponse, forceIncludeCast, cancellationToken)
+                .ConfigureAwait(false);
         }
 
-        return await ParseCreditsResponseAsync(item, lookup, httpResponse, cancellationToken).ConfigureAwait(false);
+        return await ParseCreditsResponseAsync(item, lookup, httpResponse, forceIncludeCast, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private static async Task<HttpResponseMessage> SendGetAsync(
@@ -211,6 +234,7 @@ public class CreditsService
         BaseItem item,
         TmdbLookup lookup,
         HttpResponseMessage httpResponse,
+        bool forceIncludeCast,
         CancellationToken cancellationToken)
     {
         if (!httpResponse.IsSuccessStatusCode)
@@ -235,7 +259,7 @@ public class CreditsService
         var payload = await JsonSerializer.DeserializeAsync<TmdbCreditsPayload>(stream, JsonOptions, cancellationToken)
             .ConfigureAwait(false);
 
-        var departments = BuildDepartments(payload, Plugin.Instance?.Configuration);
+        var departments = BuildDepartments(payload, Plugin.Instance?.Configuration, forceIncludeCast);
         return new FullCrewResponse
         {
             ItemId = item.Id.ToString("N", CultureInfo.InvariantCulture),
@@ -246,11 +270,19 @@ public class CreditsService
         };
     }
 
-    private static IReadOnlyList<CrewDepartment> BuildDepartments(TmdbCreditsPayload? payload, Configuration.PluginConfiguration? config)
+    private static IReadOnlyList<CrewDepartment> BuildDepartments(
+        TmdbCreditsPayload? payload,
+        Configuration.PluginConfiguration? config,
+        bool forceIncludeCast = false)
     {
         var enabled = new HashSet<string>(
             config?.EnabledDepartments ?? DepartmentOrder,
             StringComparer.OrdinalIgnoreCase);
+        if (forceIncludeCast)
+        {
+            enabled.Add("Cast");
+        }
+
         var maxPerDept = Math.Clamp(config?.MaxPeoplePerDepartment ?? 100, 1, 1000);
 
         var rawCredits = new List<(string Department, CrewPerson Person)>();

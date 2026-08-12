@@ -92,7 +92,9 @@ public sealed class SceneIdentifyService
         CancellationToken cancellationToken)
     {
         var vision = GetStatus();
-        var credits = await _creditsService.GetCreditsAsync(itemId, cancellationToken).ConfigureAwait(false);
+        var credits = await _creditsService
+            .GetCreditsAsync(itemId, cancellationToken, forceIncludeCast: true, preferSeriesAggregate: true)
+            .ConfigureAwait(false);
         var cast = ExtractCastCandidates(credits)
             .Select(c => new SceneIdentifyMatch
             {
@@ -117,6 +119,7 @@ public sealed class SceneIdentifyService
             Scene = scene,
             IndexedSceneCount = _sceneIndex.Count(itemId),
             VisionEnabled = vision.Enabled,
+            VisionReason = vision.Enabled ? null : vision.Reason,
             Error = credits.Error
         };
     }
@@ -206,7 +209,9 @@ public sealed class SceneIdentifyService
             return memHit;
         }
 
-        var credits = await _creditsService.GetCreditsAsync(itemId, cancellationToken).ConfigureAwait(false);
+        var credits = await _creditsService
+            .GetCreditsAsync(itemId, cancellationToken, forceIncludeCast: true, preferSeriesAggregate: true)
+            .ConfigureAwait(false);
         if (!string.IsNullOrEmpty(credits.Error))
         {
             return new SceneIdentifyResponse
@@ -291,9 +296,26 @@ public sealed class SceneIdentifyService
         var castDept = credits.Departments?
             .FirstOrDefault(d => string.Equals(d.Name, "Cast", StringComparison.OrdinalIgnoreCase));
 
-        var people = castDept?.People ?? [];
+        IEnumerable<CrewPerson> people = castDept?.People ?? [];
+        if (!people.Any(p => !string.IsNullOrWhiteSpace(p.Name))
+            && credits.Departments is { Count: > 0 })
+        {
+            // Cast department missing/empty (e.g. disabled in accordion settings before forceInclude)
+            // — fall back to any credited people so playback/identify still has candidates.
+            people = credits.Departments
+                .SelectMany(d => d.People ?? [])
+                .Where(p => !string.IsNullOrWhiteSpace(p.Name));
+        }
+
         return people
             .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+            .GroupBy(p => p.TmdbPersonId is int id and > 0
+                ? "id:" + id.ToString(CultureInfo.InvariantCulture)
+                : "name:" + p.Name.Trim().ToLowerInvariant())
+            .Select(g => g
+                .OrderBy(p => string.IsNullOrWhiteSpace(p.ProfileUrl) ? 1 : 0)
+                .ThenBy(p => p.Order ?? int.MaxValue)
+                .First())
             .OrderBy(p => p.Order ?? int.MaxValue)
             .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
             .Take(MaxCastCandidates)

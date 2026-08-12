@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.7.0.0';
+    var PLUGIN_VERSION = '1.7.1.0';
     var ROLE_PREVIEW_MAX = 3;
     var ROLE_NAME_SUFFIXES = {
         jr: 1, 'jr.': 1, sr: 1, 'sr.': 1, ii: 1, iii: 1, iv: 1, v: 1, phd: 1, md: 1, esq: 1, 'esq.': 1
@@ -4467,7 +4467,7 @@
         var privacy = createElement(
             'div',
             'fullCrewScenePrivacy',
-            privacyText || 'Title cast comes from TMDB. Scanned moments are stored in your Full Crew scene index.'
+            privacyText || 'Title cast is TMDB billed cast (no OpenAI). This moment uses your local scene index, or an opt-in Vision scan.'
         );
 
         panel.appendChild(header);
@@ -4556,6 +4556,11 @@
             wrap.appendChild(createElement('div', 'fullCrewSceneItemName', itemName));
         }
 
+        var creditsError = playback && (playback.Error || playback.error);
+        if (creditsError) {
+            wrap.appendChild(createElement('div', 'fullCrewSceneStatus', creditsError));
+        }
+
         var indexed = playback && (playback.IndexedSceneCount || playback.indexedSceneCount);
         if (indexed) {
             wrap.appendChild(
@@ -4567,6 +4572,13 @@
         var momentSection = document.createElement('div');
         momentSection.className = 'fullCrewSceneSection';
         momentSection.appendChild(createElement('div', 'fullCrewSceneSectionTitle', 'This moment'));
+        momentSection.appendChild(
+            createElement(
+                'div',
+                'fullCrewSceneStatus',
+                'Who appears in this frame (indexed scan or optional Vision).'
+            )
+        );
 
         if (scene && (scene.Error || scene.error) && !(scene.Matches || scene.matches || []).length) {
             momentSection.appendChild(createElement('div', 'fullCrewSceneStatus', scene.Error || scene.error));
@@ -4590,13 +4602,18 @@
             momentSection.appendChild(renderPersonList(scene.Matches || scene.matches));
         } else {
             momentSection.appendChild(
-                createElement('div', 'fullCrewSceneStatus', 'No indexed match for this timestamp yet.')
+                createElement(
+                    'div',
+                    'fullCrewSceneStatus',
+                    'No indexed match for this timestamp yet. Title cast below still comes from TMDB.'
+                )
             );
         }
 
         var actions = document.createElement('div');
         actions.className = 'fullCrewSceneActions';
         var visionOn = !!(playback && (playback.VisionEnabled || playback.visionEnabled));
+        var visionReason = playback && (playback.VisionReason || playback.visionReason);
         if (visionOn) {
             var scanBtn = document.createElement('button');
             scanBtn.type = 'button';
@@ -4613,7 +4630,8 @@
                 createElement(
                     'div',
                     'fullCrewSceneStatus',
-                    'Enable scene identify + OpenAI key in plugin settings to scan frames.'
+                    visionReason
+                        || 'Enable scene identify + OpenAI key in plugin settings to scan frames. Title cast still works without Vision.'
                 )
             );
         }
@@ -4624,10 +4642,16 @@
         var castSection = document.createElement('div');
         castSection.className = 'fullCrewSceneSection';
         castSection.appendChild(createElement('div', 'fullCrewSceneSectionTitle', 'Title cast'));
-        if (playback && (playback.Error || playback.error) && !cast.length) {
-            castSection.appendChild(createElement('div', 'fullCrewSceneStatus', playback.Error || playback.error));
+        castSection.appendChild(
+            createElement('div', 'fullCrewSceneStatus', 'TMDB billed cast for this title (no OpenAI).')
+        );
+        if (creditsError && !cast.length) {
+            castSection.appendChild(createElement('div', 'fullCrewSceneStatus', creditsError));
+        } else if (!cast.length) {
+            var emptyHint = 'No cast returned from TMDB for this item. Confirm it has a TMDB id (TheMovieDb metadata), then try again.';
+            castSection.appendChild(createElement('div', 'fullCrewSceneStatus', emptyHint));
         } else {
-            castSection.appendChild(renderPersonList(cast, 'No cast available.'));
+            castSection.appendChild(renderPersonList(cast));
         }
         wrap.appendChild(castSection);
 
