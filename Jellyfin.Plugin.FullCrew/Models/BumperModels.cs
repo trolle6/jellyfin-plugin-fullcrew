@@ -56,4 +56,14 @@ public class BumperResponse
     /// Gets or sets network hints considered for this item.
     /// </summary>
     public IReadOnlyList<string> NetworkHints { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets a stable bumper key used for rotation history (local:… or yt:…).
+    /// </summary>
+    public string? BumperKey { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many other unseen bumpers remain for this show.
+    /// </summary>
+    public int AlternatesAvailable { get; set; }
 }

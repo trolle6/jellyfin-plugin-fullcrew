@@ -8,10 +8,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <Version>1.7.1.0</Version>
-    <FileVersion>1.7.1.0</FileVersion>
-    <AssemblyVersion>1.7.1.0</AssemblyVersion>
+    <Version>1.7.5.0</Version>
+    <FileVersion>1.7.5.0</FileVersion>
+    <AssemblyVersion>1.7.5.0</AssemblyVersion>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Jellyfin.Plugin.FullCrew.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Jellyfin.Controller" Version="10.11.0" />

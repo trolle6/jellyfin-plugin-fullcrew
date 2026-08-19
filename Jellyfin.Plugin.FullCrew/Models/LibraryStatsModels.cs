@@ -96,6 +96,11 @@ public class LibraryStatsResponse
     public IReadOnlyList<LibraryStatsBucket> Decades { get; set; } = [];
 
     /// <summary>
+    /// Gets or sets production year frequency buckets (e.g. 2015, 2001).
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> Years { get; set; } = [];
+
+    /// <summary>
     /// Gets or sets community rating distribution buckets.
     /// </summary>
     public IReadOnlyList<LibraryStatsBucket> CommunityRatings { get; set; } = [];

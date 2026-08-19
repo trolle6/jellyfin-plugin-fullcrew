@@ -120,6 +120,12 @@ public class SceneIdentifyMatch
     public string? ProfileUrl { get; set; }
 
     /// <summary>
+    /// Gets or sets an in-title still (character-in-show photo) when TMDB has a tagged image.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CharacterStillUrl { get; set; }
+
+    /// <summary>
     /// Gets or sets model confidence 0–1 when provided.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

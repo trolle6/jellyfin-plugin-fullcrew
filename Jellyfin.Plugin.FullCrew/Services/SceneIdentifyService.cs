@@ -26,6 +26,10 @@ public sealed class SceneIdentifyService
     private const int MaxCastCandidates = 40;
     private const int RateLimitPerMinute = 12;
     private static readonly TimeSpan FrameCacheTtl = TimeSpan.FromMinutes(10);
+    private static readonly JsonSerializerOptions TmdbJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
 
     private readonly CreditsService _creditsService;
     private readonly SceneIndexStore _sceneIndex;
@@ -84,7 +88,7 @@ public sealed class SceneIdentifyService
     }
 
     /// <summary>
-    /// Title cast + nearby indexed scene for playback (no OpenAI call).
+    /// Billed characters for the playback side rail (TMDB only — no OpenAI).
     /// </summary>
     public async Task<PlaybackSceneResponse> GetPlaybackSceneAsync(
         Guid itemId,
@@ -95,13 +99,24 @@ public sealed class SceneIdentifyService
         var credits = await _creditsService
             .GetCreditsAsync(itemId, cancellationToken, forceIncludeCast: true, preferSeriesAggregate: true)
             .ConfigureAwait(false);
-        var cast = ExtractCastCandidates(credits)
+        var candidates = ExtractCastCandidates(credits);
+        var stills = await ResolveCharacterStillsAsync(
+                candidates,
+                credits.TmdbId,
+                credits.MediaType,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        var cast = candidates
             .Select(c => new SceneIdentifyMatch
             {
                 Name = c.Name,
                 Role = c.Role,
                 TmdbPersonId = c.TmdbPersonId,
-                ProfileUrl = c.ProfileUrl
+                ProfileUrl = c.ProfileUrl,
+                CharacterStillUrl = c.TmdbPersonId is int pid && stills.TryGetValue(pid, out var still)
+                    ? still
+                    : null
             })
             .ToList();
 
@@ -288,6 +303,119 @@ public sealed class SceneIdentifyService
         {
             _logger.LogDebug(ex, "Scene index persist skipped for {ItemId}", itemId);
         }
+    }
+
+    private async Task<Dictionary<int, string>> ResolveCharacterStillsAsync(
+        IReadOnlyList<CastCandidate> candidates,
+        string? tmdbId,
+        string? mediaType,
+        CancellationToken cancellationToken)
+    {
+        var stills = new Dictionary<int, string>();
+        if (!int.TryParse(tmdbId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var mediaTmdbId)
+            || mediaTmdbId <= 0)
+        {
+            return stills;
+        }
+
+        var expectedType = TmdbCharacterStills.ExpectedMediaType(mediaType);
+        var apiKey = TmdbDefaults.ResolveApiKey(Plugin.Instance?.Configuration?.TmdbApiKey);
+        var cacheHours = Math.Clamp(Plugin.Instance?.Configuration?.CacheHours ?? 12, 1, 168);
+        var ttl = TimeSpan.FromHours(cacheHours);
+        var client = _httpClientFactory.CreateClient();
+        using var gate = new SemaphoreSlim(TmdbCharacterStills.LookupConcurrency, TmdbCharacterStills.LookupConcurrency);
+
+        var lookups = candidates
+            .Where(c => c.TmdbPersonId is int id && id > 0)
+            .GroupBy(c => c.TmdbPersonId!.Value)
+            .Select(g => g.First())
+            .Take(TmdbCharacterStills.MaxLookups)
+            .ToList();
+
+        var tasks = lookups.Select(async candidate =>
+        {
+            var personId = candidate.TmdbPersonId!.Value;
+            var cacheKey = $"fullcrew-still-v1-{expectedType}-{mediaTmdbId}-{personId.ToString(CultureInfo.InvariantCulture)}";
+            if (_memoryCache.TryGetValue(cacheKey, out string? cached))
+            {
+                if (!string.IsNullOrEmpty(cached))
+                {
+                    lock (stills)
+                    {
+                        stills[personId] = cached;
+                    }
+                }
+
+                return;
+            }
+
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var url = await FetchTaggedStillUrlAsync(
+                        client,
+                        apiKey,
+                        personId,
+                        mediaTmdbId,
+                        expectedType,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                _memoryCache.Set(cacheKey, url ?? string.Empty, ttl);
+                if (!string.IsNullOrEmpty(url))
+                {
+                    lock (stills)
+                    {
+                        stills[personId] = url;
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Tagged still lookup failed for person {PersonId} on {TmdbId}", personId, mediaTmdbId);
+                _memoryCache.Set(cacheKey, string.Empty, TimeSpan.FromMinutes(30));
+            }
+            finally
+            {
+                gate.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks).ConfigureAwait(false);
+        return stills;
+    }
+
+    private async Task<string?> FetchTaggedStillUrlAsync(
+        HttpClient client,
+        string apiKey,
+        int personId,
+        int mediaTmdbId,
+        string? expectedMediaType,
+        CancellationToken cancellationToken)
+    {
+        var path =
+            "https://api.themoviedb.org/3/person/"
+            + personId.ToString(CultureInfo.InvariantCulture)
+            + "/tagged_images?api_key="
+            + Uri.EscapeDataString(apiKey);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.TryAddWithoutValidation("User-Agent", PluginInfo.UserAgent);
+        using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var payload = await JsonSerializer.DeserializeAsync<TmdbTaggedImagesPayload>(stream, TmdbJsonOptions, cancellationToken)
+            .ConfigureAwait(false);
+        var images = payload?.Results ?? [];
+        var filePath = TmdbCharacterStills.PickTaggedStillPath(images, mediaTmdbId, expectedMediaType);
+        return TmdbCharacterStills.ToStillUrl(filePath);
     }
 
     /// <summary>Pull billed cast candidates from a credits response.</summary>

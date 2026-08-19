@@ -50,11 +50,20 @@
                     </div>
 
                     <div class="verticalSection">
-                        <h3 class="sectionTitle">Scene identify (Who’s on screen)</h3>
+                        <h3 class="sectionTitle">Playback characters</h3>
                         <p class="fieldDescription">
-                            Opt-in. On Jellyfin Web playback, press <strong>Y</strong> (or the player button) to capture the
-                            current frame and ask OpenAI Vision which people from <em>this title’s TMDB cast</em> appear.
-                            The still is sent to OpenAI only when you ask — not continuously. This is not Amazon X-Ray.
+                            On Jellyfin Web playback, press <strong>Y</strong> (or the people button on the player)
+                            for a side panel of billed characters: character name, actor name, and a still from this
+                            title when TMDB has one. The video keeps playing. Full departments stay on the title page
+                            — back out of playback and scroll the accordion. This is not Amazon X-Ray.
+                        </p>
+                    </div>
+
+                    <div class="verticalSection">
+                        <h3 class="sectionTitle">Scene identify (optional)</h3>
+                        <p class="fieldDescription">
+                            Unused by the playback panel. Leave off unless you call the identify-frame API yourself.
+                            When enabled, a still can be sent to OpenAI Vision to match billed cast.
                         </p>
                         <div class="checkboxContainer">
                             <label>
@@ -92,10 +101,11 @@
                         </div>
                         <div class="inputContainer">
                             <input is="emby-input" type="text" id="BumpersCollectionName" label="Local bumpers collection / folder name" />
-                            <div class="fieldDescription">
-                                Optional. Prefer clips from a collection or folder with this name (default: Bumpers).
-                                Also matches library items tagged or named with “bumper”.
-                            </div>
+                        <div class="fieldDescription">
+                            Optional. Prefer clips from a collection or folder with this name (default: Bumpers).
+                            Also matches library items tagged or named with “bumper”.
+                            Already-seen bumpers rotate per show; use <strong>Another bumper</strong> in the overlay for the next clip.
+                        </div>
                         </div>
                     </div>
 
@@ -107,6 +117,16 @@
 
                     <div class="verticalSection">
                         <h3 class="sectionTitle">Web UI injection</h3>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="EnableGlassPlayButtons" />
+                                <span>Use frosted-glass play buttons on episode thumbnails</span>
+                            </label>
+                        </div>
+                        <div class="fieldDescription">
+                            Replaces solid green/theme play circles with a subtle Apple-style glass overlay.
+                            The white play icon stays visible; turn off to restore Jellyfin defaults.
+                        </div>
                         <p class="fieldDescription">
                             The plugin injects a script into Jellyfin Web. Prefer installing the
                             <strong>File Transformation</strong> plugin for Docker-safe injection.
@@ -190,6 +210,7 @@
                         document.querySelector('#MaxPeoplePerDepartment').value =
                             config.MaxPeoplePerDepartment != null ? config.MaxPeoplePerDepartment : 100;
                         document.querySelector('#EnableLibraryStats').checked = config.EnableLibraryStats !== false;
+                        document.querySelector('#EnableGlassPlayButtons').checked = config.EnableGlassPlayButtons !== false;
                         document.querySelector('#EnableSceneIdentify').checked = !!config.EnableSceneIdentify;
                         document.querySelector('#OpenAiApiKey').value = config.OpenAiApiKey || '';
                         document.querySelector('#OpenAiVisionModel').value = config.OpenAiVisionModel || 'gpt-4o-mini';
@@ -210,6 +231,7 @@
                         config.MaxPeoplePerDepartment =
                             parseInt(document.querySelector('#MaxPeoplePerDepartment').value, 10) || 100;
                         config.EnableLibraryStats = !!document.querySelector('#EnableLibraryStats').checked;
+                        config.EnableGlassPlayButtons = !!document.querySelector('#EnableGlassPlayButtons').checked;
                         config.EnableSceneIdentify = !!document.querySelector('#EnableSceneIdentify').checked;
                         config.OpenAiApiKey = document.querySelector('#OpenAiApiKey').value;
                         config.OpenAiVisionModel = document.querySelector('#OpenAiVisionModel').value || 'gpt-4o-mini';

@@ -2,14 +2,14 @@
 
 **Complete TMDB cast & crew on Jellyfin Web — Library Stats, studio profiles, break bumpers, and a local scene index you grow while watching.**
 
-[![Version](https://img.shields.io/badge/version-1.7.1.0-00a4dc)](meta.json)
+[![Version](https://img.shields.io/badge/version-1.7.2.0-00a4dc)](meta.json)
 [![Jellyfin](https://img.shields.io/badge/Jellyfin-10.11%2B-00a4dc?logo=jellyfin&logoColor=white)](https://jellyfin.org)
 [![.NET](https://img.shields.io/badge/.NET-9.0-512BD4)](Jellyfin.Plugin.FullCrew/Jellyfin.Plugin.FullCrew.csproj)
 [![Repo](https://img.shields.io/badge/github-trolle6%2Fjellyfin--plugin--fullcrew-181717?logo=github)](https://github.com/trolle6/jellyfin-plugin-fullcrew)
 
 Jellyfin’s built-in TMDb importer keeps a thin slice of people. Full Crew loads live TMDB credits for the item you already identified, groups them by department, and renders a polished accordion on **Movie / Series / Season / Episode** detail pages — not on Person, Genre, Studio, or BoxSet pages.
 
-During playback, **Y** opens scene info: title cast anytime, plus indexed “this moment” hits you build over time. Optional OpenAI Vision scans are opt-in and saved locally so revisits do not call the API again.
+During playback, **Y** opens a side panel of billed **characters** (character name, actor, still from the title when TMDB has one). Full departments stay on the title page accordion.
 
 ---
 
@@ -22,7 +22,7 @@ Screenshots are not in the repo yet. Suggested paths once you capture them:
 | `docs/screenshots/cast-accordion.png` | Department accordion on a movie or series |
 | `docs/screenshots/library-stats.png` | Library Stats overview (`#/fullcrew/stats`) |
 | `docs/screenshots/studio-page.png` | Studio profile (`#/fullcrew/studio/...`) |
-| `docs/screenshots/scene-info.png` | Playback scene info panel (Y) |
+| `docs/screenshots/scene-info.png` | Playback character rail (Y) |
 | `docs/screenshots/bumper-button.png` | Bumper / Trailer detail buttons |
 
 ---
@@ -35,9 +35,9 @@ Screenshots are not in the repo yet. Suggested paths once you capture them:
 - **Studio pages** — `#/fullcrew/studio/...` profile layout: TMDB company metadata, library titles, studio-scoped stats, name-root clusters from Stats
 - **Break bumpers** — detail-page Bumper button; prefers a local “Bumpers” collection/folder, then curated/search YouTube when enabled
 - **Trailer companion** — adds a Trailer button when Jellyfin’s native trailer control is missing
-- **Scene info + local scene index** — press **Y** (or the OSD face button) for title cast and nearby indexed moments; opt-in Vision scans persist in 10s buckets under the plugin data folder
+- **Playback character rail** — press **Y** (or the OSD people button) for a side panel of billed characters: character name, actor name, and a still from this title when TMDB has a tagged photo. Full crew stays on the title page.
 - **Self-hosted injection** — File Transformation / JavaScript Injector / `index.html` patch, plus **early-boot** so `#/fullcrew/*` routes do not flash “page not found”
-- **Configurable** — optional TMDB key, OpenAI key for scene identify, cache TTL, department toggles, bumper/YouTube/stats switches
+- **Configurable** — optional TMDB key, cache TTL, department toggles, bumper/YouTube/stats switches
 
 Credits are fetched on demand and **not** written into Jellyfin’s people library.
 
@@ -99,8 +99,8 @@ Dashboard → Plugins → **Full Crew**
 | Setting | Default | What it does |
 | --- | --- | --- |
 | TMDB API Key | *(empty)* | Optional; blank uses Jellyfin’s shared TMDB key |
-| Enable scene identify | Off | Opt-in Vision scans when you choose Scan / first visit a moment |
-| OpenAI API Key | *(empty)* | Required when scene identify is enabled |
+| Enable scene identify | Off | Unused by the Y panel; leave off unless you call identify-frame yourself |
+| OpenAI API Key | *(empty)* | Only for the optional identify-frame API |
 | OpenAI vision model | `gpt-4o-mini` | Vision-capable chat model |
 | Cache hours | `12` | In-memory credits cache (1–168) |
 | Max people per department | `100` | Cap per accordion section |
@@ -123,7 +123,7 @@ Open a movie, series, season, or episode in Jellyfin Web. Below the usual detail
 | Movie | `/movie/{id}/credits` |
 | Series | `/tv/{id}/aggregate_credits` |
 | Episode (detail accordion) | `/tv/{id}/season/{n}/credits`, falling back to series aggregate |
-| Episode (playback / identify) | Series `/tv/{id}/aggregate_credits` (fuller cast) |
+| Episode (playback rail) | Series `/tv/{id}/aggregate_credits` (fuller cast) |
 | Season | `/tv/{id}/season/{n}/credits`, falling back to series aggregate |
 
 ### Library Stats
@@ -136,21 +136,22 @@ Open a movie, series, season, or episode in Jellyfin Web. Below the usual detail
 
 `#/fullcrew/studio/{name}` — person-style profile, library grid, optional missing popular titles.
 
-### Scene info (playback)
+### Playback characters
 
 During **Jellyfin Web** playback:
 
-1. Press **Y**, or the face icon on the player OSD
-2. Side sheet shows **Title cast** (TMDB, no OpenAI) and **This moment** if indexed
-3. With scene identify enabled, unscanned moments can auto-scan once; results are stored in the local **scene index**
-4. Revisit the same timestamp (±10s) → index hit, **no new OpenAI call**
-5. Use **Rescan this frame** to force a fresh Vision pass
+1. Press **Y**, or the people icon on the player OSD (toggles the rail)
+2. A side panel lists billed **characters**: in-title still when TMDB has a tagged photo, otherwise the actor portrait; character name; actor name
+3. Video keeps playing — the panel does not scan frames
+4. For full departments, back out of playback and scroll the title-page accordion
 
-Not Amazon X-Ray. Best on clear close-ups of billed actors.
+Not Amazon X-Ray. Stills come from TMDB tagged images for this title; cartoons often fall back to the voice-actor portrait when no in-show still exists.
 
 ### Bumpers & trailers
 
 On media detail pages: **Bumper** (local first, then YouTube if allowed) and **Trailer** when Jellyfin’s native control is missing.
+
+Bumpers **rotate per show**: already-seen picks are skipped on the next click. In the player overlay use **Another bumper** for the next unseen clip, or **Search YouTube** to browse manually. History is stored under the plugin data folder (`bumper-history/`).
 
 ---
 
@@ -182,11 +183,11 @@ git push origin v1.7.0.0
 
 | Destination | When |
 | --- | --- |
-| **api.themoviedb.org** / **image.tmdb.org** | Credits, studio metadata, profile/logo images |
+| **api.themoviedb.org** / **image.tmdb.org** | Credits, studio metadata, profile images, tagged character stills |
 | **YouTube** | Bumpers/trailers when YouTube lookups are enabled |
-| **api.openai.com** | Scene identify only — when enabled and you scan a frame |
+| **api.openai.com** | Optional identify-frame API only — not used by the Y panel |
 
-Scene index JSON is stored on your server under the plugin data folder (`scene-index/`). Leave **Enable scene identify** off to never send frames to OpenAI. **Y** still shows title cast and any already-indexed moments.
+The Y playback rail is TMDB-only. Leave **Enable scene identify** off unless you call identify-frame yourself.
 
 ---
 
@@ -198,7 +199,7 @@ Scene index JSON is stored on your server under the plugin data folder (`scene-i
 | `GET` | `/FullCrew/{itemId}/bumper` | Resolve break bumper |
 | `GET` | `/FullCrew/{itemId}/trailer` | Resolve trailer companion |
 | `GET` | `/FullCrew/scene-identify/status` | Vision enabled? (no secrets) |
-| `GET` | `/FullCrew/{itemId}/playback-scene` | Title cast + nearby scene-index hit |
+| `GET` | `/FullCrew/{itemId}/playback-scene` | Billed characters + optional stills for the playback rail |
 | `POST` | `/FullCrew/{itemId}/identify-frame` | Vision match; saves to scene index |
 | `GET` | `/FullCrew/stats` | Library stats overview |
 | `GET` | `/FullCrew/stats/{category}` | Full ranked category list |

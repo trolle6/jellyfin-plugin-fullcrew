@@ -258,6 +258,7 @@ public class LibraryStatsService
             var studioCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var ratingCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var decadeCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var yearCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var tagCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var languageCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var locationCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -339,11 +340,17 @@ public class LibraryStatsService
                     var decadeLabel = ((year / 10) * 10).ToString(CultureInfo.InvariantCulture) + "s";
                     Increment(decadeCounts, decadeLabel);
                     RecordBucketItem(bucketItems, "decades", decadeLabel, itemRef);
+
+                    var yearLabel = year.ToString(CultureInfo.InvariantCulture);
+                    Increment(yearCounts, yearLabel);
+                    RecordBucketItem(bucketItems, "years", yearLabel, itemRef);
                 }
                 else
                 {
                     Increment(decadeCounts, UnknownBucketName);
                     RecordBucketItem(bucketItems, "decades", UnknownBucketName, itemRef);
+                    Increment(yearCounts, UnknownBucketName);
+                    RecordBucketItem(bucketItems, "years", UnknownBucketName, itemRef);
                 }
 
                 var communityBucket = CommunityRatingBucket(item.CommunityRating);
@@ -457,6 +464,7 @@ public class LibraryStatsService
                 StudioCounts = studioCounts,
                 RatingCounts = ratingCounts,
                 DecadeCounts = decadeCounts,
+                YearCounts = yearCounts,
                 TagCounts = tagCounts,
                 LanguageCounts = languageCounts,
                 LocationCounts = locationCounts,
@@ -514,6 +522,7 @@ public class LibraryStatsService
         // Rule A — exclusive single-value: percent of titles (or media samples).
         var ratings = ToTopBuckets(agg.RatingCounts, total, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
         var decades = ToDecadeBuckets(agg.DecadeCounts, total);
+        var years = ToTopBuckets(agg.YearCounts, total, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
         var communityRatings = ToOrderedBuckets(agg.CommunityCounts, total, CommunityRatingBucketOrder);
         var languages = ToTopBuckets(agg.LanguageCounts, total, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
         var collections = ToTopBuckets(agg.CollectionCounts, SumCounts(agg.CollectionCounts), TopBucketLimit, foldUnknown: false, omitDominantOther: true, itemIds: agg.CollectionItemIds, itemType: "BoxSet");
@@ -544,6 +553,7 @@ public class LibraryStatsService
             Studios = studios,
             OfficialRatings = ratings,
             Decades = decades,
+            Years = years,
             CommunityRatings = communityRatings,
             Tags = tags,
             Languages = languages,
@@ -555,7 +565,7 @@ public class LibraryStatsService
             AudioChannels = audioChannels,
             AudioCodecs = audioCodecs,
             PeopleByRole = peopleByRole,
-            Insights = BuildInsights(agg, genres, studios, ratings, decades, communityRatings, peopleByRole, tags, languages, collections, resolutions, videoRanges, videoCodecs)
+            Insights = BuildInsights(agg, genres, studios, ratings, decades, years, communityRatings, peopleByRole, tags, languages, collections, resolutions, videoRanges, videoCodecs)
         };
     }
 
@@ -1858,6 +1868,39 @@ public class LibraryStatsService
             .ToList();
     }
 
+    private static IReadOnlyList<LibraryStatsBucket> ToYearBuckets(
+        IReadOnlyDictionary<string, int> counts,
+        int total)
+    {
+        if (counts.Count == 0 || total <= 0)
+        {
+            return [];
+        }
+
+        return counts
+            .Where(kv => kv.Value > 0)
+            .OrderByDescending(kv => YearSortKey(kv.Key))
+            .Select(kv => new LibraryStatsBucket
+            {
+                Name = kv.Key,
+                Count = kv.Value,
+                Percent = Percent(kv.Value, total)
+            })
+            .ToList();
+    }
+
+    private static int YearSortKey(string name)
+    {
+        if (name.Equals(UnknownBucketName, StringComparison.OrdinalIgnoreCase))
+        {
+            return int.MinValue;
+        }
+
+        return int.TryParse(name, NumberStyles.Integer, CultureInfo.InvariantCulture, out var year)
+            ? year
+            : int.MinValue + 1;
+    }
+
     private static IReadOnlyList<LibraryStatsBucket> ToDecadeBuckets(
         IReadOnlyDictionary<string, int> counts,
         int total)
@@ -1900,6 +1943,7 @@ public class LibraryStatsService
         IReadOnlyList<LibraryStatsBucket> studios,
         IReadOnlyList<LibraryStatsBucket> ratings,
         IReadOnlyList<LibraryStatsBucket> decades,
+        IReadOnlyList<LibraryStatsBucket> years,
         IReadOnlyList<LibraryStatsBucket> communityRatings,
         IReadOnlyList<LibraryStatsPeopleGroup> peopleByRole,
         IReadOnlyList<LibraryStatsBucket> tags,
@@ -2179,6 +2223,22 @@ public class LibraryStatsService
                 topDecade.Percent));
         }
 
+        var topYear = years
+            .Where(y => !y.Name.Equals(UnknownBucketName, StringComparison.OrdinalIgnoreCase)
+                        && !y.Name.Equals(OtherBucketName, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(y => y.Count)
+            .ThenByDescending(y => YearSortKey(y.Name))
+            .FirstOrDefault();
+        if (topYear is not null && topYear.Count >= 2)
+        {
+            AddInsight(insights, string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} titles share release year {1} ({2}%).",
+                topYear.Count,
+                topYear.Name,
+                topYear.Percent));
+        }
+
         return insights.Take(MaxInsights).ToList();
     }
 
@@ -2415,11 +2475,18 @@ public class LibraryStatsService
                 agg.GeneratedAt,
                 agg.CollectionItemIds,
                 "BoxSet"),
-            "decades" or "years" => CategoryFromBuckets(
+            "decades" => CategoryFromBuckets(
                 "decades",
-                "Years",
+                "Decades",
                 "Share of titles",
                 ToDecadeBuckets(agg.DecadeCounts, agg.TotalCount),
+                agg.TotalCount,
+                agg.GeneratedAt),
+            "years" => CategoryFromBuckets(
+                "years",
+                "Release years",
+                "Share of titles",
+                ToYearBuckets(agg.YearCounts, agg.TotalCount),
                 agg.TotalCount,
                 agg.GeneratedAt),
             "ratings" or "officialratings" => CategoryFromCounts(
@@ -2698,6 +2765,8 @@ public class LibraryStatsService
         public Dictionary<string, int> RatingCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
         public Dictionary<string, int> DecadeCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, int> YearCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
         public Dictionary<string, int> TagCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 

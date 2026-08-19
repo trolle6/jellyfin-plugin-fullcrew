@@ -77,9 +77,13 @@ public class FullCrewController : ControllerBase
     [ProducesResponseType(typeof(BumperResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<BumperResponse>> GetBumper(
         [FromRoute] Guid itemId,
+        [FromQuery] bool next,
+        [FromQuery] string? skip,
         CancellationToken cancellationToken)
     {
-        var result = await _bumperService.GetBumperAsync(itemId, cancellationToken).ConfigureAwait(false);
+        var result = await _bumperService
+            .GetBumperAsync(itemId, next, skip, cancellationToken)
+            .ConfigureAwait(false);
         return Ok(result);
     }
 
@@ -109,7 +113,7 @@ public class FullCrewController : ControllerBase
     }
 
     /// <summary>
-    /// Playback companion: title cast + nearby scene-index hit (no OpenAI).
+    /// Playback companion: billed characters for the side rail (no OpenAI).
     /// </summary>
     [HttpGet("{itemId:guid}/playback-scene")]
     [Authorize]

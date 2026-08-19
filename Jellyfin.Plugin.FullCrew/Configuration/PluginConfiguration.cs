@@ -20,6 +20,7 @@ public class PluginConfiguration : BasePluginConfiguration
         EnableBumpers = true;
         EnableYouTubeBumpers = true;
         EnableLibraryStats = true;
+        EnableGlassPlayButtons = true;
         EnableSceneIdentify = false;
         OpenAiApiKey = string.Empty;
         OpenAiVisionModel = "gpt-4o-mini";
@@ -57,6 +58,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets a value indicating whether the Library Stats page and API are enabled.
     /// </summary>
     public bool EnableLibraryStats { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether episode/card play buttons use a frosted-glass style
+    /// instead of solid theme colors on Jellyfin Web.
+    /// </summary>
+    public bool EnableGlassPlayButtons { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether pause/hotkey scene identify (OpenAI Vision) is enabled.

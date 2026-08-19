@@ -9,12 +9,12 @@
     /*   Core.el / Core.prop / Core.getJson / Core.PageTitle / Core.Ui    */
     /*   Core.CustomPage — mount/teardown for hash-routed overlays        */
     /*   Core.navigateToItem / Core.bindPageLoad / Core.findMount         */
-    /* Features: Crew accordion · Bumper/Trailer · Stats · Studio · SceneIdentify */
+    /* Features: Crew accordion · Bumper/Trailer · Stats · Studio · Character rail */
     /* Route chrome (peek/apply) runs before the duplicate-script guard.  */
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.7.1.0';
+    var PLUGIN_VERSION = '1.7.5.0';
     var ROLE_PREVIEW_MAX = 3;
     var ROLE_NAME_SUFFIXES = {
         jr: 1, 'jr.': 1, sr: 1, 'sr.': 1, ii: 1, iii: 1, iv: 1, v: 1, phd: 1, md: 1, esq: 1, 'esq.': 1
@@ -24,6 +24,25 @@
     var ROUTE_PENDING_CLASS = 'fullCrewRoutePending';
     var STATS_BODY_CLASS = 'fullCrewStatsActive';
     var STUDIO_BODY_CLASS = 'fullCrewStudioActive';
+    var GLASS_PLAY_CLASS = 'fullCrewGlassPlay';
+
+    function applyGlassPlayChrome(enabled) {
+        var root = document.documentElement;
+        var on = enabled !== false;
+        if (on) {
+            root.classList.add(GLASS_PLAY_CLASS);
+            if (document.body) {
+                document.body.classList.add(GLASS_PLAY_CLASS);
+            }
+        } else {
+            root.classList.remove(GLASS_PLAY_CLASS);
+            if (document.body) {
+                document.body.classList.remove(GLASS_PLAY_CLASS);
+            }
+        }
+    }
+
+    applyGlassPlayChrome(true);
 
     /**
      * Parse hash ASAP (no DOM required). Used by early chrome + routers.
@@ -1595,8 +1614,19 @@
     var TRAILER_BTN_ID = 'fullCrewTrailerButton';
     var itemPromiseCache = Object.create(null);
 
-    function fetchBumper(itemId) {
-        return Core.getJson('FullCrew/' + encodeURIComponent(itemId) + '/bumper');
+    function fetchBumper(itemId, options) {
+        var q = 'FullCrew/' + encodeURIComponent(itemId) + '/bumper';
+        var params = [];
+        if (options && options.next) {
+            params.push('next=true');
+        }
+        if (options && options.skip) {
+            params.push('skip=' + encodeURIComponent(String(options.skip)));
+        }
+        if (params.length) {
+            q += '?' + params.join('&');
+        }
+        return Core.getJson(q);
     }
 
     function fetchTrailer(itemId) {
@@ -1668,13 +1698,16 @@
         return false;
     }
 
-    function playResolvedClip(data, fallbackTitle) {
+    function playResolvedClip(data, fallbackTitle, itemId) {
         var error = data && (data.Error || data.error);
         var videoId = data && (data.YouTubeVideoId || data.youTubeVideoId);
         var youtubeUrl = data && (data.YouTubeUrl || data.youTubeUrl);
         var searchUrl = data && (data.SearchUrl || data.searchUrl);
         if (error && !videoId && !youtubeUrl && !searchUrl) {
             console.warn('[FullCrew]', error);
+            if (searchUrl) {
+                openExternal(searchUrl);
+            }
             return;
         }
 
@@ -1683,15 +1716,17 @@
         var title = (data && (data.Title || data.title)) || fallbackTitle;
 
         if (source === 'Local' && localId) {
-            return playLocalItem(localId).catch(function (err) {
+            return playLocalItem(localId).then(function () {
+                openBumperActionPanel(title, data, itemId);
+            }).catch(function (err) {
                 console.warn('[FullCrew] local play failed', err);
-                if (!openYouTubeEmbed(videoId, title) && (youtubeUrl || searchUrl)) {
+                if (!openYouTubeEmbed(videoId, title, data, itemId) && (youtubeUrl || searchUrl)) {
                     openExternal(youtubeUrl || searchUrl);
                 }
             });
         }
 
-        if (openYouTubeEmbed(videoId, title)) {
+        if (openYouTubeEmbed(videoId, title, data, itemId)) {
             return;
         }
 
@@ -1804,7 +1839,100 @@
         }
     }
 
-    function openYouTubeEmbed(videoId, title) {
+    function appendBumperActions(panel, data, itemId) {
+        if (!panel || !itemId) {
+            return;
+        }
+
+        var searchUrl = data && (data.SearchUrl || data.searchUrl);
+        var bumperKey = data && (data.BumperKey || data.bumperKey);
+        var alternates = data && (data.AlternatesAvailable || data.alternatesAvailable);
+        if (!searchUrl && !bumperKey && !(alternates > 0)) {
+            return;
+        }
+
+        var actions = document.createElement('div');
+        actions.className = 'fullCrewBumperActions';
+
+        if (bumperKey || alternates > 0) {
+            var anotherBtn = document.createElement('button');
+            anotherBtn.type = 'button';
+            anotherBtn.className = 'raised button-submit fullCrewBumperAnotherBtn';
+            anotherBtn.textContent = alternates > 0
+                ? 'Another bumper (' + alternates + ' left)'
+                : 'Another bumper';
+            anotherBtn.addEventListener('click', function () {
+                anotherBtn.disabled = true;
+                fetchBumper(itemId, { next: true, skip: bumperKey })
+                    .then(function (nextData) {
+                        return playResolvedClip(nextData, 'Break bumper', itemId);
+                    })
+                    .catch(function (err) {
+                        console.warn('[FullCrew] another bumper failed', err);
+                        anotherBtn.disabled = false;
+                    });
+            });
+            actions.appendChild(anotherBtn);
+        }
+
+        if (searchUrl) {
+            var searchBtn = document.createElement('button');
+            searchBtn.type = 'button';
+            searchBtn.className = 'button-flat fullCrewBumperSearchBtn';
+            searchBtn.textContent = 'Search YouTube';
+            searchBtn.addEventListener('click', function () {
+                openExternal(searchUrl);
+            });
+            actions.appendChild(searchBtn);
+        }
+
+        panel.appendChild(actions);
+    }
+
+    function openBumperActionPanel(title, data, itemId) {
+        var returnFocus = document.activeElement;
+        bumperOverlayReturnFocus = null;
+        closeBumperOverlay();
+        bumperOverlayReturnFocus = returnFocus;
+
+        var overlay = document.createElement('div');
+        overlay.id = 'fullCrewBumperOverlay';
+        overlay.className = 'fullCrewBumperOverlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-label', title || 'Break bumper');
+
+        var backdrop = document.createElement('div');
+        backdrop.className = 'fullCrewBumperBackdrop';
+        backdrop.addEventListener('click', closeBumperOverlay);
+
+        var panel = document.createElement('div');
+        panel.className = 'fullCrewBumperPanel fullCrewBumperPanelCompact';
+
+        var header = document.createElement('div');
+        header.className = 'fullCrewBumperOverlayHeader';
+        header.appendChild(createElement('div', 'fullCrewBumperOverlayTitle', title || 'Break bumper'));
+
+        var closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'fullCrewBumperClose';
+        closeBtn.setAttribute('aria-label', 'Close');
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', closeBumperOverlay);
+        header.appendChild(closeBtn);
+
+        panel.appendChild(header);
+        panel.appendChild(createElement('div', 'fullCrewBumperLocalHint', 'Playing from your library.'));
+        appendBumperActions(panel, data, itemId);
+
+        overlay.appendChild(backdrop);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+        document.addEventListener('keydown', onBumperOverlayKeydown, true);
+        closeBtn.focus();
+    }
+
+    function openYouTubeEmbed(videoId, title, bumperData, itemId) {
         if (!videoId) {
             return false;
         }
@@ -1857,6 +1985,7 @@
         frameWrap.appendChild(iframe);
         panel.appendChild(header);
         panel.appendChild(frameWrap);
+        appendBumperActions(panel, bumperData, itemId);
         overlay.appendChild(backdrop);
         overlay.appendChild(panel);
         document.body.appendChild(overlay);
@@ -1875,7 +2004,7 @@
 
         fetchBumper(itemId)
             .then(function (data) {
-                return playResolvedClip(data, 'Break bumper');
+                return playResolvedClip(data, 'Break bumper', itemId);
             })
             .catch(function (err) {
                 console.warn('[FullCrew] bumper request failed', err);
@@ -1917,7 +2046,7 @@
                 }
 
                 return fetchTrailer(itemId).then(function (data) {
-                    return playResolvedClip(data, 'Trailer');
+                    return playResolvedClip(data, 'Trailer', itemId);
                 });
             })
             .catch(function (err) {
@@ -2148,7 +2277,7 @@
 
     var BUCKET_ITEMS_CATEGORY_KEYS = {
         types: 1, resolutions: 1, hdr: 1, videoCodecs: 1, audioChannels: 1, audioCodecs: 1,
-        genres: 1, studios: 1, collections: 1, decades: 1, ratings: 1, community: 1, tags: 1, languages: 1
+        genres: 1, studios: 1, collections: 1, decades: 1, years: 1, ratings: 1, community: 1, tags: 1, languages: 1
     };
 
     function normalizeStatsHash(hash) {
@@ -2504,6 +2633,13 @@
         }
         return Promise.resolve(client.getPluginConfiguration(PLUGIN_UNIQUE_ID)).catch(function () {
             return null;
+        });
+    }
+
+    function refreshGlassPlayEnabled() {
+        return fetchPluginConfig().then(function (config) {
+            var flag = config ? prop(config, 'EnableGlassPlayButtons', 'enableGlassPlayButtons') : undefined;
+            applyGlassPlayChrome(flag !== false);
         });
     }
 
@@ -3256,7 +3392,8 @@
             { title: 'Genres', categoryKey: 'genres', keyPascal: 'Genres', keyCamel: 'genres', hint: 'Share of genre tags · top names (full list via title)' },
             { title: 'Studios', categoryKey: 'studios', keyPascal: 'Studios', keyCamel: 'studios', hint: 'Share of studio credits · top names (full list via title)' },
             { title: 'Collections', categoryKey: 'collections', keyPascal: 'Collections', keyCamel: 'collections', hint: 'Share of collection memberships' },
-            { title: 'Years', categoryKey: 'decades', keyPascal: 'Decades', keyCamel: 'decades' },
+            { title: 'Release years', categoryKey: 'years', keyPascal: 'Years', keyCamel: 'years', hint: 'Production year · click a year to list every matching title' },
+            { title: 'Decades', categoryKey: 'decades', keyPascal: 'Decades', keyCamel: 'decades' },
             { title: 'Official ratings', categoryKey: 'ratings', keyPascal: 'OfficialRatings', keyCamel: 'officialRatings' },
             { title: 'Community scores', categoryKey: 'community', keyPascal: 'CommunityRatings', keyCamel: 'communityRatings' },
             { title: 'Tags', categoryKey: 'tags', keyPascal: 'Tags', keyCamel: 'tags', hint: 'Share of tag assignments · top names (full list via title)' },
@@ -4276,27 +4413,13 @@
     }
 
     /* ================================================================== */
-    /* Feature: Scene identify (Who’s on screen)                          */
+    /* Feature: Playback character rail                                   */
     /* ================================================================== */
 
     var SCENE_OVERLAY_ID = 'fullCrewSceneOverlay';
     var SCENE_BTN_ID = 'fullCrewSceneIdentifyBtn';
-    var sceneIdentifyEnabled = null;
     var sceneIdentifyBusy = false;
     var sceneOverlayReturnFocus = null;
-    var sceneOverlayContext = null;
-
-    function refreshSceneIdentifyEnabled() {
-        return Core.getJson('FullCrew/scene-identify/status')
-            .then(function (status) {
-                sceneIdentifyEnabled = !!(status && (status.Enabled || status.enabled));
-                return sceneIdentifyEnabled;
-            })
-            .catch(function () {
-                sceneIdentifyEnabled = false;
-                return false;
-            });
-    }
 
     function getPlaybackManager() {
         try {
@@ -4313,39 +4436,136 @@
         return null;
     }
 
-    function getCurrentlyPlayingItemId() {
-        var pm = getPlaybackManager();
+    function getPlaybackManagerAsync() {
+        var sync = getPlaybackManager();
+        if (sync) {
+            return Promise.resolve(sync);
+        }
+        if (typeof window.require !== 'function') {
+            return Promise.resolve(null);
+        }
+        return new Promise(function (resolve) {
+            try {
+                window.require(['playbackManager'], function (pm) {
+                    resolve(pm && (pm.default || pm));
+                }, function () {
+                    resolve(null);
+                });
+            } catch (e) {
+                resolve(null);
+            }
+        });
+    }
+
+    function resolvePlaybackPlayer(pm) {
         if (!pm) {
             return null;
         }
         try {
-            var item = typeof pm.getCurrentlyPlayingItem === 'function' ? pm.getCurrentlyPlayingItem() : null;
-            if (item) {
-                return item.Id || item.id || null;
+            if (pm._currentPlayer) {
+                return pm._currentPlayer;
             }
         } catch (e) { /* ignore */ }
         try {
-            var state = typeof pm.getPlayerState === 'function' ? pm.getPlayerState() : null;
-            var now = state && (state.NowPlayingItem || state.nowPlayingItem);
-            if (now) {
-                return now.Id || now.id || null;
+            if (typeof pm.getPlayers === 'function') {
+                var players = pm.getPlayers() || [];
+                var i;
+                for (i = 0; i < players.length; i++) {
+                    if (players[i] && players[i].isLocalPlayer) {
+                        return players[i];
+                    }
+                }
+                if (players.length) {
+                    return players[0];
+                }
             }
         } catch (e2) { /* ignore */ }
         return null;
     }
 
-    function getPlaybackPositionTicks() {
-        var pm = getPlaybackManager();
-        try {
-            if (pm && typeof pm.getCurrentTimeTicks === 'function') {
-                return pm.getCurrentTimeTicks();
-            }
-        } catch (e) { /* ignore */ }
-        var video = getPlaybackVideoElement();
-        if (video && isFinite(video.currentTime)) {
-            return Math.round(video.currentTime * 10000000);
+    function itemIdFromPlaybackObject(item) {
+        if (!item) {
+            return null;
         }
+        return item.Id || item.id || item.ItemId || item.itemId || null;
+    }
+
+    function getCurrentlyPlayingItemId(pm) {
+        pm = pm || getPlaybackManager();
+        if (pm) {
+            try {
+                var player = resolvePlaybackPlayer(pm);
+                if (player && typeof pm.currentItem === 'function') {
+                    var current = pm.currentItem(player);
+                    var fromCurrent = itemIdFromPlaybackObject(current);
+                    if (fromCurrent) {
+                        return fromCurrent;
+                    }
+                }
+            } catch (e) { /* ignore */ }
+            try {
+                var activePlayer = resolvePlaybackPlayer(pm);
+                if (activePlayer && typeof pm.getPlayerState === 'function') {
+                    var state = pm.getPlayerState(activePlayer);
+                    var now = state && (state.NowPlayingItem || state.nowPlayingItem);
+                    var fromState = itemIdFromPlaybackObject(now);
+                    if (fromState) {
+                        return fromState;
+                    }
+                }
+            } catch (e2) { /* ignore */ }
+            try {
+                var legacy = typeof pm.getCurrentlyPlayingItem === 'function' ? pm.getCurrentlyPlayingItem() : null;
+                var fromLegacy = itemIdFromPlaybackObject(legacy);
+                if (fromLegacy) {
+                    return fromLegacy;
+                }
+            } catch (e3) { /* ignore */ }
+        }
+
+        var video = getPlaybackVideoElement();
+        if (video) {
+            var fromVideo =
+                video.getAttribute('data-itemid')
+                || video.getAttribute('data-item-id')
+                || (video.dataset && (video.dataset.itemid || video.dataset.itemId));
+            if (fromVideo) {
+                return fromVideo;
+            }
+        }
+
         return null;
+    }
+
+    function getVisibleDetailItemId() {
+        var fromHash = getItemIdFromLocation();
+        if (fromHash) {
+            return fromHash;
+        }
+
+        var views = document.querySelectorAll('.itemDetailPage, .view:not(.hide), .mainAnimatedPage:not(.hide)');
+        var i;
+        for (i = 0; i < views.length; i++) {
+            var view = views[i];
+            if (view.classList && view.classList.contains('hide')) {
+                continue;
+            }
+            var id = getItemIdFromView(view);
+            if (id) {
+                return id;
+            }
+        }
+
+        var page = document.querySelector('.page:not(.hide)[data-id], .page:not(.hide)[data-itemid]');
+        if (page) {
+            return getItemIdFromView(page);
+        }
+
+        return null;
+    }
+
+    function resolveCharacterRailItemId(pm) {
+        return getCurrentlyPlayingItemId(pm) || getVisibleDetailItemId();
     }
 
     function getPlaybackVideoElement() {
@@ -4368,46 +4588,12 @@
         return best;
     }
 
-    function capturePlaybackFrameDataUrl() {
-        var video = getPlaybackVideoElement();
-        if (!video) {
-            return null;
-        }
-
-        var srcW = video.videoWidth || 0;
-        var srcH = video.videoHeight || 0;
-        if (srcW < 16 || srcH < 16) {
-            return null;
-        }
-
-        var maxEdge = 768;
-        var scale = Math.min(1, maxEdge / Math.max(srcW, srcH));
-        var w = Math.max(16, Math.round(srcW * scale));
-        var h = Math.max(16, Math.round(srcH * scale));
-
-        var canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        var ctx = canvas.getContext('2d');
-        if (!ctx) {
-            return null;
-        }
-        try {
-            ctx.drawImage(video, 0, 0, w, h);
-            return canvas.toDataURL('image/jpeg', 0.72);
-        } catch (e) {
-            console.warn('[FullCrew] frame capture failed (likely CORS/protected media)', e);
-            return null;
-        }
-    }
-
     function closeSceneOverlay() {
         var overlay = document.getElementById(SCENE_OVERLAY_ID);
         if (overlay && overlay.parentNode) {
             overlay.parentNode.removeChild(overlay);
         }
         document.removeEventListener('keydown', onSceneOverlayKeydown, true);
-        sceneOverlayContext = null;
         var restore = sceneOverlayReturnFocus;
         sceneOverlayReturnFocus = null;
         if (restore && typeof restore.focus === 'function' && document.contains(restore)) {
@@ -4415,6 +4601,7 @@
                 restore.focus();
             } catch (e) { /* ignore */ }
         }
+        syncSceneIdentifyButton();
     }
 
     function onSceneOverlayKeydown(e) {
@@ -4434,10 +4621,10 @@
 
         var overlay = document.createElement('div');
         overlay.id = SCENE_OVERLAY_ID;
-        overlay.className = 'fullCrewSceneOverlay';
+        overlay.className = 'fullCrewSceneOverlay fullCrewCastRail';
         overlay.setAttribute('role', 'dialog');
-        overlay.setAttribute('aria-modal', 'true');
-        overlay.setAttribute('aria-label', title || 'Scene info');
+        overlay.setAttribute('aria-modal', 'false');
+        overlay.setAttribute('aria-label', title || 'Characters');
 
         var backdrop = document.createElement('div');
         backdrop.className = 'fullCrewSceneBackdrop';
@@ -4448,7 +4635,7 @@
 
         var header = document.createElement('div');
         header.className = 'fullCrewSceneHeader';
-        header.appendChild(createElement('div', 'fullCrewSceneTitle', title || 'Scene info'));
+        header.appendChild(createElement('div', 'fullCrewSceneTitle', title || 'Characters'));
 
         var closeBtn = document.createElement('button');
         closeBtn.type = 'button';
@@ -4467,7 +4654,7 @@
         var privacy = createElement(
             'div',
             'fullCrewScenePrivacy',
-            privacyText || 'Title cast is TMDB billed cast (no OpenAI). This moment uses your local scene index, or an opt-in Vision scan.'
+            privacyText || 'Billed characters from TMDB. Stills when TMDB has a photo from this title; otherwise the actor portrait. Full crew is on the title page.'
         );
 
         panel.appendChild(header);
@@ -4478,64 +4665,83 @@
         document.body.appendChild(overlay);
         document.addEventListener('keydown', onSceneOverlayKeydown, true);
         closeBtn.focus();
+        syncSceneIdentifyButton();
     }
 
-    function renderPersonList(people, emptyText) {
+    function firstCharacterName(role) {
+        if (!role) {
+            return '';
+        }
+        var parts = String(role).split(/\s*·\s*|\s*\|\s*/);
+        return (parts[0] || '').trim();
+    }
+
+    function renderCharacterRail(playback) {
         var wrap = document.createElement('div');
-        if (!people || !people.length) {
-            wrap.appendChild(createElement('div', 'fullCrewSceneStatus', emptyText || 'None'));
+        wrap.className = 'fullCrewSceneResults';
+
+        var itemName = playback && (playback.ItemName || playback.itemName);
+        if (itemName) {
+            wrap.appendChild(createElement('div', 'fullCrewSceneItemName', itemName));
+        }
+
+        var creditsError = playback && (playback.Error || playback.error);
+        var cast = (playback && (playback.Cast || playback.cast)) || [];
+
+        if (creditsError && !cast.length) {
+            wrap.appendChild(createElement('div', 'fullCrewSceneStatus', creditsError));
+            return wrap;
+        }
+        if (!cast.length) {
+            wrap.appendChild(
+                createElement(
+                    'div',
+                    'fullCrewSceneStatus',
+                    'No characters returned from TMDB for this item. Confirm it has a TMDB id, then try again.'
+                )
+            );
             return wrap;
         }
 
+        wrap.appendChild(
+            createElement('div', 'fullCrewSceneStatus', 'Billed characters. More detail is on the title page.')
+        );
+
         var list = document.createElement('ul');
-        list.className = 'fullCrewPeople fullCrewScenePeople';
-        people.forEach(function (person) {
-            var name = prop(person, 'Name', 'name') || 'Unknown';
+        list.className = 'fullCrewCastRailList';
+        cast.forEach(function (person) {
+            var actor = prop(person, 'Name', 'name') || 'Unknown';
             var role = prop(person, 'Role', 'role') || '';
-            var profile = prop(person, 'ProfileUrl', 'profileUrl');
-            var tmdbId = prop(person, 'TmdbPersonId', 'tmdbPersonId');
-            var confidence = prop(person, 'Confidence', 'confidence');
+            var character = firstCharacterName(role);
+            var still = prop(person, 'CharacterStillUrl', 'characterStillUrl')
+                || prop(person, 'ProfileUrl', 'profileUrl');
 
-            var card;
-            if (tmdbId) {
-                card = document.createElement('a');
-                card.className = 'fullCrewPerson';
-                card.href = 'https://www.themoviedb.org/person/' + encodeURIComponent(String(tmdbId));
-                card.target = '_blank';
-                card.rel = 'noopener noreferrer';
-            } else {
-                card = document.createElement('div');
-                card.className = 'fullCrewPerson';
-            }
+            var card = document.createElement('div');
+            card.className = 'fullCrewCastCard';
 
-            if (profile) {
+            if (still) {
                 var img = document.createElement('img');
-                img.className = 'fullCrewAvatar';
-                img.alt = '';
+                img.className = 'fullCrewCastStill';
+                img.alt = character || actor;
                 img.loading = 'lazy';
-                img.src = profile;
+                img.src = still;
                 img.addEventListener('error', function () {
-                    img.replaceWith(createElement('div', 'fullCrewAvatar fullCrewAvatarFallback', initials(name)));
+                    img.replaceWith(createElement('div', 'fullCrewCastStill fullCrewCastStillFallback', initials(character || actor)));
                 });
                 card.appendChild(img);
             } else {
-                card.appendChild(createElement('div', 'fullCrewAvatar fullCrewAvatarFallback', initials(name)));
+                card.appendChild(
+                    createElement('div', 'fullCrewCastStill fullCrewCastStillFallback', initials(character || actor))
+                );
             }
 
             var text = document.createElement('div');
-            text.className = 'fullCrewPersonText';
-            text.appendChild(createElement('div', 'fullCrewPersonName', name));
-            if (role) {
-                text.appendChild(createElement('div', 'fullCrewPersonRole', role));
-            }
-            if (confidence != null && !isNaN(Number(confidence))) {
-                text.appendChild(
-                    createElement(
-                        'div',
-                        'fullCrewSceneConfidence',
-                        Math.round(Number(confidence) * 100) + '% confidence'
-                    )
-                );
+            text.className = 'fullCrewCastCardText';
+            if (character) {
+                text.appendChild(createElement('div', 'fullCrewCastCharacter', character));
+                text.appendChild(createElement('div', 'fullCrewCastActor', actor));
+            } else {
+                text.appendChild(createElement('div', 'fullCrewCastCharacter', actor));
             }
             card.appendChild(text);
 
@@ -4547,173 +4753,53 @@
         return wrap;
     }
 
-    function renderPlaybackScenePanel(playback, identify) {
-        var wrap = document.createElement('div');
-        wrap.className = 'fullCrewSceneResults';
-
-        var itemName = playback && (playback.ItemName || playback.itemName);
-        if (itemName) {
-            wrap.appendChild(createElement('div', 'fullCrewSceneItemName', itemName));
-        }
-
-        var creditsError = playback && (playback.Error || playback.error);
-        if (creditsError) {
-            wrap.appendChild(createElement('div', 'fullCrewSceneStatus', creditsError));
-        }
-
-        var indexed = playback && (playback.IndexedSceneCount || playback.indexedSceneCount);
-        if (indexed) {
-            wrap.appendChild(
-                createElement('div', 'fullCrewSceneIndexMeta', indexed + ' indexed moment' + (indexed === 1 ? '' : 's') + ' for this title')
-            );
-        }
-
-        var scene = identify || (playback && (playback.Scene || playback.scene));
-        var momentSection = document.createElement('div');
-        momentSection.className = 'fullCrewSceneSection';
-        momentSection.appendChild(createElement('div', 'fullCrewSceneSectionTitle', 'This moment'));
-        momentSection.appendChild(
-            createElement(
-                'div',
-                'fullCrewSceneStatus',
-                'Who appears in this frame (indexed scan or optional Vision).'
-            )
-        );
-
-        if (scene && (scene.Error || scene.error) && !(scene.Matches || scene.matches || []).length) {
-            momentSection.appendChild(createElement('div', 'fullCrewSceneStatus', scene.Error || scene.error));
-        } else if (scene && (scene.Matches || scene.matches || []).length) {
-            var fromIndex = !!(scene.FromSceneIndex || scene.fromSceneIndex || scene.FromCache || scene.fromCache);
-            var source = scene.Source || scene.source || (fromIndex ? 'index' : 'vision');
-            momentSection.appendChild(
-                createElement(
-                    'div',
-                    'fullCrewSceneStatus',
-                    source === 'index' || fromIndex
-                        ? 'From your scene index (no new OpenAI call).'
-                        : source === 'memory'
-                            ? 'From short-term cache.'
-                            : 'Fresh Vision scan — saved to your scene index.'
-                )
-            );
-            if (scene.Note || scene.note) {
-                momentSection.appendChild(createElement('div', 'fullCrewSceneStatus', scene.Note || scene.note));
-            }
-            momentSection.appendChild(renderPersonList(scene.Matches || scene.matches));
-        } else {
-            momentSection.appendChild(
-                createElement(
-                    'div',
-                    'fullCrewSceneStatus',
-                    'No indexed match for this timestamp yet. Title cast below still comes from TMDB.'
-                )
-            );
-        }
-
-        var actions = document.createElement('div');
-        actions.className = 'fullCrewSceneActions';
-        var visionOn = !!(playback && (playback.VisionEnabled || playback.visionEnabled));
-        var visionReason = playback && (playback.VisionReason || playback.visionReason);
-        if (visionOn) {
-            var scanBtn = document.createElement('button');
-            scanBtn.type = 'button';
-            scanBtn.className = 'raised button-submit fullCrewSceneScanBtn';
-            scanBtn.textContent = scene && (scene.Matches || scene.matches || []).length
-                ? 'Rescan this frame (OpenAI)'
-                : 'Scan this frame (OpenAI)';
-            scanBtn.addEventListener('click', function () {
-                runSceneVisionScan(true);
-            });
-            actions.appendChild(scanBtn);
-        } else {
-            actions.appendChild(
-                createElement(
-                    'div',
-                    'fullCrewSceneStatus',
-                    visionReason
-                        || 'Enable scene identify + OpenAI key in plugin settings to scan frames. Title cast still works without Vision.'
-                )
-            );
-        }
-        momentSection.appendChild(actions);
-        wrap.appendChild(momentSection);
-
-        var cast = (playback && (playback.Cast || playback.cast)) || [];
-        var castSection = document.createElement('div');
-        castSection.className = 'fullCrewSceneSection';
-        castSection.appendChild(createElement('div', 'fullCrewSceneSectionTitle', 'Title cast'));
-        castSection.appendChild(
-            createElement('div', 'fullCrewSceneStatus', 'TMDB billed cast for this title (no OpenAI).')
-        );
-        if (creditsError && !cast.length) {
-            castSection.appendChild(createElement('div', 'fullCrewSceneStatus', creditsError));
-        } else if (!cast.length) {
-            var emptyHint = 'No cast returned from TMDB for this item. Confirm it has a TMDB id (TheMovieDb metadata), then try again.';
-            castSection.appendChild(createElement('div', 'fullCrewSceneStatus', emptyHint));
-        } else {
-            castSection.appendChild(renderPersonList(cast));
-        }
-        wrap.appendChild(castSection);
-
-        return wrap;
+    function fetchPlaybackScene(itemId) {
+        return Core.getJson('FullCrew/' + encodeURIComponent(itemId) + '/playback-scene');
     }
 
-    function fetchPlaybackScene(itemId, positionTicks) {
-        var q = 'FullCrew/' + encodeURIComponent(itemId) + '/playback-scene';
-        if (positionTicks != null) {
-            q += '?positionTicks=' + encodeURIComponent(String(positionTicks));
+    function toggleCharacterRail() {
+        if (document.getElementById(SCENE_OVERLAY_ID)) {
+            closeSceneOverlay();
+            return;
         }
-        return Core.getJson(q);
+        openCharacterRail();
     }
 
-    function runSceneVisionScan(forceRefresh) {
+    function openCharacterRail() {
         if (sceneIdentifyBusy) {
-            return;
-        }
-        var ctx = sceneOverlayContext || {};
-        var itemId = ctx.itemId || getCurrentlyPlayingItemId();
-        if (!itemId) {
-            return;
-        }
-
-        var dataUrl = capturePlaybackFrameDataUrl();
-        if (!dataUrl) {
-            openSceneOverlay(
-                'Scene info',
-                createElement(
-                    'div',
-                    'fullCrewSceneStatus',
-                    'Could not capture this frame (no video, or protected media blocks canvas capture).'
-                )
-            );
             return;
         }
 
         sceneIdentifyBusy = true;
-        openSceneOverlay(
-            'Scene info',
-            createElement('div', 'fullCrewSceneStatus', 'Scanning… this still will be sent to OpenAI.')
-        );
+        openSceneOverlay('Characters', createElement('div', 'fullCrewSceneStatus', 'Loading characters…'));
 
-        var positionTicks = getPlaybackPositionTicks();
-        sceneOverlayContext = { itemId: itemId, positionTicks: positionTicks };
-
-        Core.postJson('FullCrew/' + encodeURIComponent(itemId) + '/identify-frame', {
-            ImageBase64: dataUrl,
-            PositionTicks: positionTicks,
-            ForceRefresh: !!forceRefresh
-        })
-            .then(function (identify) {
-                return fetchPlaybackScene(itemId, positionTicks).then(function (playback) {
-                    openSceneOverlay('Scene info', renderPlaybackScenePanel(playback, identify));
-                    sceneOverlayContext = { itemId: itemId, positionTicks: positionTicks };
-                });
+        getPlaybackManagerAsync()
+            .then(function (pm) {
+                var itemId = resolveCharacterRailItemId(pm);
+                if (!itemId) {
+                    openSceneOverlay(
+                        'Characters',
+                        createElement(
+                            'div',
+                            'fullCrewSceneStatus',
+                            'Open a movie, series, season, or episode (or start playback) to load characters.'
+                        )
+                    );
+                    return null;
+                }
+                return fetchPlaybackScene(itemId);
+            })
+            .then(function (playback) {
+                if (!playback) {
+                    return;
+                }
+                openSceneOverlay('Characters', renderCharacterRail(playback));
             })
             .catch(function (err) {
-                console.warn('[FullCrew] scene identify failed', err);
+                console.warn('[FullCrew] playback-scene failed', err);
                 openSceneOverlay(
-                    'Scene info',
-                    createElement('div', 'fullCrewSceneStatus', 'Identify request failed.')
+                    'Characters',
+                    createElement('div', 'fullCrewSceneStatus', 'Could not load characters.')
                 );
             })
             .then(function () {
@@ -4722,60 +4808,12 @@
             });
     }
 
-    function runSceneIdentify() {
-        if (sceneIdentifyBusy) {
-            return;
-        }
-
-        var itemId = getCurrentlyPlayingItemId();
-        if (!itemId) {
-            openSceneOverlay('Scene info', createElement('div', 'fullCrewSceneStatus', 'No playing item detected.'));
-            return;
-        }
-
-        var positionTicks = getPlaybackPositionTicks();
-        sceneIdentifyBusy = true;
-        sceneOverlayContext = { itemId: itemId, positionTicks: positionTicks };
-        openSceneOverlay('Scene info', createElement('div', 'fullCrewSceneStatus', 'Loading cast & scene index…'));
-
-        fetchPlaybackScene(itemId, positionTicks)
-            .then(function (playback) {
-                var scene = playback && (playback.Scene || playback.scene);
-                var hasScene = !!(scene && (scene.Matches || scene.matches || []).length);
-                openSceneOverlay('Scene info', renderPlaybackScenePanel(playback, null));
-                sceneOverlayContext = { itemId: itemId, positionTicks: positionTicks };
-
-                // Auto-scan only when vision is on and this moment is not indexed yet.
-                var visionOn = !!(playback && (playback.VisionEnabled || playback.visionEnabled));
-                if (visionOn && !hasScene) {
-                    sceneIdentifyBusy = false;
-                    runSceneVisionScan(false);
-                    return 'scanning';
-                }
-                return 'done';
-            })
-            .catch(function (err) {
-                console.warn('[FullCrew] playback-scene failed', err);
-                openSceneOverlay(
-                    'Scene info',
-                    createElement('div', 'fullCrewSceneStatus', 'Could not load playback scene info.')
-                );
-                return 'done';
-            })
-            .then(function (state) {
-                if (state !== 'scanning') {
-                    sceneIdentifyBusy = false;
-                }
-                syncSceneIdentifyButton();
-            });
-    }
-
     function ensureSceneIdentifyButton() {
-        // Always offer the OSD button during playback — cast/index work without Vision.
-        var video = getPlaybackVideoElement();
-        if (!video) {
+        var hasVideo = !!getPlaybackVideoElement();
+        var hasItem = !!(getCurrentlyPlayingItemId() || getVisibleDetailItemId());
+        if (!hasVideo && !hasItem) {
             var existingGone = document.getElementById(SCENE_BTN_ID);
-            if (existingGone && existingGone.parentNode && !getCurrentlyPlayingItemId()) {
+            if (existingGone && existingGone.parentNode) {
                 existingGone.parentNode.removeChild(existingGone);
             }
             return;
@@ -4791,7 +4829,9 @@
             return;
         }
 
-        if (document.getElementById(SCENE_BTN_ID)) {
+        var existing = document.getElementById(SCENE_BTN_ID);
+        if (existing) {
+            existing.setAttribute('aria-pressed', document.getElementById(SCENE_OVERLAY_ID) ? 'true' : 'false');
             return;
         }
 
@@ -4799,24 +4839,19 @@
         btn.id = SCENE_BTN_ID;
         btn.type = 'button';
         btn.className = 'paper-icon-button-light fullCrewSceneOsdBtn';
-        btn.title = 'Scene info (Y) — cast + indexed moments; scan uses OpenAI when enabled';
-        btn.setAttribute('aria-label', 'Scene info');
-        btn.innerHTML = '<span class="material-icons" aria-hidden="true">face</span>';
+        btn.title = 'Characters (Y) — billed cast for this title';
+        btn.setAttribute('aria-label', 'Characters');
+        btn.setAttribute('aria-pressed', document.getElementById(SCENE_OVERLAY_ID) ? 'true' : 'false');
+        btn.innerHTML = '<span class="material-icons" aria-hidden="true">people</span>';
         btn.addEventListener('click', function (e) {
             e.preventDefault();
             e.stopPropagation();
-            runSceneIdentify();
+            toggleCharacterRail();
         });
         osd.appendChild(btn);
     }
 
     function syncSceneIdentifyButton() {
-        if (sceneIdentifyEnabled == null) {
-            refreshSceneIdentifyEnabled().then(function () {
-                ensureSceneIdentifyButton();
-            });
-            return;
-        }
         ensureSceneIdentifyButton();
     }
 
@@ -4834,19 +4869,17 @@
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) {
             return;
         }
-        if (!getPlaybackVideoElement() && !getCurrentlyPlayingItemId()) {
+        if (!getPlaybackVideoElement() && !resolveCharacterRailItemId() && !document.getElementById(SCENE_OVERLAY_ID)) {
             return;
         }
         e.preventDefault();
-        runSceneIdentify();
+        toggleCharacterRail();
     }
 
     function initSceneIdentify() {
-        refreshSceneIdentifyEnabled().then(function () {
-            syncSceneIdentifyButton();
-        });
         document.addEventListener('keydown', onSceneIdentifyHotkey, true);
         window.setInterval(syncSceneIdentifyButton, 2500);
+        syncSceneIdentifyButton();
     }
 
     function scanAll() {
@@ -4873,6 +4906,7 @@
         refreshStatsEnabled().then(function () {
             scanAll();
         });
+        refreshGlassPlayEnabled();
         initSceneIdentify();
         scanAll();
 

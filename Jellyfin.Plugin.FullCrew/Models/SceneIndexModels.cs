@@ -51,7 +51,7 @@ public class SceneIndexDocument
 }
 
 /// <summary>
-/// Playback companion payload: title cast + nearby indexed scene (no OpenAI required).
+/// Playback companion payload: billed characters for the side rail (no OpenAI required).
 /// </summary>
 public class PlaybackSceneResponse
 {

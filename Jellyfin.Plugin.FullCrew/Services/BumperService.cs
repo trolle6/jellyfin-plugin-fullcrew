@@ -28,6 +28,7 @@ public partial class BumperService
 
     private readonly ILibraryManager _libraryManager;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly BumperHistoryStore _bumperHistory;
     private readonly ILogger<BumperService> _logger;
 
     /// <summary>
@@ -36,17 +37,27 @@ public partial class BumperService
     public BumperService(
         ILibraryManager libraryManager,
         IHttpClientFactory httpClientFactory,
+        BumperHistoryStore bumperHistory,
         ILogger<BumperService> logger)
     {
         _libraryManager = libraryManager;
         _httpClientFactory = httpClientFactory;
+        _bumperHistory = bumperHistory;
         _logger = logger;
     }
 
     /// <summary>
     /// Resolves a bumper for the given Jellyfin item (local → show-specific YouTube).
     /// </summary>
-    public async Task<BumperResponse> GetBumperAsync(Guid itemId, CancellationToken cancellationToken)
+    /// <param name="itemId">Library item id.</param>
+    /// <param name="tryAnother">When true, skip <paramref name="skipKey"/> and pick the next unseen bumper.</param>
+    /// <param name="skipKey">Bumper key to skip (current clip when trying another).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<BumperResponse> GetBumperAsync(
+        Guid itemId,
+        bool tryAnother,
+        string? skipKey,
+        CancellationToken cancellationToken)
     {
         var item = _libraryManager.GetItemById(itemId);
         if (item is null)
@@ -70,13 +81,26 @@ public partial class BumperService
 
         var showTitle = ResolveShowTitle(item);
         var hints = CollectNetworkHints(item).ToList();
+        var showKey = BumperHistoryStore.NormalizeShowKey(showTitle);
+        var seen = _bumperHistory.GetSeenKeys(showKey);
+        var activeSkip = tryAnother ? skipKey : null;
+
         var collectionName = string.IsNullOrWhiteSpace(config?.BumpersCollectionName)
             ? "Bumpers"
             : config!.BumpersCollectionName.Trim();
 
-        var local = TryFindLocalBumper(showTitle, hints, collectionName);
+        var localRanked = GetLocalBumperCandidates(showTitle, hints, collectionName);
+        var local = BumperHistoryStore.PickUnseen(
+            localRanked,
+            item => BumperHistoryStore.LocalKey(item.Id),
+            seen,
+            activeSkip,
+            () => _bumperHistory.Clear(showKey));
+
         if (local is not null)
         {
+            var localKey = BumperHistoryStore.LocalKey(local.Id);
+            _bumperHistory.MarkSeen(showKey, localKey);
             return new BumperResponse
             {
                 ItemId = item.Id.ToString("N", CultureInfo.InvariantCulture),
@@ -84,19 +108,45 @@ public partial class BumperService
                 Title = local.Name,
                 Network = hints.FirstOrDefault(),
                 LocalItemId = local.Id.ToString("N", CultureInfo.InvariantCulture),
-                NetworkHints = hints
+                NetworkHints = hints,
+                BumperKey = localKey,
+                AlternatesAvailable = CountAlternates(localRanked, item => BumperHistoryStore.LocalKey(item.Id), seen, localKey)
             };
         }
 
         if (config is null or { EnableYouTubeBumpers: true })
         {
-            var youtube = await TryFindYouTubeBumperAsync(showTitle, hints, cancellationToken).ConfigureAwait(false);
-            if (youtube is not null)
+            var youtubeRanked = await CollectYouTubeBumperCandidatesAsync(showTitle, hints, cancellationToken)
+                .ConfigureAwait(false);
+            var youtubePick = BumperHistoryStore.PickUnseen(
+                youtubeRanked,
+                c => BumperHistoryStore.YouTubeKey(c.Id),
+                seen,
+                activeSkip,
+                () => _bumperHistory.Clear(showKey));
+
+            if (!string.IsNullOrWhiteSpace(youtubePick.Id))
             {
-                youtube.ItemId = item.Id.ToString("N", CultureInfo.InvariantCulture);
-                youtube.Network = hints.FirstOrDefault();
-                youtube.NetworkHints = hints;
-                return youtube;
+                var ytKey = BumperHistoryStore.YouTubeKey(youtubePick.Id);
+                _bumperHistory.MarkSeen(showKey, ytKey);
+                return new BumperResponse
+                {
+                    ItemId = item.Id.ToString("N", CultureInfo.InvariantCulture),
+                    Source = "YouTube",
+                    Title = youtubePick.Title,
+                    YouTubeVideoId = youtubePick.Id,
+                    YouTubeUrl = "https://www.youtube.com/watch?v=" + youtubePick.Id,
+                    SearchUrl = "https://www.youtube.com/results?search_query="
+                        + Uri.EscapeDataString(BuildShowSearchQuery(showTitle)),
+                    Network = hints.FirstOrDefault(),
+                    NetworkHints = hints,
+                    BumperKey = ytKey,
+                    AlternatesAvailable = CountAlternates(
+                        youtubeRanked,
+                        c => BumperHistoryStore.YouTubeKey(c.Id),
+                        seen,
+                        ytKey)
+                };
             }
 
             var query = BuildShowSearchQuery(showTitle);
@@ -172,14 +222,14 @@ public partial class BumperService
         };
     }
 
-    private async Task<BumperResponse?> TryFindYouTubeBumperAsync(
+    private async Task<IReadOnlyList<(string Id, string Title, int Seconds)>> CollectYouTubeBumperCandidatesAsync(
         string showTitle,
         IReadOnlyList<string> hints,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(showTitle))
         {
-            return null;
+            return [];
         }
 
         var queries = BuildShowBumperQueries(showTitle, hints);
@@ -198,8 +248,7 @@ public partial class BumperService
 
             var found = await SearchYouTubeShortAsync(query, showTitle, MaxBumperSeconds, budgetToken).ConfigureAwait(false);
             candidates.AddRange(found);
-            // Stop once we have a healthy shortlist; later queries are lower-confidence synonyms.
-            if (candidates.Count >= 10)
+            if (candidates.Count >= 16)
             {
                 break;
             }
@@ -213,26 +262,38 @@ public partial class BumperService
 
         if (candidates.Count == 0)
         {
-            return null;
+            return [];
         }
 
-        // Prefer titles that look like actual bumpers, then shorter clips.
-        var ranked = candidates
+        return candidates
             .OrderByDescending(c => BumperTitleScore(c.Title, showTitle))
             .ThenBy(c => c.Seconds)
-            .Take(8)
+            .Take(20)
             .ToList();
+    }
 
-        var pick = ranked[Random.Shared.Next(Math.Min(3, ranked.Count))];
-        return new BumperResponse
+    private static int CountAlternates<T>(
+        IReadOnlyList<T> ranked,
+        Func<T, string> keySelector,
+        IReadOnlySet<string> seen,
+        string currentKey)
+    {
+        var count = 0;
+        foreach (var item in ranked)
         {
-            Source = "YouTube",
-            Title = pick.Title,
-            YouTubeVideoId = pick.Id,
-            YouTubeUrl = "https://www.youtube.com/watch?v=" + pick.Id,
-            SearchUrl = "https://www.youtube.com/results?search_query="
-                + Uri.EscapeDataString(BuildShowSearchQuery(showTitle))
-        };
+            var key = keySelector(item);
+            if (string.Equals(key, currentKey, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!seen.Contains(key))
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private async Task<BumperResponse?> TryFindYouTubeTrailerAsync(string showTitle, CancellationToken cancellationToken)
@@ -593,7 +654,7 @@ public partial class BumperService
     private static string BuildShowSearchQuery(string showTitle)
         => string.IsNullOrWhiteSpace(showTitle) ? "TV bumper" : $"\"{showTitle.Trim()}\" bumper";
 
-    private BaseItem? TryFindLocalBumper(string showTitle, IReadOnlyList<string> hints, string collectionName)
+    private IReadOnlyList<BaseItem> GetLocalBumperCandidates(string showTitle, IReadOnlyList<string> hints, string collectionName)
     {
         try
         {
@@ -647,33 +708,43 @@ public partial class BumperService
 
             if (candidates.Count == 0)
             {
-                return null;
+                return [];
             }
 
             var showMatched = candidates
                 .Where(c => !string.IsNullOrWhiteSpace(showTitle)
                             && ((c.Name?.Contains(showTitle, StringComparison.OrdinalIgnoreCase) ?? false)
                                 || (c.Path?.Contains(showTitle, StringComparison.OrdinalIgnoreCase) ?? false)))
+                .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
+            var showIds = showMatched.Select(c => c.Id).ToHashSet();
             var networkMatched = candidates
+                .Where(c => !showIds.Contains(c.Id))
                 .Where(c => hints.Any(h =>
                     (c.Name?.Contains(h, StringComparison.OrdinalIgnoreCase) ?? false)
                     || (c.Path?.Contains(h, StringComparison.OrdinalIgnoreCase) ?? false)
                     || (c.Studios?.Any(s => s.Contains(h, StringComparison.OrdinalIgnoreCase)) ?? false)
                     || (c.Tags?.Any(t => t.Contains(h, StringComparison.OrdinalIgnoreCase)) ?? false)))
+                .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            var pool = showMatched.Count > 0 ? showMatched
-                : networkMatched.Count > 0 ? networkMatched
-                : candidates;
+            var tierIds = showMatched.Select(c => c.Id).Concat(networkMatched.Select(c => c.Id)).ToHashSet();
+            var remainder = candidates
+                .Where(c => !tierIds.Contains(c.Id))
+                .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-            return pool[Random.Shared.Next(pool.Count)];
+            var ranked = new List<BaseItem>(candidates.Count);
+            ranked.AddRange(showMatched);
+            ranked.AddRange(networkMatched);
+            ranked.AddRange(remainder);
+            return ranked;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Local bumper search failed");
-            return null;
+            return [];
         }
     }
 
