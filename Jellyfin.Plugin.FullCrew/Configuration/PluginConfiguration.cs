@@ -60,8 +60,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool EnableLibraryStats { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether episode/card play buttons use a frosted-glass style
-    /// instead of solid theme colors on Jellyfin Web.
+    /// Gets or sets a value indicating whether episode rows in series/season lists
+    /// use a frosted-glass play button instead of solid theme green on Jellyfin Web.
     /// </summary>
     public bool EnableGlassPlayButtons { get; set; }
 

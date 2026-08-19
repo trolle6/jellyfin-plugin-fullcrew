@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.7.5.0';
+    var PLUGIN_VERSION = '1.7.5.1';
     var ROLE_PREVIEW_MAX = 3;
     var ROLE_NAME_SUFFIXES = {
         jr: 1, 'jr.': 1, sr: 1, 'sr.': 1, ii: 1, iii: 1, iv: 1, v: 1, phd: 1, md: 1, esq: 1, 'esq.': 1
@@ -25,6 +25,63 @@
     var STATS_BODY_CLASS = 'fullCrewStatsActive';
     var STUDIO_BODY_CLASS = 'fullCrewStudioActive';
     var GLASS_PLAY_CLASS = 'fullCrewGlassPlay';
+    var GLASS_PLAY_STYLE_ID = 'fullCrewGlassPlayStyles';
+
+    function glassPlayCssText() {
+        var root = 'html.' + GLASS_PLAY_CLASS + ' body .listItem[data-type="Episode"]';
+        var btn = root + ' button.listItemImageButton,' + root + ' .listItemImageButton';
+        var icon = root + ' .listItemImageButton-icon';
+        var hover = root + ' button.listItemImageButton:hover,' + root + ' .listItemImageButton:hover';
+        return (
+            root + '{' +
+            '--btnMiniPlayColor:rgba(255,255,255,0.22)!important;' +
+            '--btnMiniPlayBorderColor:rgba(255,255,255,0.36)!important}' +
+            btn + '{' +
+            'background:rgba(255,255,255,0.22)!important;' +
+            'background-color:rgba(255,255,255,0.22)!important;' +
+            'backdrop-filter:blur(14px) saturate(175%)!important;' +
+            '-webkit-backdrop-filter:blur(14px) saturate(175%)!important;' +
+            'border:1px solid rgba(255,255,255,0.36)!important;' +
+            'border-radius:50%!important;' +
+            'box-shadow:0 2px 10px rgba(0,0,0,0.22)!important;' +
+            'color:rgba(255,255,255,0.94)!important;' +
+            'font-size:1.35em!important}' +
+            icon + '{' +
+            'background:transparent!important;' +
+            'background-color:transparent!important;' +
+            'color:rgba(255,255,255,0.94)!important;' +
+            'padding:0.12em!important}' +
+            hover + '{' +
+            'background:rgba(255,255,255,0.32)!important;' +
+            'background-color:rgba(255,255,255,0.32)!important;' +
+            'border-color:rgba(255,255,255,0.5)!important;' +
+            'box-shadow:0 3px 14px rgba(0,0,0,0.28)!important;' +
+            'color:#fff!important;' +
+            'transform:scale(1.08,1.08)!important}'
+        );
+    }
+
+    function ensureGlassPlayStyles(enabled) {
+        var existing = document.getElementById(GLASS_PLAY_STYLE_ID);
+        if (enabled === false) {
+            if (existing) {
+                existing.parentNode.removeChild(existing);
+            }
+            return;
+        }
+
+        var style = existing;
+        if (!style) {
+            style = document.createElement('style');
+            style.id = GLASS_PLAY_STYLE_ID;
+        }
+        style.textContent = glassPlayCssText();
+
+        var parent = document.head || document.documentElement;
+        if (parent) {
+            parent.appendChild(style);
+        }
+    }
 
     function applyGlassPlayChrome(enabled) {
         var root = document.documentElement;
@@ -34,11 +91,13 @@
             if (document.body) {
                 document.body.classList.add(GLASS_PLAY_CLASS);
             }
+            ensureGlassPlayStyles(true);
         } else {
             root.classList.remove(GLASS_PLAY_CLASS);
             if (document.body) {
                 document.body.classList.remove(GLASS_PLAY_CLASS);
             }
+            ensureGlassPlayStyles(false);
         }
     }
 
@@ -4906,9 +4965,22 @@
         refreshStatsEnabled().then(function () {
             scanAll();
         });
-        refreshGlassPlayEnabled();
+        refreshGlassPlayEnabled().then(function () {
+            ensureGlassPlayStyles(document.documentElement.classList.contains(GLASS_PLAY_CLASS));
+        });
+        window.setTimeout(function () {
+            if (document.documentElement.classList.contains(GLASS_PLAY_CLASS)) {
+                ensureGlassPlayStyles(true);
+            }
+        }, 1500);
         initSceneIdentify();
         scanAll();
+
+        document.addEventListener('viewshow', function () {
+            if (document.documentElement.classList.contains(GLASS_PLAY_CLASS)) {
+                ensureGlassPlayStyles(true);
+            }
+        }, true);
 
         var observer = new MutationObserver(function (mutations) {
             if (mutationTouchesFullCrewOnly(mutations)) {
