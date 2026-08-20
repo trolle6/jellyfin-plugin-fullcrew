@@ -1,12 +1,12 @@
 {
   "category": "Metadata",
-  "changelog": "1.7.5.2: Cast cards show two role lines max; characters before crew jobs; fix overlap.",
+  "changelog": "1.7.6: Release years list every year (oldest→newest by default) with sort options; no Top-N/Other fold.",
   "description": "Fetches complete TMDB cast and crew for movies and series, groups people by department, and shows them in a polished accordion on Jellyfin Web item detail pages. Includes break bumpers with rotation, Library Stats, studio detail pages, and a playback character rail.",
   "guid": "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f",
   "name": "Full Crew",
   "overview": "Full cast and crew, stats, studio pages, rotating bumpers, and a playback character rail",
   "owner": "trolle6",
   "targetAbi": "10.11.0.0",
-  "timestamp": "2026-08-19T00:00:00Z",
-  "version": "1.7.5.2"
+  "timestamp": "2026-08-20T00:00:00Z",
+  "version": "1.7.6.0"
 }

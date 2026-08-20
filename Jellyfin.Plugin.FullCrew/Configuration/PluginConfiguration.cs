@@ -20,6 +20,7 @@ public class PluginConfiguration : BasePluginConfiguration
         EnableBumpers = true;
         EnableYouTubeBumpers = true;
         EnableLibraryStats = true;
+        LibraryStatsYearSort = "OldestFirst";
         EnableGlassPlayButtons = true;
         EnableSceneIdentify = false;
         OpenAiApiKey = string.Empty;
@@ -58,6 +59,13 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets a value indicating whether the Library Stats page and API are enabled.
     /// </summary>
     public bool EnableLibraryStats { get; set; }
+
+    /// <summary>
+    /// Gets or sets how Library Stats release years are ordered.
+    /// Allowed: OldestFirst (default), NewestFirst, MostTitles.
+    /// Shows every year with titles — no Top-N / Other fold.
+    /// </summary>
+    public string LibraryStatsYearSort { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether episode rows in series/season lists

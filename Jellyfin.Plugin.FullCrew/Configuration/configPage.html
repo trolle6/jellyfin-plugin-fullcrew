@@ -47,6 +47,18 @@
                         <div class="fieldDescription">
                             Adds a Library Stats page with genre, studio, people-by-role, rating, tag, and runtime breakdowns.
                         </div>
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="LibraryStatsYearSort">Release years sort</label>
+                            <select is="emby-select" id="LibraryStatsYearSort" class="emby-select-withcolor emby-select">
+                                <option value="OldestFirst">Oldest → newest (every year)</option>
+                                <option value="NewestFirst">Newest → oldest (every year)</option>
+                                <option value="MostTitles">Most titles first (every year)</option>
+                            </select>
+                            <div class="fieldDescription">
+                                Release years lists every year that has titles — no Top-N cutoff or “Other” bucket.
+                                You can also change this on the Stats page itself.
+                            </div>
+                        </div>
                     </div>
 
                     <div class="verticalSection">
@@ -210,6 +222,8 @@
                         document.querySelector('#MaxPeoplePerDepartment').value =
                             config.MaxPeoplePerDepartment != null ? config.MaxPeoplePerDepartment : 100;
                         document.querySelector('#EnableLibraryStats').checked = config.EnableLibraryStats !== false;
+                        document.querySelector('#LibraryStatsYearSort').value =
+                            config.LibraryStatsYearSort || 'OldestFirst';
                         document.querySelector('#EnableGlassPlayButtons').checked = config.EnableGlassPlayButtons !== false;
                         document.querySelector('#EnableSceneIdentify').checked = !!config.EnableSceneIdentify;
                         document.querySelector('#OpenAiApiKey').value = config.OpenAiApiKey || '';
@@ -231,6 +245,7 @@
                         config.MaxPeoplePerDepartment =
                             parseInt(document.querySelector('#MaxPeoplePerDepartment').value, 10) || 100;
                         config.EnableLibraryStats = !!document.querySelector('#EnableLibraryStats').checked;
+                        config.LibraryStatsYearSort = document.querySelector('#LibraryStatsYearSort').value || 'OldestFirst';
                         config.EnableGlassPlayButtons = !!document.querySelector('#EnableGlassPlayButtons').checked;
                         config.EnableSceneIdentify = !!document.querySelector('#EnableSceneIdentify').checked;
                         config.OpenAiApiKey = document.querySelector('#OpenAiApiKey').value;

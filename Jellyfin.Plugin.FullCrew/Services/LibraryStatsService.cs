@@ -35,7 +35,7 @@ public class LibraryStatsService
     private const int MaxInsights = 14;
     /// <summary>When Other would exceed this share on overview charts, omit it (detail page still has full list).</summary>
     private const double OmitOtherPercentThreshold = 40.0;
-    private const string CacheKeyPrefix = "fullcrew:library-stats:v9:";
+    private const string CacheKeyPrefix = "fullcrew:library-stats:v10:";
     private const string AnimationGenre = "Animation";
     private const string OtherBucketName = "Other";
     private const string UnknownBucketName = "Unknown";
@@ -120,7 +120,7 @@ public class LibraryStatsService
         }
 
         var aggregate = GetOrBuildAggregate(user);
-        return ProjectOverview(aggregate);
+        return ProjectOverview(aggregate, ResolveYearSort(config?.LibraryStatsYearSort));
     }
 
     /// <summary>
@@ -510,7 +510,7 @@ public class LibraryStatsService
         }
     }
 
-    private static LibraryStatsResponse ProjectOverview(LibraryStatsAggregate agg)
+    private static LibraryStatsResponse ProjectOverview(LibraryStatsAggregate agg, string yearSort)
     {
         var total = agg.TotalCount;
         var types = BuildTypeBuckets(agg.MovieCount, agg.SeriesCount, total);
@@ -522,7 +522,8 @@ public class LibraryStatsService
         // Rule A — exclusive single-value: percent of titles (or media samples).
         var ratings = ToTopBuckets(agg.RatingCounts, total, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
         var decades = ToDecadeBuckets(agg.DecadeCounts, total);
-        var years = ToTopBuckets(agg.YearCounts, total, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
+        // Years: every year with titles (no Top-N / Other), chronological by default.
+        var years = ToYearBuckets(agg.YearCounts, total, yearSort);
         var communityRatings = ToOrderedBuckets(agg.CommunityCounts, total, CommunityRatingBucketOrder);
         var languages = ToTopBuckets(agg.LanguageCounts, total, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
         var collections = ToTopBuckets(agg.CollectionCounts, SumCounts(agg.CollectionCounts), TopBucketLimit, foldUnknown: false, omitDominantOther: true, itemIds: agg.CollectionItemIds, itemType: "BoxSet");
@@ -1868,18 +1869,29 @@ public class LibraryStatsService
             .ToList();
     }
 
-    private static IReadOnlyList<LibraryStatsBucket> ToYearBuckets(
+    internal static IReadOnlyList<LibraryStatsBucket> ToYearBuckets(
         IReadOnlyDictionary<string, int> counts,
-        int total)
+        int total,
+        string sortMode = "OldestFirst")
     {
         if (counts.Count == 0 || total <= 0)
         {
             return [];
         }
 
-        return counts
-            .Where(kv => kv.Value > 0)
-            .OrderByDescending(kv => YearSortKey(kv.Key))
+        var items = counts.Where(kv => kv.Value > 0).ToList();
+        IEnumerable<KeyValuePair<string, int>> ordered = NormalizeYearSort(sortMode) switch
+        {
+            "MostTitles" => items
+                .OrderByDescending(kv => kv.Value)
+                .ThenByDescending(kv => YearSortKey(kv.Key, unknownLast: true)),
+            "NewestFirst" => items
+                .OrderByDescending(kv => YearSortKey(kv.Key, unknownLast: false)),
+            _ => items
+                .OrderBy(kv => YearSortKey(kv.Key, unknownLast: true))
+        };
+
+        return ordered
             .Select(kv => new LibraryStatsBucket
             {
                 Name = kv.Key,
@@ -1889,16 +1901,41 @@ public class LibraryStatsService
             .ToList();
     }
 
-    private static int YearSortKey(string name)
+    /// <summary>
+    /// Normalizes year-sort config to OldestFirst, NewestFirst, or MostTitles.
+    /// </summary>
+    internal static string ResolveYearSort(string? sortMode)
+    {
+        return NormalizeYearSort(sortMode);
+    }
+
+    private static string NormalizeYearSort(string? sortMode)
+    {
+        if (string.Equals(sortMode, "NewestFirst", StringComparison.OrdinalIgnoreCase))
+        {
+            return "NewestFirst";
+        }
+
+        if (string.Equals(sortMode, "MostTitles", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sortMode, "ByCount", StringComparison.OrdinalIgnoreCase))
+        {
+            return "MostTitles";
+        }
+
+        return "OldestFirst";
+    }
+
+    private static int YearSortKey(string name, bool unknownLast)
     {
         if (name.Equals(UnknownBucketName, StringComparison.OrdinalIgnoreCase))
         {
-            return int.MinValue;
+            // OldestFirst: unknown last (MaxValue). NewestFirst uses unknownLast=false → MinValue so descending puts it last.
+            return unknownLast ? int.MaxValue : int.MinValue;
         }
 
         return int.TryParse(name, NumberStyles.Integer, CultureInfo.InvariantCulture, out var year)
             ? year
-            : int.MinValue + 1;
+            : (unknownLast ? int.MaxValue - 1 : int.MinValue + 1);
     }
 
     private static IReadOnlyList<LibraryStatsBucket> ToDecadeBuckets(
@@ -2227,7 +2264,7 @@ public class LibraryStatsService
             .Where(y => !y.Name.Equals(UnknownBucketName, StringComparison.OrdinalIgnoreCase)
                         && !y.Name.Equals(OtherBucketName, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(y => y.Count)
-            .ThenByDescending(y => YearSortKey(y.Name))
+            .ThenByDescending(y => YearSortKey(y.Name, unknownLast: true))
             .FirstOrDefault();
         if (topYear is not null && topYear.Count >= 2)
         {
@@ -2485,8 +2522,11 @@ public class LibraryStatsService
             "years" => CategoryFromBuckets(
                 "years",
                 "Release years",
-                "Share of titles",
-                ToYearBuckets(agg.YearCounts, agg.TotalCount),
+                "Share of titles · every year with library titles",
+                ToYearBuckets(
+                    agg.YearCounts,
+                    agg.TotalCount,
+                    ResolveYearSort(Plugin.Instance?.Configuration?.LibraryStatsYearSort)),
                 agg.TotalCount,
                 agg.GeneratedAt),
             "ratings" or "officialratings" => CategoryFromCounts(

@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.7.5.2';
+    var PLUGIN_VERSION = '1.7.6.0';
     var ROLE_PREVIEW_MAX = 2;
     var CREW_JOB_TITLES = {
         'creator': 1,
@@ -2410,6 +2410,132 @@
         genres: 1, studios: 1, collections: 1, decades: 1, years: 1, ratings: 1, community: 1, tags: 1, languages: 1
     };
 
+    var YEAR_SORT_STORAGE_KEY = 'fullCrewYearSort';
+    var YEAR_SORT_OPTIONS = [
+        { value: 'OldestFirst', label: 'Oldest → newest' },
+        { value: 'NewestFirst', label: 'Newest → oldest' },
+        { value: 'MostTitles', label: 'Most titles' }
+    ];
+
+    function normalizeYearSortMode(mode) {
+        var raw = String(mode || '').trim();
+        if (/^NewestFirst$/i.test(raw)) {
+            return 'NewestFirst';
+        }
+        if (/^(MostTitles|ByCount)$/i.test(raw)) {
+            return 'MostTitles';
+        }
+        return 'OldestFirst';
+    }
+
+    function getYearSortMode() {
+        try {
+            var stored = window.localStorage && localStorage.getItem(YEAR_SORT_STORAGE_KEY);
+            if (stored) {
+                return normalizeYearSortMode(stored);
+            }
+        } catch (e) { /* ignore */ }
+        return 'OldestFirst';
+    }
+
+    function setYearSortMode(mode) {
+        var next = normalizeYearSortMode(mode);
+        try {
+            if (window.localStorage) {
+                localStorage.setItem(YEAR_SORT_STORAGE_KEY, next);
+            }
+        } catch (e2) { /* ignore */ }
+        return next;
+    }
+
+    function yearSortKey(name, unknownLast) {
+        var label = String(name || '');
+        if (/^Unknown$/i.test(label)) {
+            return unknownLast ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+        }
+        var year = parseInt(label, 10);
+        if (!isFinite(year)) {
+            return unknownLast ? Number.POSITIVE_INFINITY - 1 : Number.NEGATIVE_INFINITY + 1;
+        }
+        return year;
+    }
+
+    function sortYearBuckets(buckets, mode) {
+        var items = (buckets || []).slice();
+        var sort = normalizeYearSortMode(mode);
+        if (sort === 'MostTitles') {
+            items.sort(function (a, b) {
+                var dc = (b.count || 0) - (a.count || 0);
+                if (dc) {
+                    return dc;
+                }
+                return yearSortKey(b.name, true) - yearSortKey(a.name, true);
+            });
+            return items;
+        }
+        if (sort === 'NewestFirst') {
+            items.sort(function (a, b) {
+                return yearSortKey(b.name, false) - yearSortKey(a.name, false);
+            });
+            return items;
+        }
+        items.sort(function (a, b) {
+            return yearSortKey(a.name, true) - yearSortKey(b.name, true);
+        });
+        return items;
+    }
+
+    function applyYearSortIfNeeded(buckets, categoryKey) {
+        if (categoryKey !== 'years') {
+            return buckets || [];
+        }
+        return sortYearBuckets(buckets, getYearSortMode());
+    }
+
+    function createYearSortControl(onChange) {
+        var wrap = createElement('div', 'fullCrewStatsYearSort');
+        wrap.appendChild(createElement('label', 'fullCrewStatsYearSortLabel', 'Sort'));
+        var select = document.createElement('select');
+        select.className = 'fullCrewStatsYearSortSelect';
+        select.setAttribute('aria-label', 'Sort release years');
+        YEAR_SORT_OPTIONS.forEach(function (opt) {
+            var option = document.createElement('option');
+            option.value = opt.value;
+            option.textContent = opt.label;
+            select.appendChild(option);
+        });
+        select.value = getYearSortMode();
+        select.addEventListener('change', function () {
+            setYearSortMode(select.value);
+            if (typeof onChange === 'function') {
+                onChange(select.value);
+            }
+        });
+        wrap.appendChild(select);
+        return wrap;
+    }
+
+    function syncYearSortFromConfig() {
+        return fetchPluginConfig().then(function (config) {
+            if (!config) {
+                return getYearSortMode();
+            }
+            var flag = prop(config, 'LibraryStatsYearSort', 'libraryStatsYearSort');
+            if (!flag) {
+                return getYearSortMode();
+            }
+            try {
+                var stored = window.localStorage && localStorage.getItem(YEAR_SORT_STORAGE_KEY);
+                if (!stored) {
+                    setYearSortMode(flag);
+                }
+            } catch (e) {
+                setYearSortMode(flag);
+            }
+            return getYearSortMode();
+        });
+    }
+
     function normalizeStatsHash(hash) {
         return Core.normalizeHash(hash);
     }
@@ -3342,6 +3468,7 @@
                 stillValid: isStatsRoute,
                 warn: '[FullCrew] failed to load stats category ' + route.category,
                 onSuccess: function (data) {
+                    statsDetailCategoryKey = String(route.category || '').toLowerCase();
                     renderStatsDetailContent(page, data);
                 },
                 onError: function () {
@@ -3522,7 +3649,7 @@
             { title: 'Genres', categoryKey: 'genres', keyPascal: 'Genres', keyCamel: 'genres', hint: 'Share of genre tags · top names (full list via title)' },
             { title: 'Studios', categoryKey: 'studios', keyPascal: 'Studios', keyCamel: 'studios', hint: 'Share of studio credits · top names (full list via title)' },
             { title: 'Collections', categoryKey: 'collections', keyPascal: 'Collections', keyCamel: 'collections', hint: 'Share of collection memberships' },
-            { title: 'Release years', categoryKey: 'years', keyPascal: 'Years', keyCamel: 'years', hint: 'Production year · click a year to list every matching title' },
+            { title: 'Release years', categoryKey: 'years', keyPascal: 'Years', keyCamel: 'years', hint: 'Every production year · click a year to list matching titles' },
             { title: 'Decades', categoryKey: 'decades', keyPascal: 'Decades', keyCamel: 'decades' },
             { title: 'Official ratings', categoryKey: 'ratings', keyPascal: 'OfficialRatings', keyCamel: 'officialRatings' },
             { title: 'Community scores', categoryKey: 'community', keyPascal: 'CommunityRatings', keyCamel: 'communityRatings' },
@@ -3797,12 +3924,32 @@
             if (section.hint) {
                 card.appendChild(createElement('p', 'fullCrewStatsSectionHint', section.hint));
             }
+            if (section.categoryKey === 'years') {
+                card.appendChild(createYearSortControl(function () {
+                    var host = card.querySelector('.fullCrewStatsChartHost');
+                    if (host) {
+                        renderChartInto(
+                            host,
+                            applyYearSortIfNeeded(card._buckets || buckets, 'years'),
+                            mode,
+                            true,
+                            'years'
+                        );
+                    }
+                }));
+            }
             var chartHost = createElement('div', 'fullCrewStatsChartHost');
             chartHost.setAttribute('data-section', section.keyPascal);
             if (section.categoryKey) {
                 chartHost.setAttribute('data-category', section.categoryKey);
             }
-            renderChartInto(chartHost, buckets, mode, true, section.categoryKey || null);
+            renderChartInto(
+                chartHost,
+                applyYearSortIfNeeded(buckets, section.categoryKey || null),
+                mode,
+                true,
+                section.categoryKey || null
+            );
             card.appendChild(chartHost);
             card._buckets = buckets;
             grid.appendChild(card);
@@ -3860,6 +4007,7 @@
                     return null;
                 }).filter(Boolean);
             }
+            buckets = applyYearSortIfNeeded(buckets, statsDetailCategoryKey);
             renderChartInto(detailHost, buckets, mode, false, statsDetailCategoryKey);
             return;
         }
@@ -3885,6 +4033,7 @@
                     Studios: 'studios',
                     Collections: 'collections',
                     Decades: 'decades',
+                    Years: 'years',
                     OfficialRatings: 'officialRatings',
                     CommunityRatings: 'communityRatings',
                     Tags: 'tags',
@@ -3907,7 +4056,7 @@
                     buckets = normalizeBuckets(prop(statsCachedData, key, map[key]));
                 }
             }
-            renderChartInto(host, buckets || [], mode, true, categoryKey);
+            renderChartInto(host, applyYearSortIfNeeded(buckets || [], categoryKey), mode, true, categoryKey);
         });
     }
 
@@ -4012,6 +4161,9 @@
         var totalBuckets = Number(prop(data, 'TotalBuckets', 'totalBuckets')) || 0;
         var buckets = normalizeBuckets(prop(data, 'Buckets', 'buckets'));
         statsDetailBuckets = buckets;
+        if (!statsDetailCategoryKey) {
+            statsDetailCategoryKey = String(prop(data, 'Category', 'category') || '').toLowerCase();
+        }
 
         var titleEl = page.querySelector('.fullCrewStatsTitle');
         if (titleEl) {
@@ -4038,6 +4190,11 @@
             buckets.length + (truncated ? ' of ' + totalBuckets : '') + ' entries'
         );
         toolbar.appendChild(countLabel);
+        if (statsDetailCategoryKey === 'years') {
+            toolbar.appendChild(createYearSortControl(function () {
+                reRenderStatsCharts(page, true);
+            }));
+        }
         body.appendChild(toolbar);
 
         if (truncated) {
@@ -4052,7 +4209,13 @@
 
         var chartHost = createElement('div', 'fullCrewStatsChartHost fullCrewStatsChartHost--detail');
         body.appendChild(chartHost);
-        renderChartInto(chartHost, buckets, getStatsViewMode(true));
+        renderChartInto(
+            chartHost,
+            applyYearSortIfNeeded(buckets, statsDetailCategoryKey),
+            getStatsViewMode(true),
+            false,
+            statsDetailCategoryKey
+        );
 
         var generatedAt = prop(data, 'GeneratedAt', 'generatedAt');
         if (generatedAt) {
@@ -5036,6 +5199,7 @@
         refreshStatsEnabled().then(function () {
             scanAll();
         });
+        syncYearSortFromConfig();
         refreshGlassPlayEnabled().then(function () {
             ensureGlassPlayStyles(document.documentElement.classList.contains(GLASS_PLAY_CLASS));
         });

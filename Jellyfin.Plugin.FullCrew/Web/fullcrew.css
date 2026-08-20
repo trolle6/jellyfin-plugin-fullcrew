@@ -639,6 +639,39 @@ a.fullCrewStatsSectionTitleLink:focus-visible {
     font-variant-numeric: tabular-nums;
 }
 
+.fullCrewStatsYearSort {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0 0 0.65rem;
+}
+
+.fullCrewStatsYearSortLabel {
+    font-size: 0.8rem;
+    opacity: 0.65;
+}
+
+.fullCrewStatsYearSortSelect {
+    box-sizing: border-box;
+    padding: 0.35rem 0.55rem;
+    border-radius: 0.35rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.05);
+    color: inherit;
+    font: inherit;
+    font-size: 0.82rem;
+}
+
+.fullCrewStatsYearSortSelect:focus {
+    outline: none;
+    border-color: rgba(0, 164, 220, 0.65);
+}
+
+.fullCrewStatsDetailToolbar .fullCrewStatsYearSort {
+    margin: 0;
+    margin-left: auto;
+}
+
 .fullCrewStatsChartHost--detail {
     max-width: 52rem;
 }
