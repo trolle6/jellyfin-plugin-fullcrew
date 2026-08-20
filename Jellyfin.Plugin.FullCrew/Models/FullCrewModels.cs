@@ -67,8 +67,16 @@ public class CrewPerson
 
     /// <summary>
     /// Gets or sets the character name (cast) or job title (crew).
+    /// Joined with “ · ” when multiple unique roles remain after collapse.
     /// </summary>
     public string Role { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets unique collapsed role names (preferred for UI).
+    /// Empty when only <see cref="Role"/> is available.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Roles { get; set; }
 
     /// <summary>
     /// Gets or sets the TMDB person id.

@@ -1,0 +1,308 @@
+using System;
+using System.Collections.Generic;
+
+namespace Jellyfin.Plugin.FullCrew.Models;
+
+/// <summary>
+/// Aggregated library statistics for movies and series.
+/// </summary>
+public class LibraryStatsResponse
+{
+    /// <summary>
+    /// Gets or sets when these stats were generated (UTC).
+    /// </summary>
+    public DateTime GeneratedAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of movies counted.
+    /// </summary>
+    public int MovieCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of series counted.
+    /// </summary>
+    public int SeriesCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets the total movie + series count.
+    /// </summary>
+    public int TotalCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets the percent of items whose genres include Animation.
+    /// </summary>
+    public double AnimationPercent { get; set; }
+
+    /// <summary>
+    /// Gets or sets total runtime ticks across movies that have RunTimeTicks.
+    /// </summary>
+    public long MovieRuntimeTicksTotal { get; set; }
+
+    /// <summary>
+    /// Gets or sets average runtime ticks for movies with known runtime.
+    /// </summary>
+    public long MovieRuntimeTicksAverage { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many movies contributed to the runtime average.
+    /// </summary>
+    public int MovieRuntimeSampleCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets total runtime ticks across series that have RunTimeTicks.
+    /// </summary>
+    public long SeriesRuntimeTicksTotal { get; set; }
+
+    /// <summary>
+    /// Gets or sets average runtime ticks for series with known runtime.
+    /// </summary>
+    public long SeriesRuntimeTicksAverage { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many series contributed to the runtime average.
+    /// </summary>
+    public int SeriesRuntimeSampleCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets short auto-generated insight lines.
+    /// </summary>
+    public IReadOnlyList<string> Insights { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets the Movie vs Series type mix.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> Types { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets genre frequency buckets.
+    /// Percent is share of all genre-tag assignments (multi-label), not titles.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> Genres { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets studio / network frequency buckets.
+    /// Percent is share of all studio credits (multi-label), not titles.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> Studios { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets official rating frequency buckets.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> OfficialRatings { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets production decade frequency buckets.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> Decades { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets production year frequency buckets (e.g. 2015, 2001).
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> Years { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets community rating distribution buckets.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> CommunityRatings { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets top tag frequency buckets.
+    /// Percent is share of all tag assignments (multi-label), not titles.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> Tags { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets preferred metadata language frequency buckets.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> Languages { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets Jellyfin collection (BoxSet) size buckets.
+    /// Count is Movie/Series members in that collection; Percent is share of all
+    /// collection memberships (sum of those counts), consistent with role people charts.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> Collections { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets how many Movie/Series titles contributed media-stream quality stats.
+    /// Resolution / HDR / codec / audio percents use this as their denominator
+    /// (titles with a resolvable primary video stream), not <see cref="TotalCount"/>.
+    /// </summary>
+    public int MediaInfoSampleCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets video resolution buckets (480p, 720p, 1080p, …) from primary video Height.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> Resolutions { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets video range / HDR buckets (SDR, HDR10, Dolby Vision, …) from VideoRangeType.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> VideoRanges { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets primary video codec buckets (H.264, HEVC, AV1, …).
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> VideoCodecs { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets primary audio channel layout buckets (Stereo, 5.1, Atmos, …).
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> AudioChannels { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets primary audio codec buckets (when present on the sampled stream).
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> AudioCodecs { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets top-people lists grouped by PersonKind / role.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsPeopleGroup> PeopleByRole { get; set; } = [];
+}
+
+/// <summary>
+/// Top people for a single PersonKind / credit role.
+/// </summary>
+public class LibraryStatsPeopleGroup
+{
+    /// <summary>
+    /// Gets or sets the role display name (e.g. Actor, Director, Guest Star).
+    /// </summary>
+    public string Role { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the underlying PersonKind name when known.
+    /// </summary>
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets top people for this role.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> People { get; set; } = [];
+}
+
+/// <summary>
+/// A named count/percent bucket within a library stats breakdown.
+/// </summary>
+public class LibraryStatsBucket
+{
+    /// <summary>
+    /// Gets or sets the display name for this bucket.
+    /// </summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets how many items fall in this bucket.
+    /// </summary>
+    public int Count { get; set; }
+
+    /// <summary>
+    /// Gets or sets the share of the library total (0–100).
+    /// </summary>
+    public double Percent { get; set; }
+
+    /// <summary>
+    /// Gets or sets the Jellyfin library item id when this bucket maps to a real entity
+    /// (Person, Genre, Studio, BoxSet, …). Null when there is no resolvable page.
+    /// </summary>
+    public string? ItemId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the Jellyfin item type for <see cref="ItemId"/> (e.g. Person, Genre, Studio, BoxSet).
+    /// </summary>
+    public string? ItemType { get; set; }
+
+    /// <summary>
+    /// Gets or sets child buckets when this row is a clustered parent (e.g. studio name-root group).
+    /// Null/empty for leaf rows.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket>? Children { get; set; }
+}
+
+/// <summary>
+/// Full ranked list for a single library-stats category (detail page).
+/// Overview keeps Top N (+ Other when it is not dominating); this endpoint returns the uncapped (or high-cap) list.
+/// </summary>
+public class LibraryStatsCategoryResponse
+{
+    /// <summary>
+    /// Gets or sets the canonical category key (e.g. actors, genres, hdr).
+    /// </summary>
+    public string Category { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the display title (e.g. Top Actor, Genres).
+    /// </summary>
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets a short hint describing the percent denominator.
+    /// </summary>
+    public string? DenominatorHint { get; set; }
+
+    /// <summary>
+    /// Gets or sets the denominator used for Percent (titles, assignments, role credits, …).
+    /// </summary>
+    public int Denominator { get; set; }
+
+    /// <summary>
+    /// Gets or sets when these stats were generated (UTC).
+    /// </summary>
+    public DateTime GeneratedAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the list was capped (see <see cref="TotalBuckets"/>).
+    /// </summary>
+    public bool Truncated { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many distinct buckets existed before any safety cap.
+    /// </summary>
+    public int TotalBuckets { get; set; }
+
+    /// <summary>
+    /// Gets or sets the full ranked buckets for this category.
+    /// </summary>
+    public IReadOnlyList<LibraryStatsBucket> Buckets { get; set; } = [];
+}
+
+/// <summary>
+/// Library Movie/Series titles that contribute to one stats bucket (e.g. audioChannels · Stereo).
+/// </summary>
+public class LibraryStatsBucketItemsResponse
+{
+    /// <summary>Canonical category key (e.g. audioChannels).</summary>
+    public string Category { get; set; } = string.Empty;
+    /// <summary>Category display title.</summary>
+    public string CategoryTitle { get; set; } = string.Empty;
+    /// <summary>Bucket name (e.g. Stereo).</summary>
+    public string Bucket { get; set; } = string.Empty;
+    /// <summary>When generated (UTC).</summary>
+    public DateTime GeneratedAt { get; set; }
+    /// <summary>Matches before safety cap.</summary>
+    public int TotalCount { get; set; }
+    /// <summary>Whether capped.</summary>
+    public bool Truncated { get; set; }
+    /// <summary>Contributing titles.</summary>
+    public IReadOnlyList<LibraryStatsBucketItem> Items { get; set; } = [];
+}
+
+/// <summary>A single library title in a stats bucket item list.</summary>
+public class LibraryStatsBucketItem
+{
+    /// <summary>Jellyfin item id (N format).</summary>
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>Display name.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Movie or Series.</summary>
+    public string Type { get; set; } = string.Empty;
+
+    /// <summary>Production year when known.</summary>
+    public int? ProductionYear { get; set; }
+
+    /// <summary>Primary-image presence flag for the client.</summary>
+    public string? ImageTag { get; set; }
+}

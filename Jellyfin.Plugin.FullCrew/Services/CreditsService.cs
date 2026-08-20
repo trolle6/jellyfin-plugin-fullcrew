@@ -23,27 +23,35 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 /// </summary>
 public class CreditsService
 {
-    /// <summary>
-    /// Same shared TMDB API key Jellyfin's official TheMovieDb provider uses
-    /// (<c>MediaBrowser.Providers.Plugins.Tmdb.TmdbUtils.ApiKey</c>) when no custom key is configured.
-    /// </summary>
-    private const string JellyfinSharedTmdbApiKey = "4219e299c89411838049ab0dab19ebd5";
+    private static readonly string[] DepartmentOrder = CrewDepartments.DefaultOrder;
 
-    private static readonly string[] DepartmentOrder =
+    /// <summary>
+    /// Preferred display order when one person has multiple stacked jobs.
+    /// Unknown roles sort after these, alphabetically.
+    /// </summary>
+    private static readonly string[] RolePriorityOrder =
     [
-        "Cast",
-        "Directing",
-        "Writing",
-        "Production",
-        "Camera",
-        "Editing",
-        "Sound",
-        "Art",
-        "Costume & Make-Up",
-        "Visual Effects",
-        "Lighting",
-        "Crew",
-        "Other"
+        "Creator",
+        "Executive Producer",
+        "Co-Executive Producer",
+        "Producer",
+        "Co-Producer",
+        "Associate Producer",
+        "Line Producer",
+        "Director",
+        "Co-Director",
+        "Writer",
+        "Screenplay",
+        "Story",
+        "Characters",
+        "Editor",
+        "Supervising Editor",
+        "Director of Photography",
+        "Cinematography",
+        "Original Music Composer",
+        "Music",
+        "Actor",
+        "Self"
     ];
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -76,8 +84,20 @@ public class CreditsService
     /// </summary>
     /// <param name="itemId">The Jellyfin item id.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="forceIncludeCast">
+    /// When true, always include the Cast department even if disabled in accordion settings
+    /// (used by playback / scene identify).
+    /// </param>
+    /// <param name="preferSeriesAggregate">
+    /// When true, skip season-scoped credits and use series <c>aggregate_credits</c>
+    /// (richer cast for episode playback).
+    /// </param>
     /// <returns>Categorized credits response.</returns>
-    public async Task<FullCrewResponse> GetCreditsAsync(Guid itemId, CancellationToken cancellationToken)
+    public async Task<FullCrewResponse> GetCreditsAsync(
+        Guid itemId,
+        CancellationToken cancellationToken,
+        bool forceIncludeCast = false,
+        bool preferSeriesAggregate = false)
     {
         var item = _libraryManager.GetItemById(itemId);
         if (item is null)
@@ -89,8 +109,20 @@ public class CreditsService
             };
         }
 
+        var kind = item.GetBaseItemKind();
+        if (kind is not (BaseItemKind.Movie or BaseItemKind.Series or BaseItemKind.Season or BaseItemKind.Episode))
+        {
+            return new FullCrewResponse
+            {
+                ItemId = item.Id.ToString("N", CultureInfo.InvariantCulture),
+                ItemName = item.Name,
+                MediaType = kind.ToString(),
+                Error = "Cast and crew is only available for movies, series, seasons, and episodes."
+            };
+        }
+
         var config = Plugin.Instance?.Configuration;
-        var apiKey = ResolveApiKey(config?.TmdbApiKey);
+        var apiKey = TmdbDefaults.ResolveApiKey(config?.TmdbApiKey);
 
         var lookup = ResolveTmdbLookup(item);
         if (lookup is null)
@@ -104,7 +136,19 @@ public class CreditsService
             };
         }
 
-        var cacheKey = $"fullcrew-{lookup.MediaKind}-{lookup.TmdbId}";
+        if (preferSeriesAggregate && lookup.MediaKind == TmdbMediaKind.Tv && lookup.SeasonNumber is not null)
+        {
+            lookup = lookup with { SeasonNumber = null };
+        }
+
+        // Include display config so department toggles / caps take effect without waiting for TTL.
+        var maxPeople = Math.Clamp(config?.MaxPeoplePerDepartment ?? 100, 1, 500);
+        var enabledDepts = string.Join('|', config?.EnabledDepartments ?? DepartmentOrder);
+        var forceFlag = forceIncludeCast ? "1" : "0";
+        var aggFlag = preferSeriesAggregate ? "1" : "0";
+        var cacheKey = lookup.SeasonNumber is int seasonNumber
+            ? $"fullcrew-v5-{lookup.MediaKind}-{lookup.TmdbId}-s{seasonNumber}-m{maxPeople}-c{forceFlag}-a{aggFlag}-[{enabledDepts}]"
+            : $"fullcrew-v5-{lookup.MediaKind}-{lookup.TmdbId}-m{maxPeople}-c{forceFlag}-a{aggFlag}-[{enabledDepts}]";
         if (_memoryCache.TryGetValue(cacheKey, out FullCrewResponse? cached) && cached is not null)
         {
             return CloneForItem(cached, item);
@@ -112,7 +156,8 @@ public class CreditsService
 
         try
         {
-            var response = await FetchFromTmdbAsync(item, lookup, apiKey, cancellationToken).ConfigureAwait(false);
+            var response = await FetchFromTmdbAsync(item, lookup, apiKey, forceIncludeCast, cancellationToken)
+                .ConfigureAwait(false);
             var cacheHours = Math.Clamp(config?.CacheHours ?? 12, 1, 168);
             _memoryCache.Set(cacheKey, response, TimeSpan.FromHours(cacheHours));
             return response;
@@ -135,23 +180,69 @@ public class CreditsService
         BaseItem item,
         TmdbLookup lookup,
         string apiKey,
+        bool forceIncludeCast,
         CancellationToken cancellationToken)
     {
         var client = _httpClientFactory.CreateClient();
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Jellyfin-Plugin-FullCrew/1.0");
+        var path = BuildTmdbCreditsUrl(lookup, apiKey);
+        using var httpResponse = await SendGetAsync(client, path, cancellationToken).ConfigureAwait(false);
 
-        var path = lookup.MediaKind == TmdbMediaKind.Movie
-            ? $"https://api.themoviedb.org/3/movie/{lookup.TmdbId}/credits?api_key={Uri.EscapeDataString(apiKey)}"
-            : $"https://api.themoviedb.org/3/tv/{lookup.TmdbId}/aggregate_credits?api_key={Uri.EscapeDataString(apiKey)}";
+        if (!httpResponse.IsSuccessStatusCode && lookup.SeasonNumber is not null)
+        {
+            // Season credits missing — fall back to full-series aggregate credits.
+            _logger.LogDebug(
+                "TMDB season credits unavailable for {TmdbId} S{Season}; falling back to series aggregate credits.",
+                lookup.TmdbId,
+                lookup.SeasonNumber);
 
-        using var httpResponse = await client.GetAsync(path, cancellationToken).ConfigureAwait(false);
+            var fallbackPath = BuildTmdbCreditsUrl(lookup with { SeasonNumber = null }, apiKey);
+            using var fallbackResponse = await SendGetAsync(client, fallbackPath, cancellationToken).ConfigureAwait(false);
+            return await ParseCreditsResponseAsync(item, lookup, fallbackResponse, forceIncludeCast, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return await ParseCreditsResponseAsync(item, lookup, httpResponse, forceIncludeCast, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static async Task<HttpResponseMessage> SendGetAsync(
+        HttpClient client,
+        string url,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.TryAddWithoutValidation("User-Agent", PluginInfo.UserAgent);
+        return await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string BuildTmdbCreditsUrl(TmdbLookup lookup, string apiKey)
+    {
+        if (lookup.MediaKind == TmdbMediaKind.Movie)
+        {
+            return $"https://api.themoviedb.org/3/movie/{lookup.TmdbId}/credits?api_key={Uri.EscapeDataString(apiKey)}";
+        }
+
+        if (lookup.SeasonNumber is int seasonNumber)
+        {
+            return $"https://api.themoviedb.org/3/tv/{lookup.TmdbId}/season/{seasonNumber.ToString(CultureInfo.InvariantCulture)}/credits?api_key={Uri.EscapeDataString(apiKey)}";
+        }
+
+        return $"https://api.themoviedb.org/3/tv/{lookup.TmdbId}/aggregate_credits?api_key={Uri.EscapeDataString(apiKey)}";
+    }
+
+    private async Task<FullCrewResponse> ParseCreditsResponseAsync(
+        BaseItem item,
+        TmdbLookup lookup,
+        HttpResponseMessage httpResponse,
+        bool forceIncludeCast,
+        CancellationToken cancellationToken)
+    {
         if (!httpResponse.IsSuccessStatusCode)
         {
             var body = await httpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             _logger.LogWarning(
-                "TMDB credits request failed ({StatusCode}) for {Path}: {Body}",
+                "TMDB credits request failed ({StatusCode}): {Body}",
                 (int)httpResponse.StatusCode,
-                path.Split('?')[0],
                 body);
 
             return new FullCrewResponse
@@ -168,7 +259,7 @@ public class CreditsService
         var payload = await JsonSerializer.DeserializeAsync<TmdbCreditsPayload>(stream, JsonOptions, cancellationToken)
             .ConfigureAwait(false);
 
-        var departments = BuildDepartments(payload, Plugin.Instance?.Configuration);
+        var departments = BuildDepartments(payload, Plugin.Instance?.Configuration, forceIncludeCast);
         return new FullCrewResponse
         {
             ItemId = item.Id.ToString("N", CultureInfo.InvariantCulture),
@@ -179,16 +270,24 @@ public class CreditsService
         };
     }
 
-    private static IReadOnlyList<CrewDepartment> BuildDepartments(TmdbCreditsPayload? payload, Configuration.PluginConfiguration? config)
+    private static IReadOnlyList<CrewDepartment> BuildDepartments(
+        TmdbCreditsPayload? payload,
+        Configuration.PluginConfiguration? config,
+        bool forceIncludeCast = false)
     {
         var enabled = new HashSet<string>(
             config?.EnabledDepartments ?? DepartmentOrder,
             StringComparer.OrdinalIgnoreCase);
+        if (forceIncludeCast)
+        {
+            enabled.Add("Cast");
+        }
+
         var maxPerDept = Math.Clamp(config?.MaxPeoplePerDepartment ?? 100, 1, 1000);
 
-        var buckets = new Dictionary<string, List<CrewPerson>>(StringComparer.OrdinalIgnoreCase);
+        var rawCredits = new List<(string Department, CrewPerson Person)>();
 
-        void AddPerson(string department, CrewPerson person)
+        void AddRaw(string department, CrewPerson person)
         {
             var key = NormalizeDepartment(department);
             if (!enabled.Contains(key))
@@ -196,22 +295,7 @@ public class CreditsService
                 return;
             }
 
-            if (!buckets.TryGetValue(key, out var list))
-            {
-                list = [];
-                buckets[key] = list;
-            }
-
-            // Deduplicate by TMDB id + role within department
-            if (list.Any(p =>
-                    p.TmdbPersonId == person.TmdbPersonId
-                    && string.Equals(p.Role, person.Role, StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(p.Name, person.Name, StringComparison.OrdinalIgnoreCase)))
-            {
-                return;
-            }
-
-            list.Add(person);
+            rawCredits.Add((key, person));
         }
 
         if (payload?.Cast is not null)
@@ -227,7 +311,35 @@ public class CreditsService
                     ? member.Character!
                     : FirstRole(member.Roles) ?? "Actor";
 
-                AddPerson(
+                // Aggregate credits can list several characters for one person.
+                if (member.Roles is { Count: > 0 } && string.IsNullOrWhiteSpace(member.Character))
+                {
+                    var addedFromRoles = false;
+                    foreach (var character in member.Roles
+                                 .Select(r => r.Character)
+                                 .Where(c => !string.IsNullOrWhiteSpace(c))
+                                 .Distinct(StringComparer.OrdinalIgnoreCase))
+                    {
+                        AddRaw(
+                            "Cast",
+                            new CrewPerson
+                            {
+                                Name = member.Name.Trim(),
+                                Role = character!.Trim(),
+                                TmdbPersonId = member.Id,
+                                ProfileUrl = ToProfileUrl(member.ProfilePath),
+                                Order = member.Order
+                            });
+                        addedFromRoles = true;
+                    }
+
+                    if (addedFromRoles)
+                    {
+                        continue;
+                    }
+                }
+
+                AddRaw(
                     "Cast",
                     new CrewPerson
                     {
@@ -254,7 +366,7 @@ public class CreditsService
                     foreach (var job in member.Jobs)
                     {
                         var jobTitle = string.IsNullOrWhiteSpace(job.Job) ? "Crew" : job.Job!;
-                        AddPerson(
+                        AddRaw(
                             string.IsNullOrWhiteSpace(member.Department) ? "Crew" : member.Department!,
                             new CrewPerson
                             {
@@ -268,7 +380,7 @@ public class CreditsService
                 else
                 {
                     var jobTitle = string.IsNullOrWhiteSpace(member.Job) ? "Crew" : member.Job!;
-                    AddPerson(
+                    AddRaw(
                         string.IsNullOrWhiteSpace(member.Department) ? "Crew" : member.Department!,
                         new CrewPerson
                         {
@@ -281,6 +393,70 @@ public class CreditsService
             }
         }
 
+        // One card per person: stack roles, park them in their primary department
+        // (earliest match in DepartmentOrder — e.g. Production before Editing).
+        var buckets = new Dictionary<string, List<CrewPerson>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var group in rawCredits.GroupBy(PersonKey, StringComparer.OrdinalIgnoreCase))
+        {
+            var credits = group.ToList();
+            var primaryDepartment = credits
+                .Select(c => c.Department)
+                .OrderBy(DepartmentSortIndex)
+                .ThenBy(d => d, StringComparer.OrdinalIgnoreCase)
+                .First();
+
+            var isCast = string.Equals(primaryDepartment, "Cast", StringComparison.OrdinalIgnoreCase);
+            var rawRoles = credits
+                .Select(c => c.Person.Role)
+                .Where(r => !string.IsNullOrWhiteSpace(r));
+
+            // Aggregate TV credits often list dozens of near-duplicate character strings
+            // (“Mr. Slate (voice)”, “Mr. Slate / Announcer (voice)”, …). Collapse those.
+            IReadOnlyList<string> stackedRoles = RoleCollapse.Collapse(rawRoles);
+            if (isCast && stackedRoles.Count > 1)
+            {
+                stackedRoles = RoleCollapse.PrioritizeCastCharacters(stackedRoles);
+            }
+            else if (!isCast && stackedRoles.Count > 1)
+            {
+                stackedRoles = stackedRoles
+                    .OrderBy(RoleSortIndex)
+                    .ThenBy(r => r, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
+            var best = credits
+                .OrderBy(c => string.IsNullOrWhiteSpace(c.Person.ProfileUrl) ? 1 : 0)
+                .ThenBy(c => c.Person.Order ?? int.MaxValue)
+                .Select(c => c.Person)
+                .First();
+
+            var billingOrders = credits
+                .Select(c => c.Person.Order)
+                .Where(o => o.HasValue)
+                .Select(o => o!.Value)
+                .ToList();
+
+            var stacked = new CrewPerson
+            {
+                Name = best.Name,
+                Role = string.Join(" · ", stackedRoles),
+                Roles = stackedRoles.Count > 0 ? stackedRoles : null,
+                TmdbPersonId = best.TmdbPersonId,
+                ProfileUrl = best.ProfileUrl ?? credits.Select(c => c.Person.ProfileUrl).FirstOrDefault(u => !string.IsNullOrWhiteSpace(u)),
+                Order = billingOrders.Count > 0 ? billingOrders.Min() : null
+            };
+
+            if (!buckets.TryGetValue(primaryDepartment, out var list))
+            {
+                list = [];
+                buckets[primaryDepartment] = list;
+            }
+
+            list.Add(stacked);
+        }
+
         var result = new List<CrewDepartment>();
         foreach (var deptName in DepartmentOrder)
         {
@@ -291,8 +467,8 @@ public class CreditsService
 
             IEnumerable<CrewPerson> ordered = string.Equals(deptName, "Cast", StringComparison.OrdinalIgnoreCase)
                 ? people.OrderBy(p => p.Order ?? int.MaxValue).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
-                : people.OrderBy(p => p.Role, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase);
+                : people.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(p => p.Role, StringComparer.OrdinalIgnoreCase);
 
             result.Add(new CrewDepartment
             {
@@ -315,14 +491,64 @@ public class CreditsService
             {
                 Name = orphan,
                 People = buckets[orphan]
-                    .OrderBy(p => p.Role, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(p => p.Role, StringComparer.OrdinalIgnoreCase)
                     .Take(maxPerDept)
                     .ToList()
             });
         }
 
         return result;
+    }
+
+    private static string PersonKey((string Department, CrewPerson Person) credit)
+    {
+        if (credit.Person.TmdbPersonId is int id and > 0)
+        {
+            return "id:" + id.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return "name:" + credit.Person.Name.Trim().ToLowerInvariant();
+    }
+
+    private static int DepartmentSortIndex(string department)
+    {
+        for (var i = 0; i < DepartmentOrder.Length; i++)
+        {
+            if (string.Equals(DepartmentOrder[i], department, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return DepartmentOrder.Length + 1;
+    }
+
+    private static int RoleSortIndex(string role)
+    {
+        if (string.IsNullOrWhiteSpace(role))
+        {
+            return RolePriorityOrder.Length + 2;
+        }
+
+        for (var i = 0; i < RolePriorityOrder.Length; i++)
+        {
+            if (string.Equals(RolePriorityOrder[i], role, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        // Fuzzy: "Executive Producer (uncredited)" still ranks with Executive Producer.
+        for (var i = 0; i < RolePriorityOrder.Length; i++)
+        {
+            if (role.StartsWith(RolePriorityOrder[i], StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return RolePriorityOrder.Length + 1;
     }
 
     private static string NormalizeDepartment(string department)
@@ -377,7 +603,7 @@ public class CreditsService
             return null;
         }
 
-        return "https://image.tmdb.org/t/p/w185" + profilePath;
+        return "https://image.tmdb.org/t/p/w342" + profilePath;
     }
 
     private static FullCrewResponse CloneForItem(FullCrewResponse cached, BaseItem item)
@@ -395,6 +621,26 @@ public class CreditsService
 
     private static TmdbLookup? ResolveTmdbLookup(BaseItem item)
     {
+        if (item is Season season)
+        {
+            var series = season.Series;
+            if (series is not null)
+            {
+                var seriesId = GetProviderId(series, "Tmdb") ?? GetProviderId(series, "TmdbSeries");
+                if (!string.IsNullOrWhiteSpace(seriesId))
+                {
+                    return new TmdbLookup(seriesId, TmdbMediaKind.Tv, season.IndexNumber);
+                }
+            }
+
+            // Some libraries store the series TMDB id on the season itself.
+            var seasonSeriesId = GetProviderId(item, "Tmdb") ?? GetProviderId(item, "TmdbSeries");
+            if (!string.IsNullOrWhiteSpace(seasonSeriesId))
+            {
+                return new TmdbLookup(seasonSeriesId, TmdbMediaKind.Tv, season.IndexNumber);
+            }
+        }
+
         if (item is Episode episode)
         {
             var series = episode.Series;
@@ -403,7 +649,7 @@ public class CreditsService
                 var seriesId = GetProviderId(series, "Tmdb") ?? GetProviderId(series, "TmdbSeries");
                 if (!string.IsNullOrWhiteSpace(seriesId))
                 {
-                    return new TmdbLookup(seriesId, TmdbMediaKind.Tv);
+                    return new TmdbLookup(seriesId, TmdbMediaKind.Tv, episode.ParentIndexNumber);
                 }
             }
         }
@@ -427,17 +673,21 @@ public class CreditsService
         }
 
         // Fallback: treat as movie if only Tmdb is present, else TV if TmdbSeries
+        int? seasonNumber = item is Season s ? s.IndexNumber
+            : item is Episode e ? e.ParentIndexNumber
+            : null;
+
         var tmdb = GetProviderId(item, "Tmdb");
         if (!string.IsNullOrWhiteSpace(tmdb))
         {
-            var kind = item is Series or Episode ? TmdbMediaKind.Tv : TmdbMediaKind.Movie;
-            return new TmdbLookup(tmdb, kind);
+            var kind = item is Series or Season or Episode ? TmdbMediaKind.Tv : TmdbMediaKind.Movie;
+            return new TmdbLookup(tmdb, kind, seasonNumber);
         }
 
         var tmdbSeries = GetProviderId(item, "TmdbSeries");
         if (!string.IsNullOrWhiteSpace(tmdbSeries))
         {
-            return new TmdbLookup(tmdbSeries, TmdbMediaKind.Tv);
+            return new TmdbLookup(tmdbSeries, TmdbMediaKind.Tv, seasonNumber);
         }
 
         return null;
@@ -455,16 +705,8 @@ public class CreditsService
             : null;
     }
 
-    /// <summary>
-    /// Uses a configured key when set; otherwise Jellyfin's shared TMDB provider key.
-    /// </summary>
-    private static string ResolveApiKey(string? configuredKey)
-    {
-        var trimmed = configuredKey?.Trim();
-        return string.IsNullOrWhiteSpace(trimmed) ? JellyfinSharedTmdbApiKey : trimmed;
-    }
 
-    private sealed record TmdbLookup(string TmdbId, TmdbMediaKind MediaKind);
+    private sealed record TmdbLookup(string TmdbId, TmdbMediaKind MediaKind, int? SeasonNumber = null);
 
     private enum TmdbMediaKind
     {

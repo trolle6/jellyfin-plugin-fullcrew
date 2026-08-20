@@ -5,6 +5,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Jellyfin.Plugin.FullCrew", "Jellyfin.Plugin.FullCrew\Jellyfin.Plugin.FullCrew.csproj", "{FA395149-C273-4586-B896-ECD0C175E5A3}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Jellyfin.Plugin.FullCrew.Tests", "Jellyfin.Plugin.FullCrew.Tests\Jellyfin.Plugin.FullCrew.Tests.csproj", "{B2C4E8A1-5D7F-4A9B-8C3E-1F6A0D9E2B4C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,6 +29,18 @@ Global
 		{FA395149-C273-4586-B896-ECD0C175E5A3}.Release|x64.Build.0 = Release|Any CPU
 		{FA395149-C273-4586-B896-ECD0C175E5A3}.Release|x86.ActiveCfg = Release|Any CPU
 		{FA395149-C273-4586-B896-ECD0C175E5A3}.Release|x86.Build.0 = Release|Any CPU
+		{B2C4E8A1-5D7F-4A9B-8C3E-1F6A0D9E2B4C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B2C4E8A1-5D7F-4A9B-8C3E-1F6A0D9E2B4C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B2C4E8A1-5D7F-4A9B-8C3E-1F6A0D9E2B4C}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B2C4E8A1-5D7F-4A9B-8C3E-1F6A0D9E2B4C}.Debug|x64.Build.0 = Debug|Any CPU
+		{B2C4E8A1-5D7F-4A9B-8C3E-1F6A0D9E2B4C}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B2C4E8A1-5D7F-4A9B-8C3E-1F6A0D9E2B4C}.Debug|x86.Build.0 = Debug|Any CPU
+		{B2C4E8A1-5D7F-4A9B-8C3E-1F6A0D9E2B4C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B2C4E8A1-5D7F-4A9B-8C3E-1F6A0D9E2B4C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B2C4E8A1-5D7F-4A9B-8C3E-1F6A0D9E2B4C}.Release|x64.ActiveCfg = Release|Any CPU
+		{B2C4E8A1-5D7F-4A9B-8C3E-1F6A0D9E2B4C}.Release|x64.Build.0 = Release|Any CPU
+		{B2C4E8A1-5D7F-4A9B-8C3E-1F6A0D9E2B4C}.Release|x86.ActiveCfg = Release|Any CPU
+		{B2C4E8A1-5D7F-4A9B-8C3E-1F6A0D9E2B4C}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -1,9 +1,12 @@
 using System;
-using System.Reflection;
+using System.IO;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.FullCrew.Models;
 using Jellyfin.Plugin.FullCrew.Services;
+using MediaBrowser.Controller.Library;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -18,15 +21,34 @@ namespace Jellyfin.Plugin.FullCrew.Api;
 [Route("FullCrew")]
 public class FullCrewController : ControllerBase
 {
+    private const string JellyfinUserIdClaim = "Jellyfin-UserId";
+
     private readonly CreditsService _creditsService;
+    private readonly BumperService _bumperService;
+    private readonly LibraryStatsService _libraryStatsService;
+    private readonly StudioPageService _studioPageService;
+    private readonly SceneIdentifyService _sceneIdentifyService;
+    private readonly IUserManager _userManager;
     private readonly ILogger<FullCrewController> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FullCrewController"/> class.
     /// </summary>
-    public FullCrewController(CreditsService creditsService, ILogger<FullCrewController> logger)
+    public FullCrewController(
+        CreditsService creditsService,
+        BumperService bumperService,
+        LibraryStatsService libraryStatsService,
+        StudioPageService studioPageService,
+        SceneIdentifyService sceneIdentifyService,
+        IUserManager userManager,
+        ILogger<FullCrewController> logger)
     {
         _creditsService = creditsService;
+        _bumperService = bumperService;
+        _libraryStatsService = libraryStatsService;
+        _studioPageService = studioPageService;
+        _sceneIdentifyService = sceneIdentifyService;
+        _userManager = userManager;
         _logger = logger;
     }
 
@@ -36,7 +58,7 @@ public class FullCrewController : ControllerBase
     /// <param name="itemId">The Jellyfin item id.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Categorized credits.</returns>
-    [HttpGet("{itemId}")]
+    [HttpGet("{itemId:guid}")]
     [Authorize]
     [ProducesResponseType(typeof(FullCrewResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<FullCrewResponse>> GetCredits(
@@ -48,36 +70,307 @@ public class FullCrewController : ControllerBase
     }
 
     /// <summary>
+    /// Resolves a nostalgia break-bumper for an item (local library, curated YouTube, or search).
+    /// </summary>
+    [HttpGet("{itemId:guid}/bumper")]
+    [Authorize]
+    [ProducesResponseType(typeof(BumperResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<BumperResponse>> GetBumper(
+        [FromRoute] Guid itemId,
+        [FromQuery] bool next,
+        [FromQuery] string? skip,
+        CancellationToken cancellationToken)
+    {
+        var result = await _bumperService
+            .GetBumperAsync(itemId, next, skip, cancellationToken)
+            .ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Resolves an official trailer when Jellyfin's native trailer button is unavailable.
+    /// </summary>
+    [HttpGet("{itemId:guid}/trailer")]
+    [Authorize]
+    [ProducesResponseType(typeof(BumperResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<BumperResponse>> GetTrailer(
+        [FromRoute] Guid itemId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _bumperService.GetTrailerAsync(itemId, cancellationToken).ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Scene identify status (enabled + model; never returns the API key).
+    /// </summary>
+    [HttpGet("scene-identify/status")]
+    [Authorize]
+    [ProducesResponseType(typeof(SceneIdentifyStatusResponse), StatusCodes.Status200OK)]
+    public ActionResult<SceneIdentifyStatusResponse> GetSceneIdentifyStatus()
+    {
+        return Ok(_sceneIdentifyService.GetStatus());
+    }
+
+    /// <summary>
+    /// Playback companion: billed characters for the side rail (no OpenAI).
+    /// </summary>
+    [HttpGet("{itemId:guid}/playback-scene")]
+    [Authorize]
+    [ProducesResponseType(typeof(PlaybackSceneResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<PlaybackSceneResponse>> GetPlaybackScene(
+        [FromRoute] Guid itemId,
+        [FromQuery] long? positionTicks,
+        CancellationToken cancellationToken)
+    {
+        var result = await _sceneIdentifyService
+            .GetPlaybackSceneAsync(itemId, positionTicks, cancellationToken)
+            .ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Identifies billed cast members visible in a captured playback frame (OpenAI Vision, opt-in).
+    /// Prefer <see cref="GetPlaybackScene"/> first — indexed moments skip OpenAI.
+    /// </summary>
+    [HttpPost("{itemId:guid}/identify-frame")]
+    [Authorize]
+    [RequestSizeLimit(600_000)]
+    [ProducesResponseType(typeof(SceneIdentifyResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<SceneIdentifyResponse>> IdentifyFrame(
+        [FromRoute] Guid itemId,
+        [FromBody] SceneIdentifyRequest request,
+        CancellationToken cancellationToken)
+    {
+        var user = TryGetCurrentUser();
+        var rateKey = user?.Id.ToString("N") ?? HttpContext.Connection.RemoteIpAddress?.ToString() ?? "anon";
+        var result = await _sceneIdentifyService
+            .IdentifyAsync(itemId, request ?? new SceneIdentifyRequest(), rateKey, cancellationToken)
+            .ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Gets aggregated Movie + Series library statistics for charts and insights.
+    /// </summary>
+    [HttpGet("stats")]
+    [Authorize]
+    [ProducesResponseType(typeof(LibraryStatsResponse), StatusCodes.Status200OK)]
+    public ActionResult<LibraryStatsResponse> GetLibraryStats()
+    {
+        var user = TryGetCurrentUser();
+        var result = _libraryStatsService.GetStats(user);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Gets the full ranked bucket list for a single stats category (detail page).
+    /// </summary>
+    /// <param name="category">Category key such as actors, genres, hdr, videoCodecs.</param>
+    [HttpGet("stats/{category}")]
+    [Authorize]
+    [ProducesResponseType(typeof(LibraryStatsCategoryResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult<LibraryStatsCategoryResponse> GetLibraryStatsCategory([FromRoute] string category)
+    {
+        var user = TryGetCurrentUser();
+        var result = _libraryStatsService.GetCategoryStats(user, category);
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(result);
+    }
+
+        /// <summary>
+    /// Gets every Movie/Series title that contributes to one stats bucket.
+    /// </summary>
+    [HttpGet("stats/{category}/items")]
+    [Authorize]
+    [ProducesResponseType(typeof(LibraryStatsBucketItemsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public ActionResult<LibraryStatsBucketItemsResponse> GetLibraryStatsBucketItems(
+        [FromRoute] string category,
+        [FromQuery] string? bucket)
+    {
+        var user = TryGetCurrentUser();
+        var result = _libraryStatsService.GetBucketItems(user, category, bucket);
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(result);
+    }
+
+/// <summary>
+    /// Studio detail page via query string (preferred by the client to avoid path double-encoding).
+    /// </summary>
+    [HttpGet("studio")]
+    [Authorize]
+    [ProducesResponseType(typeof(StudioPageResponse), StatusCodes.Status200OK)]
+    public Task<ActionResult<StudioPageResponse>> GetStudioPageByQuery(
+        [FromQuery] string? name,
+        [FromQuery] string? id,
+        [FromQuery] string? branches,
+        CancellationToken cancellationToken)
+        => GetStudioPageCoreAsync(name, id, branches, cancellationToken);
+
+    /// <summary>
+    /// Studio detail page: TMDB company metadata + library titles for a studio / name-root cluster.
+    /// </summary>
+    /// <param name="name">Studio or cluster display name (route key).</param>
+    /// <param name="id">Optional Jellyfin Studio item id.</param>
+    /// <param name="branches">Optional comma/pipe-separated exact studio credit names for clusters.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [HttpGet("studio/{name}")]
+    [Authorize]
+    [ProducesResponseType(typeof(StudioPageResponse), StatusCodes.Status200OK)]
+    public Task<ActionResult<StudioPageResponse>> GetStudioPage(
+        [FromRoute] string name,
+        [FromQuery] string? id,
+        [FromQuery] string? branches,
+        CancellationToken cancellationToken)
+        => GetStudioPageCoreAsync(name, id, branches, cancellationToken);
+
+    private async Task<ActionResult<StudioPageResponse>> GetStudioPageCoreAsync(
+        string? name,
+        string? id,
+        string? branches,
+        CancellationToken cancellationToken)
+    {
+        Guid? itemId = null;
+        if (!string.IsNullOrWhiteSpace(id) && Guid.TryParse(id, out var parsed) && parsed != Guid.Empty)
+        {
+            itemId = parsed;
+        }
+
+        var branchList = ParseBranchList(branches);
+        var decodedName = Uri.UnescapeDataString(name ?? string.Empty);
+        var user = TryGetCurrentUser();
+        var result = await _studioPageService
+            .GetStudioPageAsync(user, itemId, decodedName, branchList, cancellationToken)
+            .ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Studio detail by Jellyfin item id only.
+    /// </summary>
+    [HttpGet("studio/item/{itemId:guid}")]
+    [Authorize]
+    [ProducesResponseType(typeof(StudioPageResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<StudioPageResponse>> GetStudioPageByItem(
+        [FromRoute] Guid itemId,
+        [FromQuery] string? branches,
+        CancellationToken cancellationToken)
+    {
+        var user = TryGetCurrentUser();
+        var result = await _studioPageService
+            .GetStudioPageAsync(user, itemId, null, ParseBranchList(branches), cancellationToken)
+            .ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    private static IReadOnlyList<string>? ParseBranchList(string? branches)
+    {
+        if (string.IsNullOrWhiteSpace(branches))
+        {
+            return null;
+        }
+
+        var parts = branches.Split(['|', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length == 0 ? null : parts;
+    }
+
+    /// <summary>
     /// Serves the client JavaScript.
     /// </summary>
     [HttpGet("fullcrew.js")]
+    [HttpHead("fullcrew.js")]
     [AllowAnonymous]
     public ActionResult GetScript()
     {
-        return GetEmbeddedResource("Web.fullcrew.js", "application/javascript");
+        return GetClientAsset("fullcrew.js", "application/javascript");
     }
 
     /// <summary>
     /// Serves the client CSS.
     /// </summary>
     [HttpGet("fullcrew.css")]
+    [HttpHead("fullcrew.css")]
     [AllowAnonymous]
     public ActionResult GetStyles()
     {
-        return GetEmbeddedResource("Web.fullcrew.css", "text/css");
+        return GetClientAsset("fullcrew.css", "text/css");
     }
 
-    private ActionResult GetEmbeddedResource(string relativeName, string contentType)
+    private ActionResult GetClientAsset(string fileName, string contentType)
     {
-        var assembly = Assembly.GetExecutingAssembly();
-        var resourceName = $"{typeof(Plugin).Namespace}.{relativeName}";
-        var stream = assembly.GetManifestResourceStream(resourceName);
-        if (stream is null)
+        // Prefer loose files next to the plugin DLL. Overwriting the DLL while Jellyfin is
+        // running corrupts memory-mapped embedded resources; disk files stay readable.
+        var diskPath = ResolvePluginWebPath(fileName);
+        ActionResult result;
+        if (diskPath is not null && System.IO.File.Exists(diskPath))
         {
-            _logger.LogWarning("Embedded resource not found: {ResourceName}", resourceName);
-            return NotFound();
+            result = PhysicalFile(diskPath, contentType);
+        }
+        else
+        {
+            var assembly = typeof(Plugin).Assembly;
+            var resourceName = $"{typeof(Plugin).Namespace}.Web.{fileName}";
+            var stream = assembly.GetManifestResourceStream(resourceName);
+            if (stream is null)
+            {
+                _logger.LogWarning(
+                    "Full Crew client asset missing: {FileName} (disk and embedded). Restart Jellyfin after updating the plugin DLL.",
+                    fileName);
+                return NotFound();
+            }
+
+            result = new FileStreamResult(stream, contentType);
         }
 
-        return new FileStreamResult(stream, contentType);
+        // Assets are versioned via ?v= on inject; allow short private cache without stale forever.
+        Response.Headers.CacheControl = "private, max-age=300";
+        Response.Headers["X-FullCrew-Version"] = PluginInfo.Version;
+        return result;
+    }
+
+    private static string? ResolvePluginWebPath(string fileName)
+    {
+        try
+        {
+            var assemblyPath = typeof(Plugin).Assembly.Location;
+            if (string.IsNullOrWhiteSpace(assemblyPath))
+            {
+                return null;
+            }
+
+            var pluginDir = Path.GetDirectoryName(assemblyPath);
+            if (string.IsNullOrWhiteSpace(pluginDir))
+            {
+                return null;
+            }
+
+            return Path.Combine(pluginDir, "Web", fileName);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private User? TryGetCurrentUser()
+    {
+        var claim = User.FindFirstValue(JellyfinUserIdClaim)
+                    ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(claim, out var userId) || userId == Guid.Empty)
+        {
+            return null;
+        }
+
+        return _userManager.GetUserById(userId);
     }
 }

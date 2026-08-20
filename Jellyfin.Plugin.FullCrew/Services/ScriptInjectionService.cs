@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Controller;
@@ -17,7 +18,26 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 /// </summary>
 public class ScriptInjectionService : IHostedService
 {
-    internal const string ScriptTag = "<script plugin=\"FullCrew\" src=\"/FullCrew/fullcrew.js\"></script>";
+    /// <summary>Version query used on client asset URLs for cache busting after upgrades.</summary>
+    internal static string AssetVersion => PluginInfo.Version;
+
+    /// <summary>Deferred main script URL (versioned).</summary>
+    internal static string ScriptSrc => "/FullCrew/fullcrew.js?v=" + AssetVersion;
+
+    /// <summary>Stylesheet URL (versioned).</summary>
+    internal static string StylesHref => "/FullCrew/fullcrew.css?v=" + AssetVersion;
+
+    /// <summary>
+    /// Inline early-boot: hide Jellyfin 404 chrome for #/fullcrew/* before first paint.
+    /// Must stay synchronous (no defer) and ahead of the deferred fullcrew.js tag.
+    /// </summary>
+    internal static string EarlyBootTag =>
+        "<script plugin=\"FullCrew-early\">(function(){try{var h=(location.hash||'').split('?')[0];if(h.indexOf('#!/')===0)h='#'+h.slice(2);if(h.indexOf('#/fullcrew/')!==0)return;var stats=h==='#/fullcrew/stats'||h.indexOf('#/fullcrew/stats/')===0;var studio=h.indexOf('#/fullcrew/studio/')===0;var cls=stats?'fullCrewStatsActive':'fullCrewStudioActive';var root=document.documentElement;root.classList.add('fullCrewRoutePending',cls);var css='html.fullCrewRoutePending,html.fullCrewStatsActive,html.fullCrewStudioActive{background:var(--background-color,#101010)!important}html.fullCrewRoutePending body,body.fullCrewStatsActive,body.fullCrewStudioActive{background:var(--background-color,#101010)!important}html.fullCrewRoutePending .mainAnimatedPages>.page,html.fullCrewRoutePending .mainAnimatedPages>.mainAnimatedPage,html.fullCrewStatsActive .mainAnimatedPages>.page,html.fullCrewStudioActive .mainAnimatedPages>.page,body.fullCrewStatsActive .mainAnimatedPages>.page,body.fullCrewStatsActive .mainAnimatedPages>.mainAnimatedPage,body.fullCrewStudioActive .mainAnimatedPages>.page,body.fullCrewStudioActive .mainAnimatedPages>.mainAnimatedPage,html.fullCrewRoutePending .mainAnimatedPages .emptyMessage{visibility:hidden!important;pointer-events:none!important;opacity:0!important}html.fullCrewRoutePending .skinHeader .pageTitle,html.fullCrewRoutePending .skinHeader .headerTitle,html.fullCrewRoutePending .headerTop .pageTitle{visibility:hidden!important}body.fullCrewStatsActive .mainAnimatedPages,body.fullCrewStudioActive .mainAnimatedPages,html.fullCrewStatsActive .mainAnimatedPages,html.fullCrewStudioActive .mainAnimatedPages,html.fullCrewRoutePending .mainAnimatedPages{position:relative!important;min-height:calc(100vh - var(--header-height,3.5rem))!important;min-height:calc(100dvh - var(--header-height,3.5rem))!important;background:var(--background-color,#101010)!important}';var s=document.createElement('style');s.id='fullCrewCritical';s.textContent=css;(document.head||root).appendChild(s);var l=document.createElement('link');l.id='fullCrewStyles';l.rel='stylesheet';l.href='"
+        + StylesHref
+        + "';(document.head||root).appendChild(l);function apply(){if(document.body){document.body.classList.add(cls,'fullCrewRoutePending');}}apply();if(!document.body)document.addEventListener('DOMContentLoaded',apply);try{var want=stats?'Stats':(studio?(function(){var n=h.slice('#/fullcrew/studio/'.length);try{n=decodeURIComponent(n)||n;}catch(e0){}return n||'Studio';})():'Full Crew');window.__fcTitleDesired=want;if(!window.__fcTitleHooked){var D=Object.getOwnPropertyDescriptor(Document.prototype,'title')||Object.getOwnPropertyDescriptor(HTMLDocument.prototype,'title');if(D&&D.get&&D.set){window.__fcTitleNativeGet=D.get;window.__fcTitleNativeSet=D.set;Object.defineProperty(document,'title',{configurable:true,enumerable:true,get:function(){return D.get.call(document);},set:function(v){if(window.__fcTitleDesired!=null&&(location.hash||'').indexOf('/fullcrew/')>=0&&String(v)!==window.__fcTitleDesired){D.set.call(document,window.__fcTitleDesired);return;}D.set.call(document,v);}});window.__fcTitleHooked=true;}}if(window.__fcTitleNativeSet){window.__fcTitleNativeSet.call(document,want);}else{document.title=want;}}catch(e1){}}catch(e){}})();</script>";
+
+    internal static string ScriptTag =>
+        EarlyBootTag + "<script plugin=\"FullCrew\" src=\"" + ScriptSrc + "\" defer></script>";
 
     private readonly ILogger<ScriptInjectionService> _logger;
     private readonly IServerApplicationPaths _applicationPaths;
@@ -39,33 +59,80 @@ public class ScriptInjectionService : IHostedService
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        if (TryRegisterFileTransformation())
+        TryExtractWebAssets();
+
+        // Try every injection path. JS Injector registration alone is not enough when its
+        // own loader was never written into index.html (common alongside Jellyfin Enhanced).
+        var fileTransformation = TryRegisterFileTransformation();
+        var jsInjector = TryRegisterJavaScriptInjector();
+        var indexHtml = TryPatchIndexHtml();
+
+        if (fileTransformation)
         {
-            _logger.LogInformation(
-                "Full Crew: registered script injection via File Transformation plugin (no filesystem writes).");
-            return Task.CompletedTask;
+            _logger.LogInformation("Full Crew: registered via File Transformation.");
         }
 
-        if (TryRegisterJavaScriptInjector())
+        if (jsInjector)
         {
-            _logger.LogInformation(
-                "Full Crew: registered client script via JavaScript Injector plugin. Hard-refresh the web client.");
-            return Task.CompletedTask;
+            _logger.LogInformation("Full Crew: registered script with JavaScript Injector.");
         }
 
-        if (TryPatchIndexHtml())
+        if (indexHtml)
         {
-            _logger.LogInformation("Full Crew: injected script tag into index.html.");
-            return Task.CompletedTask;
+            _logger.LogInformation("Full Crew: ensured script tag in index.html.");
         }
 
-        _logger.LogWarning(
-            "Full Crew: could not auto-inject client script. You already may have JavaScript Injector — "
-            + "add a script that loads /FullCrew/fullcrew.js, install File Transformation, "
-            + "or add this line before </body> in jellyfin-web index.html: {ScriptTag}",
-            ScriptTag);
+        if (!fileTransformation && !jsInjector && !indexHtml)
+        {
+            _logger.LogWarning(
+                "Full Crew: could not auto-inject client script. Add this before </body> in jellyfin-web index.html: {ScriptTag}",
+                ScriptTag);
+        }
+        else if (!indexHtml && !fileTransformation)
+        {
+            _logger.LogWarning(
+                "Full Crew: index.html was not patched. If the UI section is missing, hard-refresh after adding "
+                + "the Full Crew script in JS Injector, or manually insert: {ScriptTag}",
+                ScriptTag);
+        }
 
         return Task.CompletedTask;
+    }
+
+    private void TryExtractWebAssets()
+    {
+        try
+        {
+            var assembly = typeof(Plugin).Assembly;
+            var pluginDir = Path.GetDirectoryName(assembly.Location);
+            if (string.IsNullOrWhiteSpace(pluginDir))
+            {
+                return;
+            }
+
+            var webDir = Path.Combine(pluginDir, "Web");
+            Directory.CreateDirectory(webDir);
+
+            foreach (var fileName in new[] { "fullcrew.js", "fullcrew.css" })
+            {
+                var resourceName = $"{typeof(Plugin).Namespace}.Web.{fileName}";
+                using var stream = assembly.GetManifestResourceStream(resourceName);
+                if (stream is null)
+                {
+                    continue;
+                }
+
+                var target = Path.Combine(webDir, fileName);
+                using var output = File.Create(target);
+                stream.CopyTo(output);
+            }
+
+            _logger.LogInformation("Full Crew: extracted client assets to {WebDir}", webDir);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Full Crew: could not extract client assets to disk.");
+        }
     }
 
     /// <inheritdoc />
@@ -178,9 +245,69 @@ public class ScriptInjectionService : IHostedService
 (function () {
   if (window.__fullCrewLoader) { return; }
   window.__fullCrewLoader = true;
+  try {
+    var h = (location.hash || '').split('?')[0];
+    if (h.indexOf('#!/') === 0) h = '#' + h.slice(2);
+    if (h.indexOf('#/fullcrew/') === 0) {
+      var stats = h === '#/fullcrew/stats' || h.indexOf('#/fullcrew/stats/') === 0;
+      var studio = h.indexOf('#/fullcrew/studio/') === 0;
+      var cls = stats ? 'fullCrewStatsActive' : 'fullCrewStudioActive';
+      document.documentElement.classList.add('fullCrewRoutePending', cls);
+      if (document.body) document.body.classList.add(cls, 'fullCrewRoutePending');
+      if (!document.getElementById('fullCrewCritical')) {
+        var st = document.createElement('style');
+        st.id = 'fullCrewCritical';
+        st.textContent = 'html.fullCrewRoutePending .mainAnimatedPages>.page,html.fullCrewStatsActive .mainAnimatedPages>.page,html.fullCrewStudioActive .mainAnimatedPages>.page,body.fullCrewStatsActive .mainAnimatedPages>.page,body.fullCrewStudioActive .mainAnimatedPages>.page{visibility:hidden!important;opacity:0!important}html.fullCrewRoutePending .skinHeader .pageTitle{visibility:hidden!important}body.fullCrewStatsActive .mainAnimatedPages,body.fullCrewStudioActive .mainAnimatedPages,html.fullCrewStatsActive .mainAnimatedPages,html.fullCrewStudioActive .mainAnimatedPages,html.fullCrewRoutePending .mainAnimatedPages{position:relative!important;min-height:calc(100vh - var(--header-height,3.5rem))!important;min-height:calc(100dvh - var(--header-height,3.5rem))!important;background:var(--background-color,#101010)!important}';
+        (document.head || document.documentElement).appendChild(st);
+      }
+      try {
+        var want = stats ? 'Stats' : (studio ? (function () {
+          var n = h.slice('#/fullcrew/studio/'.length);
+          try { n = decodeURIComponent(n) || n; } catch (e1) {}
+          return n || 'Studio';
+        })() : 'Full Crew');
+        window.__fcTitleDesired = want;
+        if (!window.__fcTitleHooked) {
+          var D = Object.getOwnPropertyDescriptor(Document.prototype, 'title')
+            || Object.getOwnPropertyDescriptor(HTMLDocument.prototype, 'title');
+          if (D && D.get && D.set) {
+            window.__fcTitleNativeGet = D.get;
+            window.__fcTitleNativeSet = D.set;
+            Object.defineProperty(document, 'title', {
+              configurable: true,
+              enumerable: true,
+              get: function () { return D.get.call(document); },
+              set: function (v) {
+                if (window.__fcTitleDesired != null
+                    && (location.hash || '').indexOf('/fullcrew/') >= 0
+                    && String(v) !== window.__fcTitleDesired) {
+                  D.set.call(document, window.__fcTitleDesired);
+                  return;
+                }
+                D.set.call(document, v);
+              }
+            });
+            window.__fcTitleHooked = true;
+          }
+        }
+        if (window.__fcTitleNativeSet) {
+          window.__fcTitleNativeSet.call(document, want);
+        } else {
+          document.title = want;
+        }
+      } catch (e2) {}
+    }
+  } catch (e0) {}
+  if (!document.getElementById('fullCrewStyles')) {
+    var l = document.createElement('link');
+    l.id = 'fullCrewStyles';
+    l.rel = 'stylesheet';
+    l.href = '/FullCrew/fullcrew.css?v=' + (plugin.Version && plugin.Version.toString ? plugin.Version.toString() : '');
+    (document.head || document.documentElement).appendChild(l);
+  }
   var s = document.createElement('script');
-  s.src = '/FullCrew/fullcrew.js';
-  s.async = true;
+  s.src = '/FullCrew/fullcrew.js?v=' + (plugin.Version && plugin.Version.toString ? plugin.Version.toString() : '');
+  s.defer = true;
   document.head.appendChild(s);
 })();
 """;
@@ -262,19 +389,14 @@ public class ScriptInjectionService : IHostedService
             }
 
             var contents = File.ReadAllText(indexPath);
-            if (contents.Contains(ScriptTag, StringComparison.OrdinalIgnoreCase)
-                || contents.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase))
+            var updated = EnsureClientInjection(contents);
+            if (ReferenceEquals(updated, contents) || updated == contents)
             {
-                return true;
+                // Already fully injected (including early-boot), or no </body>.
+                return contents.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase)
+                       || contents.Contains("FullCrew-early", StringComparison.OrdinalIgnoreCase);
             }
 
-            var bodyIndex = contents.IndexOf("</body>", StringComparison.OrdinalIgnoreCase);
-            if (bodyIndex < 0)
-            {
-                return false;
-            }
-
-            var updated = contents.Insert(bodyIndex, "    " + ScriptTag + Environment.NewLine);
             File.WriteAllText(indexPath, updated);
             return true;
         }
@@ -283,6 +405,95 @@ public class ScriptInjectionService : IHostedService
             _logger.LogWarning(ex, "Full Crew: failed to patch index.html.");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Ensures early-boot + deferred fullcrew.js are present. Upgrades older
+    /// single-script injections that lack FullCrew-early, and rewrites asset
+    /// URLs to the current version query so browsers pick up upgrades.
+    /// </summary>
+    internal static string EnsureClientInjection(string html)
+    {
+        if (string.IsNullOrEmpty(html))
+        {
+            return html;
+        }
+
+        var hasEarly = html.Contains("FullCrew-early", StringComparison.OrdinalIgnoreCase);
+        var hasScript = html.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase);
+
+        if (hasEarly && hasScript)
+        {
+            return EnsureVersionedAssetUrls(html);
+        }
+
+        if (hasScript && !hasEarly)
+        {
+            // Upgrade: insert early-boot immediately before the existing Full Crew script tag.
+            var marker = "src=\"/FullCrew/fullcrew.js";
+            var markerIdx = html.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (markerIdx < 0)
+            {
+                marker = "src='/FullCrew/fullcrew.js";
+                markerIdx = html.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (markerIdx >= 0)
+            {
+                var scriptStart = html.LastIndexOf("<script", markerIdx, StringComparison.OrdinalIgnoreCase);
+                if (scriptStart >= 0)
+                {
+                    return EnsureVersionedAssetUrls(html.Insert(scriptStart, EarlyBootTag));
+                }
+            }
+
+            // Fallback: prepend combined tag before </body> and leave the old tag
+            // (duplicate fullcrew.js is guarded client-side).
+            return EnsureVersionedAssetUrls(InsertBeforeBodyClose(html));
+        }
+
+        // Fresh inject.
+        const string enhancedMarker = "JellyfinEnhanced/script";
+        var enhancedIdx = html.IndexOf(enhancedMarker, StringComparison.OrdinalIgnoreCase);
+        if (enhancedIdx >= 0)
+        {
+            var scriptEnd = html.IndexOf("</script>", enhancedIdx, StringComparison.OrdinalIgnoreCase);
+            if (scriptEnd >= 0)
+            {
+                return html.Insert(scriptEnd + "</script>".Length, ScriptTag);
+            }
+        }
+
+        return InsertBeforeBodyClose(html);
+    }
+
+    private static string EnsureVersionedAssetUrls(string html)
+    {
+        html = RewriteAssetUrl(html, "/FullCrew/fullcrew.js", ScriptSrc);
+        html = RewriteAssetUrl(html, "/FullCrew/fullcrew.css", StylesHref);
+        return html;
+    }
+
+    private static string RewriteAssetUrl(string html, string barePath, string versionedPath)
+    {
+        if (html.Contains(versionedPath, StringComparison.Ordinal))
+        {
+            return html;
+        }
+
+        return Regex.Replace(
+            html,
+            Regex.Escape(barePath) + @"(\?[^""'\s>]*)?",
+            versionedPath,
+            RegexOptions.IgnoreCase);
+    }
+
+    private static string InsertBeforeBodyClose(string contents)
+    {
+        var bodyIndex = contents.IndexOf("</body>", StringComparison.OrdinalIgnoreCase);
+        return bodyIndex < 0
+            ? contents
+            : contents.Insert(bodyIndex, ScriptTag);
     }
 }
 
@@ -315,19 +526,7 @@ public static class FileTransformationPatch
             return contents;
         }
 
-        if (contents.Contains(ScriptInjectionService.ScriptTag, StringComparison.OrdinalIgnoreCase)
-            || contents.Contains("/FullCrew/fullcrew.js", StringComparison.OrdinalIgnoreCase))
-        {
-            return contents;
-        }
-
-        var bodyIndex = contents.IndexOf("</body>", StringComparison.OrdinalIgnoreCase);
-        if (bodyIndex < 0)
-        {
-            return contents;
-        }
-
-        return contents.Insert(bodyIndex, "    " + ScriptInjectionService.ScriptTag + "\n");
+        return ScriptInjectionService.EnsureClientInjection(contents);
     }
 
     private static string ReadContents(object payload)

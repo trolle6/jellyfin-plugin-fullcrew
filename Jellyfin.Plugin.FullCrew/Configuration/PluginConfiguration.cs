@@ -1,3 +1,5 @@
+using System;
+using Jellyfin.Plugin.FullCrew.Services;
 using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.FullCrew.Configuration;
@@ -15,22 +17,16 @@ public class PluginConfiguration : BasePluginConfiguration
         TmdbApiKey = string.Empty;
         CacheHours = 12;
         MaxPeoplePerDepartment = 100;
-        EnabledDepartments =
-        [
-            "Cast",
-            "Directing",
-            "Writing",
-            "Production",
-            "Camera",
-            "Editing",
-            "Sound",
-            "Art",
-            "Costume & Make-Up",
-            "Visual Effects",
-            "Lighting",
-            "Crew",
-            "Other"
-        ];
+        EnableBumpers = true;
+        EnableYouTubeBumpers = true;
+        EnableLibraryStats = true;
+        LibraryStatsYearSort = "OldestFirst";
+        EnableGlassPlayButtons = true;
+        EnableSceneIdentify = false;
+        OpenAiApiKey = string.Empty;
+        OpenAiVisionModel = "gpt-4o-mini";
+        BumpersCollectionName = "Bumpers";
+        EnabledDepartments = (string[])CrewDepartments.DefaultOrder.Clone();
     }
 
     /// <summary>
@@ -48,6 +44,55 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets the maximum number of people shown per department.
     /// </summary>
     public int MaxPeoplePerDepartment { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the Break Bumper button is shown.
+    /// </summary>
+    public bool EnableBumpers { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether YouTube curated/search bumpers are allowed.
+    /// </summary>
+    public bool EnableYouTubeBumpers { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the Library Stats page and API are enabled.
+    /// </summary>
+    public bool EnableLibraryStats { get; set; }
+
+    /// <summary>
+    /// Gets or sets how Library Stats release years are ordered.
+    /// Allowed: OldestFirst (default), NewestFirst, MostTitles.
+    /// Shows every year with titles — no Top-N / Other fold.
+    /// </summary>
+    public string LibraryStatsYearSort { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether episode rows in series/season lists
+    /// use a frosted-glass play button instead of solid theme green on Jellyfin Web.
+    /// </summary>
+    public bool EnableGlassPlayButtons { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether pause/hotkey scene identify (OpenAI Vision) is enabled.
+    /// Opt-in: sends a video frame to OpenAI when the user asks.
+    /// </summary>
+    public bool EnableSceneIdentify { get; set; }
+
+    /// <summary>
+    /// Gets or sets the OpenAI API key used for scene identify. Required when the feature is enabled.
+    /// </summary>
+    public string OpenAiApiKey { get; set; }
+
+    /// <summary>
+    /// Gets or sets the OpenAI vision-capable chat model (default gpt-4o-mini).
+    /// </summary>
+    public string OpenAiVisionModel { get; set; }
+
+    /// <summary>
+    /// Gets or sets the local collection/folder name to prefer for bumpers.
+    /// </summary>
+    public string BumpersCollectionName { get; set; }
 
     /// <summary>
     /// Gets or sets the department names to display.

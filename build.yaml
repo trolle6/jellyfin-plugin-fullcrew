@@ -1,17 +1,25 @@
 ---
 name: "Full Crew"
 guid: "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f"
-version: "1.0.0.0"
+version: "1.7.6.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
-overview: "Full cast and crew by department on movie and series pages"
+overview: "Full cast and crew by department, break bumpers, library stats, studio pages, and a playback character rail"
 description: >
   Fetches complete TMDB cast and crew for movies and series, groups people by
-  department (Cast, Camera, Costume & Make-Up, Sound, Visual Effects, and more),
-  and shows them in a polished accordion on Jellyfin Web item detail pages.
+  department, and shows them in a polished accordion on Jellyfin Web item detail
+  pages. Includes a nostalgia Break Bumper action, a Library Stats page
+  (genres, people, collections, resolution/HDR/codecs, and more), studio
+  detail pages with TMDB company metadata plus library titles, and a playback
+  side panel of billed characters (character + actor + still). Optional OpenAI
+  scene identify remains available as an API.
 category: "Metadata"
-owner: "local"
+owner: "trolle6"
 artifacts:
 - "Jellyfin.Plugin.FullCrew.dll"
 changelog: >
-  Initial release: TMDB full credits API, department accordion UI, File Transformation injection.
+  1.7.6: Release years list every year (oldest→newest by default) with sort options; no Top-N/Other fold.
+  1.7.5.2: Cast cards show two role lines max; characters before crew jobs; fix overlap.
+  1.7.5: Frosted-glass play buttons on episode thumbnails (configurable).
+  1.7.4: Library Stats release years (2015, 2001, …) with click-through title lists.
+  1.7.3: Bumper rotation per show — skips already-seen picks, Another bumper + Search YouTube in overlay.

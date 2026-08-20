@@ -37,6 +37,91 @@
                     </div>
 
                     <div class="verticalSection">
+                        <h3 class="sectionTitle">Library stats</h3>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="EnableLibraryStats" />
+                                <span>Show Stats tab next to Favourites</span>
+                            </label>
+                        </div>
+                        <div class="fieldDescription">
+                            Adds a Library Stats page with genre, studio, people-by-role, rating, tag, and runtime breakdowns.
+                        </div>
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="LibraryStatsYearSort">Release years sort</label>
+                            <select is="emby-select" id="LibraryStatsYearSort" class="emby-select-withcolor emby-select">
+                                <option value="OldestFirst">Oldest → newest (every year)</option>
+                                <option value="NewestFirst">Newest → oldest (every year)</option>
+                                <option value="MostTitles">Most titles first (every year)</option>
+                            </select>
+                            <div class="fieldDescription">
+                                Release years lists every year that has titles — no Top-N cutoff or “Other” bucket.
+                                You can also change this on the Stats page itself.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <h3 class="sectionTitle">Playback characters</h3>
+                        <p class="fieldDescription">
+                            On Jellyfin Web playback, press <strong>Y</strong> (or the people button on the player)
+                            for a side panel of billed characters: character name, actor name, and a still from this
+                            title when TMDB has one. The video keeps playing. Full departments stay on the title page
+                            — back out of playback and scroll the accordion. This is not Amazon X-Ray.
+                        </p>
+                    </div>
+
+                    <div class="verticalSection">
+                        <h3 class="sectionTitle">Scene identify (optional)</h3>
+                        <p class="fieldDescription">
+                            Unused by the playback panel. Leave off unless you call the identify-frame API yourself.
+                            When enabled, a still can be sent to OpenAI Vision to match billed cast.
+                        </p>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="EnableSceneIdentify" />
+                                <span>Enable scene identify (sends frames to OpenAI when you ask)</span>
+                            </label>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" type="password" id="OpenAiApiKey" label="OpenAI API Key" autocomplete="off" />
+                            <div class="fieldDescription">
+                                Required when scene identify is enabled. Stored in plugin config like other secrets.
+                                Keys from
+                                <a is="emby-linkbutton" class="button-link" target="_blank" rel="noopener noreferrer" href="https://platform.openai.com/api-keys">platform.openai.com/api-keys</a>.
+                            </div>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" type="text" id="OpenAiVisionModel" label="OpenAI vision model" />
+                            <div class="fieldDescription">Default <code>gpt-4o-mini</code>. Use a vision-capable chat model.</div>
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <h3 class="sectionTitle">Break bumpers</h3>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="EnableBumpers" />
+                                <span>Show Bumper button on detail pages</span>
+                            </label>
+                        </div>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="EnableYouTubeBumpers" />
+                                <span>Allow YouTube search when no local bumper is found</span>
+                            </label>
+                        </div>
+                        <div class="inputContainer">
+                            <input is="emby-input" type="text" id="BumpersCollectionName" label="Local bumpers collection / folder name" />
+                        <div class="fieldDescription">
+                            Optional. Prefer clips from a collection or folder with this name (default: Bumpers).
+                            Also matches library items tagged or named with “bumper”.
+                            Already-seen bumpers rotate per show; use <strong>Another bumper</strong> in the overlay for the next clip.
+                        </div>
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
                         <h3 class="sectionTitle">Departments</h3>
                         <div class="fieldDescription" style="margin-bottom:0.75em;">Choose which departments appear in the accordion.</div>
                         <div id="DepartmentToggles"></div>
@@ -44,6 +129,16 @@
 
                     <div class="verticalSection">
                         <h3 class="sectionTitle">Web UI injection</h3>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="EnableGlassPlayButtons" />
+                                <span>Use frosted-glass play on episode list rows only</span>
+                            </label>
+                        </div>
+                        <div class="fieldDescription">
+                            Replaces the solid green circle on episode thumbnails in series/season lists.
+                            Movie/show cards and other play buttons are unchanged.
+                        </div>
                         <p class="fieldDescription">
                             The plugin injects a script into Jellyfin Web. Prefer installing the
                             <strong>File Transformation</strong> plugin for Docker-safe injection.
@@ -126,6 +221,16 @@
                         document.querySelector('#CacheHours').value = config.CacheHours != null ? config.CacheHours : 12;
                         document.querySelector('#MaxPeoplePerDepartment').value =
                             config.MaxPeoplePerDepartment != null ? config.MaxPeoplePerDepartment : 100;
+                        document.querySelector('#EnableLibraryStats').checked = config.EnableLibraryStats !== false;
+                        document.querySelector('#LibraryStatsYearSort').value =
+                            config.LibraryStatsYearSort || 'OldestFirst';
+                        document.querySelector('#EnableGlassPlayButtons').checked = config.EnableGlassPlayButtons !== false;
+                        document.querySelector('#EnableSceneIdentify').checked = !!config.EnableSceneIdentify;
+                        document.querySelector('#OpenAiApiKey').value = config.OpenAiApiKey || '';
+                        document.querySelector('#OpenAiVisionModel').value = config.OpenAiVisionModel || 'gpt-4o-mini';
+                        document.querySelector('#EnableBumpers').checked = config.EnableBumpers !== false;
+                        document.querySelector('#EnableYouTubeBumpers').checked = config.EnableYouTubeBumpers !== false;
+                        document.querySelector('#BumpersCollectionName').value = config.BumpersCollectionName || 'Bumpers';
                         renderDepartmentToggles(config.EnabledDepartments || FullCrewConfig.allDepartments);
                         Dashboard.hideLoadingMsg();
                     });
@@ -139,6 +244,15 @@
                         config.CacheHours = parseInt(document.querySelector('#CacheHours').value, 10) || 12;
                         config.MaxPeoplePerDepartment =
                             parseInt(document.querySelector('#MaxPeoplePerDepartment').value, 10) || 100;
+                        config.EnableLibraryStats = !!document.querySelector('#EnableLibraryStats').checked;
+                        config.LibraryStatsYearSort = document.querySelector('#LibraryStatsYearSort').value || 'OldestFirst';
+                        config.EnableGlassPlayButtons = !!document.querySelector('#EnableGlassPlayButtons').checked;
+                        config.EnableSceneIdentify = !!document.querySelector('#EnableSceneIdentify').checked;
+                        config.OpenAiApiKey = document.querySelector('#OpenAiApiKey').value;
+                        config.OpenAiVisionModel = document.querySelector('#OpenAiVisionModel').value || 'gpt-4o-mini';
+                        config.EnableBumpers = !!document.querySelector('#EnableBumpers').checked;
+                        config.EnableYouTubeBumpers = !!document.querySelector('#EnableYouTubeBumpers').checked;
+                        config.BumpersCollectionName = document.querySelector('#BumpersCollectionName').value || 'Bumpers';
                         config.EnabledDepartments = readEnabledDepartments();
                         ApiClient.updatePluginConfiguration(FullCrewConfig.pluginUniqueId, config).then(function (result) {
                             Dashboard.processPluginConfigurationUpdateResult(result);

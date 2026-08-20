@@ -1,8 +1,54 @@
-/* Full Crew — Jellyfin Web accordion styles */
+/* Full Crew — Jellyfin Web client styles
+ *
+ * Design tokens align with Jellyfin chrome (--background-color, --primary-color).
+ * Shared page shell (.fullCrewPage) is used by Stats + Studio overlays.
+ */
+
+:root {
+    --fc-space-1: 0.35rem;
+    --fc-space-2: 0.65rem;
+    --fc-space-3: 1rem;
+    --fc-space-4: 1.5rem;
+    --fc-space-5: 2.5rem;
+    --fc-radius: 0.35rem;
+    --fc-radius-lg: 1rem;
+    --fc-muted: 0.55;
+    --fc-muted-soft: 0.7;
+    --fc-surface: rgba(255, 255, 255, 0.06);
+    --fc-surface-strong: rgba(255, 255, 255, 0.08);
+    --fc-border: rgba(255, 255, 255, 0.12);
+    --fc-accent: var(--primary-color, #00a4dc);
+    --fc-accent-soft: rgba(0, 164, 220, 0.18);
+    --fc-page-bg: var(--background-color, #101010);
+    --fc-danger: #e57373;
+    --fc-font-sm: 0.82rem;
+    --fc-font-md: 0.92rem;
+    --fc-font-lg: 1.25rem;
+    --fc-font-xl: 2rem;
+}
+
+.fullCrewHideNative {
+    display: none !important;
+}
+
+/* Shared absolute overlay page (Stats + Studio) */
+.fullCrewPage {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    overflow: auto;
+    box-sizing: border-box;
+    min-height: 100%;
+    padding: var(--fc-space-3) var(--fc-space-4) var(--fc-space-5);
+    background: var(--fc-page-bg);
+    color: inherit;
+}
 
 .fullCrewSection {
     margin: 1.6em 0 0.4em;
-    max-width: 54em;
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
 }
 
 .fullCrewHeader {
@@ -33,26 +79,27 @@
 
 .fullCrewStatus--error {
     opacity: 0.9;
-    color: #e57373;
+    color: var(--fc-danger);
 }
 
 .fullCrewAccordion {
     display: flex;
     flex-direction: column;
     gap: 0.45em;
+    width: 100%;
 }
 
 .fullCrewDept {
     border-radius: 0.45em;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--fc-surface);
     border: 1px solid rgba(255, 255, 255, 0.06);
     overflow: hidden;
     transition: border-color 0.2s ease, background 0.2s ease;
 }
 
 .fullCrewDept.is-open {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.1);
+    background: var(--fc-surface-strong);
+    border-color: var(--fc-border);
 }
 
 .fullCrewDeptToggle {
@@ -128,21 +175,32 @@
 
 .fullCrewPeople {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(15.5em, 1fr));
-    gap: 0.35em 0.75em;
+    grid-template-columns: repeat(auto-fill, minmax(12.5em, 1fr));
+    gap: 0.85em 1em;
     list-style: none;
     margin: 0;
-    padding: 0.15em 0 0;
+    padding: 0.35em 0.15em 0.15em;
 }
 
 .fullCrewPerson {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 0.7em;
+    gap: 0.55em;
     min-width: 0;
-    padding: 0.35em 0.4em;
-    border-radius: 0.4em;
-    transition: background 0.15s ease;
+    padding: 0.55em 0.4em 0.65em;
+    border-radius: 0.5em;
+    text-align: center;
+    text-decoration: none;
+    color: inherit;
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+
+a.fullCrewPerson:hover,
+a.fullCrewPerson:focus-visible {
+    background: rgba(255, 255, 255, 0.07);
+    outline: none;
+    transform: translateY(-1px);
 }
 
 .fullCrewPerson:hover {
@@ -150,8 +208,8 @@
 }
 
 .fullCrewAvatar {
-    width: 2.6em;
-    height: 2.6em;
+    width: 5.5em;
+    height: 5.5em;
     border-radius: 50%;
     object-fit: cover;
     flex-shrink: 0;
@@ -163,7 +221,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.78em;
+    font-size: 1.15em;
     font-weight: 700;
     letter-spacing: 0.02em;
     opacity: 0.85;
@@ -172,25 +230,156 @@
 
 .fullCrewPersonText {
     min-width: 0;
+    width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 0.1em;
+    gap: 0.15em;
 }
 
 .fullCrewPersonName {
     font-weight: 600;
-    font-size: 0.92em;
-    white-space: nowrap;
+    font-size: 0.95em;
+    line-height: 1.25;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+}
+
+a.fullCrewPerson:hover .fullCrewPersonName,
+a.fullCrewPerson:focus-visible .fullCrewPersonName {
+    color: var(--primary-color, #00a4dc);
+}
+
+.fullCrewPersonRoles {
+    display: flex;
+    flex-direction: column;
+    gap: 0.14em;
+    min-width: 0;
+    width: 100%;
 }
 
 .fullCrewPersonRole {
-    font-size: 0.8em;
+    font-size: 0.78em;
     opacity: 0.62;
-    white-space: nowrap;
+    line-height: 1.35;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fullCrewPersonRoleMore {
+    font-size: 0.72em;
+    opacity: 0.5;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+}
+
+.fullCrewBumperButton .fullCrewBumperIcon {
+    font-size: 1.6em !important;
+}
+
+.fullCrewBumperBusy {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+.fullCrewBumperOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    box-sizing: border-box;
+}
+
+.fullCrewBumperBackdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.72);
+}
+
+.fullCrewBumperPanel {
+    position: relative;
+    z-index: 1;
+    width: min(960px, 100%);
+    background: #101010;
+    border-radius: 0.6rem;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+}
+
+.fullCrewBumperOverlayHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+}
+
+.fullCrewBumperOverlayTitle {
+    font-weight: 600;
+    font-size: 1rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fullCrewBumperClose {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 1.6rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.8;
+    padding: 0.1rem 0.35rem;
+}
+
+.fullCrewBumperClose:hover,
+.fullCrewBumperClose:focus-visible {
+    opacity: 1;
+}
+
+.fullCrewBumperFrameWrap {
+    position: relative;
+    width: 100%;
+    padding-top: 56.25%;
+    background: #000;
+}
+
+.fullCrewBumperFrame {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
+
+.fullCrewBumperActions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding: 0 1rem 1rem;
+}
+
+.fullCrewBumperAnotherBtn,
+.fullCrewBumperSearchBtn {
+    width: 100%;
+}
+
+.fullCrewBumperPanelCompact {
+    width: min(18rem, 92vw);
+}
+
+.fullCrewBumperLocalHint {
+    padding: 0 1rem;
+    opacity: 0.8;
+    font-size: 0.9rem;
+    line-height: 1.35;
 }
 
 @media (max-width: 42em) {
@@ -203,4 +392,1074 @@
         align-items: flex-start;
         gap: 0.25em;
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* Library Stats page                                                 */
+/* ------------------------------------------------------------------ */
+
+#fullCrewStatsTab .emby-button-foreground,
+.headerTabs .emby-tab-button .emby-button-foreground {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+}
+
+#fullCrewStatsTab .material-icons,
+#fullCrewStatsTab .material-symbols-outlined,
+.headerTabs .emby-tab-button .material-icons,
+.headerTabs .emby-tab-button .material-symbols-outlined {
+    font-size: 1.15em;
+    line-height: 1;
+    width: 1em;
+    text-align: center;
+}
+
+body.fullCrewStatsActive .mainAnimatedPages > .page,
+body.fullCrewStatsActive .mainAnimatedPages > .mainAnimatedPage,
+body.fullCrewStudioActive .mainAnimatedPages > .page,
+body.fullCrewStudioActive .mainAnimatedPages > .mainAnimatedPage,
+html.fullCrewStatsActive .mainAnimatedPages > .page,
+html.fullCrewStatsActive .mainAnimatedPages > .mainAnimatedPage,
+html.fullCrewStudioActive .mainAnimatedPages > .page,
+html.fullCrewStudioActive .mainAnimatedPages > .mainAnimatedPage,
+html.fullCrewRoutePending .mainAnimatedPages > .page,
+html.fullCrewRoutePending .mainAnimatedPages > .mainAnimatedPage {
+    visibility: hidden !important;
+    pointer-events: none !important;
+    opacity: 0 !important;
+}
+
+/* Full-viewport containing block under the skin header (was 70vh → ~30% Jellyfin bleed) */
+body.fullCrewStatsActive .mainAnimatedPages,
+body.fullCrewStudioActive .mainAnimatedPages,
+html.fullCrewStatsActive .mainAnimatedPages,
+html.fullCrewStudioActive .mainAnimatedPages,
+html.fullCrewRoutePending .mainAnimatedPages {
+    position: relative !important;
+    min-height: calc(100vh - var(--header-height, 3.5rem)) !important;
+    min-height: calc(100dvh - var(--header-height, 3.5rem)) !important;
+    background: var(--fc-page-bg, var(--background-color, #101010)) !important;
+}
+
+/* Keep our overlay visible above the hidden 404 shell */
+body.fullCrewStatsActive .fullCrewPage,
+body.fullCrewStudioActive .fullCrewPage,
+html.fullCrewStatsActive .fullCrewPage,
+html.fullCrewStudioActive .fullCrewPage {
+    visibility: visible !important;
+    pointer-events: auto !important;
+    opacity: 1 !important;
+}
+
+/* Stabilize Stats tab so late injection doesn't feel like a blink */
+#fullCrewStatsTab {
+    flex: 0 0 auto;
+    min-width: 4.5em;
+}
+
+.fullCrewStatsPage {
+    /* Shell layout from .fullCrewPage; keep slightly roomier padding for charts. */
+    padding: 1.25rem var(--fc-space-4) var(--fc-space-5);
+}
+
+.fullCrewStatsHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin: 0 0 1.25rem;
+}
+
+.fullCrewStatsTitle {
+    margin: 0;
+    font-size: 1.55rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+.fullCrewStatsToggle {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.45rem;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.fullCrewStatsToggleBtn {
+    appearance: none;
+    border: 0;
+    margin: 0;
+    padding: 0.45rem 0.85rem;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 0.88rem;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+.fullCrewStatsToggleBtn + .fullCrewStatsToggleBtn {
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.fullCrewStatsToggleBtn:hover,
+.fullCrewStatsToggleBtn:focus-visible {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.05);
+    outline: none;
+}
+
+.fullCrewStatsToggleBtn.is-active {
+    opacity: 1;
+    background: rgba(0, 164, 220, 0.18);
+    color: var(--primary-color, #00a4dc);
+}
+
+.fullCrewStatsStatus {
+    padding: 1.5rem 0;
+    opacity: 0.7;
+}
+
+.fullCrewStatsStatus--error {
+    opacity: 0.95;
+    color: var(--fc-danger);
+}
+
+.fullCrewStatsSummary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+}
+
+.fullCrewStatsChip {
+    min-width: 6.5rem;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.fullCrewStatsChipValue {
+    font-size: 1.35rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+}
+
+.fullCrewStatsChipLabel {
+    margin-top: 0.2rem;
+    font-size: 0.78rem;
+    opacity: 0.6;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.fullCrewStatsSection {
+    margin-bottom: 1.35rem;
+}
+
+.fullCrewStatsSectionTitle {
+    margin: 0 0 0.65rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+a.fullCrewStatsSectionTitleLink {
+    display: inline-block;
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    cursor: pointer;
+}
+
+a.fullCrewStatsSectionTitleLink:hover,
+a.fullCrewStatsSectionTitleLink:focus-visible {
+    color: var(--primary-color, #00a4dc);
+    border-bottom-color: rgba(0, 164, 220, 0.55);
+    outline: none;
+}
+
+.fullCrewStatsTitleWrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.fullCrewStatsBack {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    color: var(--primary-color, #00a4dc);
+    text-decoration: none;
+    font-size: 0.88rem;
+    opacity: 0.9;
+}
+
+.fullCrewStatsBack:hover,
+.fullCrewStatsBack:focus-visible {
+    opacity: 1;
+    text-decoration: underline;
+    outline: none;
+}
+
+.fullCrewStatsDetailToolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0 0 1rem;
+}
+
+.fullCrewStatsSearch {
+    flex: 1 1 14rem;
+    min-width: 10rem;
+    max-width: 28rem;
+    box-sizing: border-box;
+    padding: 0.55rem 0.75rem;
+    border-radius: 0.4rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.04);
+    color: inherit;
+    font: inherit;
+}
+
+.fullCrewStatsSearch:focus {
+    outline: none;
+    border-color: rgba(0, 164, 220, 0.65);
+}
+
+.fullCrewStatsDetailCount {
+    font-size: 0.85rem;
+    opacity: 0.6;
+    font-variant-numeric: tabular-nums;
+}
+
+.fullCrewStatsYearSort {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0 0 0.65rem;
+}
+
+.fullCrewStatsYearSortLabel {
+    font-size: 0.8rem;
+    opacity: 0.65;
+}
+
+.fullCrewStatsYearSortSelect {
+    box-sizing: border-box;
+    padding: 0.35rem 0.55rem;
+    border-radius: 0.35rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.05);
+    color: inherit;
+    font: inherit;
+    font-size: 0.82rem;
+}
+
+.fullCrewStatsYearSortSelect:focus {
+    outline: none;
+    border-color: rgba(0, 164, 220, 0.65);
+}
+
+.fullCrewStatsDetailToolbar .fullCrewStatsYearSort {
+    margin: 0;
+    margin-left: auto;
+}
+
+.fullCrewStatsChartHost--detail {
+    max-width: 52rem;
+}
+
+.fullCrewStatsSectionHint {
+    margin: -0.35rem 0 0.75rem;
+    font-size: 0.82rem;
+    opacity: 0.55;
+    line-height: 1.35;
+}
+
+.fullCrewStatsInsights {
+    margin: 0;
+    padding: 0.75rem 1rem 0.75rem 1.4rem;
+    border-radius: 0.5rem;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    list-style: disc;
+}
+
+.fullCrewStatsInsights li {
+    margin: 0.35rem 0;
+    line-height: 1.4;
+    opacity: 0.9;
+}
+
+.fullCrewStatsGrid {
+    display: grid;
+    /* Prefer 1–2 readable columns over a row of tiny pies with clipped legends. */
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+    gap: 1.15rem 1.35rem;
+}
+
+.fullCrewStatsChartSection {
+    padding: 1rem 1.1rem 1.15rem;
+    border-radius: 0.55rem;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    margin-bottom: 0;
+    min-width: 0;
+}
+
+.fullCrewStatsEmpty {
+    opacity: 0.55;
+    font-size: 0.9rem;
+    padding: 0.5rem 0;
+}
+
+.fullCrewStatsPieWrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.9rem;
+}
+
+.fullCrewStatsPieCanvas {
+    flex-shrink: 0;
+    border-radius: 50%;
+}
+
+.fullCrewStatsLegend {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.fullCrewStatsLegendItem {
+    display: grid;
+    grid-template-columns: 0.7rem minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 0.55rem;
+    font-size: 0.9rem;
+    line-height: 1.35;
+}
+
+.fullCrewStatsSwatch {
+    width: 0.7rem;
+    height: 0.7rem;
+    margin-top: 0.2rem;
+    border-radius: 0.15rem;
+    flex-shrink: 0;
+}
+
+.fullCrewStatsLegendName {
+    /* Full labels; wrap instead of ellipsis-clipping to a single character. */
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    min-width: 0;
+}
+
+a.fullCrewStatsItemLink,
+.fullCrewStatsPage a.fullCrewStatsItemLink {
+    color: var(--primary-color, #00a4dc) !important;
+    text-decoration: underline !important;
+    text-decoration-color: rgba(0, 164, 220, 0.55) !important;
+    text-underline-offset: 0.12em;
+    cursor: pointer !important;
+    pointer-events: auto !important;
+}
+
+a.fullCrewStatsItemLink:hover,
+a.fullCrewStatsItemLink:focus,
+.fullCrewStatsPage a.fullCrewStatsItemLink:hover,
+.fullCrewStatsPage a.fullCrewStatsItemLink:focus-visible {
+    text-decoration: underline !important;
+    text-decoration-color: #3ec1f0 !important;
+    color: #3ec1f0 !important;
+    outline: none;
+}
+
+.fullCrewStatsRankRow {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.85rem;
+}
+
+.fullCrewStatsRankNameWrap,
+.fullCrewStatsBarLabelWrap {
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.fullCrewStatsClusterToggle {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 0.05rem 0.25rem;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    opacity: 0.7;
+    cursor: pointer;
+    font: inherit;
+    line-height: 1;
+}
+
+.fullCrewStatsClusterToggle:hover,
+.fullCrewStatsClusterToggle:focus-visible {
+    opacity: 1;
+    outline: none;
+    color: var(--primary-color, #00a4dc);
+}
+
+.fullCrewStatsClusterChevron {
+    display: inline-block;
+    width: 0.85em;
+    text-align: center;
+}
+
+.fullCrewStatsRankList--nested {
+    list-style: none;
+    margin: 0.15rem 0 0.35rem;
+    padding: 0;
+    counter-reset: none;
+}
+
+.fullCrewStatsRankList--nested.is-collapsed,
+.fullCrewStatsBarChildren.is-collapsed {
+    display: none;
+}
+
+.fullCrewStatsRankItem--child {
+    opacity: 0.92;
+    border-bottom-color: rgba(255, 255, 255, 0.04);
+}
+
+.fullCrewStatsRankItem--child .fullCrewStatsRankName::before {
+    content: "";
+}
+
+.fullCrewStatsBarCluster--child {
+    margin-left: 1rem;
+}
+
+.fullCrewStatsBarChildren {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0.25rem 0 0.45rem 0.25rem;
+    padding-left: 0.75rem;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.fullCrewStatsRankName {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.fullCrewStatsRankName::before {
+    content: counter(fullcrew-rank) ". ";
+    opacity: 0.45;
+    font-variant-numeric: tabular-nums;
+}
+
+.fullCrewStatsLegendMeta {
+    opacity: 0.65;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    padding-top: 0.05rem;
+}
+
+.fullCrewStatsBars {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.fullCrewStatsBarRow {
+    display: grid;
+    grid-template-columns: minmax(9rem, 13rem) minmax(0, 1fr) auto;
+    gap: 0.65rem;
+    align-items: center;
+    font-size: 0.9rem;
+}
+
+.fullCrewStatsBarLabel {
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.3;
+    min-width: 0;
+}
+
+.fullCrewStatsBarTrack {
+    height: 0.6rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+}
+
+.fullCrewStatsBarFill {
+    height: 100%;
+    border-radius: inherit;
+    min-width: 2px;
+}
+
+.fullCrewStatsBarValue {
+    opacity: 0.65;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    font-size: 0.82rem;
+}
+
+.fullCrewStatsRankList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    counter-reset: fullcrew-rank;
+}
+
+.fullCrewStatsRankItem {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.15rem;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 0.92rem;
+    line-height: 1.35;
+    counter-increment: fullcrew-rank;
+}
+
+.fullCrewStatsRankItem:last-child {
+    border-bottom: 0;
+}
+
+.fullCrewStatsRankItem--child {
+    counter-increment: none;
+}
+
+.fullCrewStatsRankMeta {
+    flex-shrink: 0;
+    opacity: 0.65;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.fullCrewStatsLegendNameRow {
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.fullCrewStatsLegendNested {
+    list-style: none;
+    margin: 0.25rem 0 0 1.4rem;
+    padding: 0;
+    grid-column: 1 / -1;
+}
+
+.fullCrewStatsLegendNested.is-collapsed {
+    display: none;
+}
+
+.fullCrewStatsFooter {
+    margin-top: 1.5rem;
+    font-size: 0.78rem;
+    opacity: 0.45;
+}
+
+/* Studio detail page — person-page profile layout */
+
+.fullCrewStudioHeader {
+    margin-bottom: var(--fc-space-1);
+}
+
+.fullCrewStudioBack {
+    display: inline-block;
+    font-size: 0.85rem;
+    opacity: var(--fc-muted);
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.fullCrewStudioBack:hover,
+.fullCrewStudioBack:focus-visible {
+    opacity: 0.9;
+    color: var(--fc-accent);
+}
+
+.fullCrewStudioProfile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    margin: 0.5rem auto 1.25rem;
+    max-width: 40rem;
+}
+
+.fullCrewStudioLogo {
+    width: 12.5rem;
+    height: 12.5rem;
+    object-fit: contain;
+    background: var(--fc-surface);
+    border-radius: var(--fc-radius-lg);
+    padding: 1.1rem;
+    box-sizing: border-box;
+}
+
+.fullCrewStudioLogoFallback {
+    width: 12.5rem;
+    height: 12.5rem;
+    border-radius: var(--fc-radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 3.4rem;
+    font-weight: 600;
+    background: var(--fc-accent-soft);
+    color: var(--fc-accent);
+}
+
+.fullCrewStudioName {
+    margin: var(--fc-space-3) 0 0;
+    font-size: var(--fc-font-xl);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    line-height: 1.15;
+}
+
+.fullCrewStudioOverview {
+    margin: 0 auto 1.15rem;
+    max-width: 42rem;
+    line-height: 1.55;
+    opacity: 0.9;
+    text-align: center;
+    font-size: 0.98rem;
+}
+
+.fullCrewStudioMetaRows {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.35rem 1.25rem;
+    margin: 0 auto 1.15rem;
+    max-width: 28rem;
+    padding: 0;
+}
+
+.fullCrewStudioMetaLabel {
+    margin: 0;
+    opacity: 0.55;
+    font-size: 0.92rem;
+}
+
+.fullCrewStudioMetaValue {
+    margin: 0;
+    font-size: 0.95rem;
+}
+
+.fullCrewStudioLinks {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.65rem;
+    margin: 0 auto 1.1rem;
+}
+
+.fullCrewStudioBadge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 4.5rem;
+    padding: 0.4rem 0.85rem;
+    border-radius: var(--fc-radius);
+    background: var(--fc-surface-strong);
+    border: 1px solid var(--fc-border);
+    color: inherit;
+    text-decoration: none;
+    font-size: 0.88rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+}
+
+.fullCrewStudioBadge:hover,
+.fullCrewStudioBadge:focus-visible {
+    background: var(--fc-accent-soft);
+    border-color: rgba(0, 164, 220, 0.45);
+    color: var(--fc-accent);
+}
+
+.fullCrewStudioCoCredit {
+    margin: 0 auto 0.85rem;
+    max-width: 36rem;
+    text-align: center;
+    font-size: 0.9rem;
+    opacity: 0.7;
+}
+
+.fullCrewStudioCoCreditLink {
+    color: var(--fc-accent);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.fullCrewStudioCoCreditLink:hover,
+.fullCrewStudioCoCreditLink:focus-visible {
+    text-decoration: underline;
+}
+
+.fullCrewStudioQuietStats {
+    margin: 0 auto 1.25rem;
+    max-width: 40rem;
+    text-align: center;
+}
+
+.fullCrewStudioQuietLine {
+    font-size: 0.88rem;
+    opacity: 0.55;
+    line-height: 1.4;
+}
+
+.fullCrewStudioQuietDetails {
+    margin-top: 0.45rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    font-size: 0.82rem;
+    opacity: 0.55;
+}
+
+.fullCrewStudioQuietDetail {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.35rem 0.65rem;
+}
+
+.fullCrewStudioQuietDetailLabel {
+    opacity: 0.8;
+}
+
+.fullCrewStudioQuietDetailLabel::after {
+    content: ':';
+}
+
+.fullCrewStudioVariants {
+    margin: 0 auto 1.35rem;
+    max-width: 40rem;
+    text-align: center;
+    font-size: 0.82rem;
+    opacity: 0.5;
+    line-height: 1.45;
+}
+
+.fullCrewStudioVariantLink {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 0.12em;
+    cursor: pointer;
+}
+
+.fullCrewStudioVariantLink:hover,
+.fullCrewStudioVariantLink:focus-visible {
+    color: var(--fc-accent);
+    opacity: 1;
+}
+
+.fullCrewStudioHint {
+    margin: 0 0 0.75rem;
+    font-size: 0.85em;
+    opacity: 0.65;
+    max-width: 48rem;
+}
+
+.fullCrewStudioMissing {
+    margin: 0;
+    padding-left: 1.2em;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35em;
+}
+
+.fullCrewStudioSection {
+    margin: 0 0 1.75rem;
+}
+
+.fullCrewStudioSection--secondary {
+    opacity: 0.85;
+}
+
+.fullCrewStudioSectionTitle {
+    margin: 0 0 0.85rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.fullCrewStudioRow {
+    display: flex;
+    gap: 0.85rem;
+    overflow-x: auto;
+    padding: 0.15rem 0.15rem 0.65rem;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+}
+
+.fullCrewStudioCard {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    flex: 0 0 8.25rem;
+    width: 8.25rem;
+    scroll-snap-align: start;
+}
+
+.fullCrewStudioCard:hover .fullCrewStudioCardName,
+.fullCrewStudioCard:focus-visible .fullCrewStudioCardName {
+    color: var(--fc-accent);
+}
+
+.fullCrewStudioPoster {
+    aspect-ratio: 2 / 3;
+    border-radius: var(--fc-radius);
+    overflow: hidden;
+    background: var(--fc-surface);
+}
+
+.fullCrewStudioPosterImg {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.fullCrewStudioPosterFallback {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.6rem;
+    opacity: 0.45;
+}
+
+.fullCrewStudioCardName {
+    font-size: 0.88rem;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+.fullCrewStudioCardMeta {
+    font-size: 0.78rem;
+    opacity: 0.55;
+}
+
+@media (max-width: 42em) {
+    .fullCrewStatsPage {
+        padding: 1rem 0.85rem 2rem;
+    }
+
+    .fullCrewStudioPage {
+        padding: 0.85rem 0.85rem 2rem;
+    }
+
+    .fullCrewStudioLogo,
+    .fullCrewStudioLogoFallback {
+        width: 10rem;
+        height: 10rem;
+    }
+
+    .fullCrewStudioName {
+        font-size: 1.65rem;
+    }
+
+    .fullCrewStudioMetaRows {
+        grid-template-columns: 1fr;
+        gap: 0.15rem;
+        text-align: center;
+    }
+
+    .fullCrewStudioCard {
+        flex-basis: 7.25rem;
+        width: 7.25rem;
+    }
+
+    .fullCrewStatsGrid {
+        grid-template-columns: 1fr;
+    }
+
+    .fullCrewStatsBarRow {
+        grid-template-columns: 1fr;
+        gap: 0.25rem;
+    }
+
+    .fullCrewStatsBarValue {
+        justify-self: end;
+    }
+}
+
+/* Playback character rail */
+.fullCrewSceneOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10050;
+    display: flex;
+    justify-content: flex-end;
+    align-items: stretch;
+    pointer-events: none;
+}
+
+.fullCrewSceneBackdrop {
+    position: absolute;
+    inset: 0;
+    background: transparent;
+    pointer-events: auto;
+}
+
+.fullCrewScenePanel {
+    position: relative;
+    z-index: 1;
+    width: min(22rem, 92vw);
+    max-width: 100%;
+    background: rgba(12, 12, 14, 0.92);
+    color: inherit;
+    box-shadow: -8px 0 28px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(14px);
+    display: flex;
+    flex-direction: column;
+    padding: 0.85rem 0.9rem 1rem;
+    overflow: auto;
+    pointer-events: auto;
+}
+
+.fullCrewSceneHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.fullCrewSceneTitle {
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.fullCrewSceneClose {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.8;
+    padding: 0.15rem 0.35rem;
+}
+
+.fullCrewSceneClose:hover,
+.fullCrewSceneClose:focus-visible {
+    opacity: 1;
+}
+
+.fullCrewSceneBody {
+    flex: 1;
+    min-height: 4rem;
+}
+
+.fullCrewSceneStatus {
+    opacity: 0.85;
+    line-height: 1.4;
+    font-size: 0.9rem;
+    margin-bottom: 0.75rem;
+}
+
+.fullCrewScenePrivacy {
+    margin-top: 0.85rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.75rem;
+    opacity: 0.65;
+    line-height: 1.35;
+}
+
+.fullCrewSceneOsdBtn {
+    opacity: 0.92;
+}
+
+.fullCrewSceneOsdBtn[aria-pressed="true"] {
+    opacity: 1;
+}
+
+.fullCrewSceneItemName {
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+}
+
+.fullCrewCastRailList {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.fullCrewCastCard {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.fullCrewCastStill {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    object-position: center top;
+    border-radius: 0.45rem;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.fullCrewCastStillFallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    opacity: 0.7;
+}
+
+.fullCrewCastCardText {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.fullCrewCastCharacter {
+    font-weight: 600;
+    font-size: 0.98rem;
+    line-height: 1.25;
+}
+
+.fullCrewCastActor {
+    font-size: 0.85rem;
+    opacity: 0.72;
+    line-height: 1.3;
 }
