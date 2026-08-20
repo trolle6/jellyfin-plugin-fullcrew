@@ -12,7 +12,40 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 public static class RoleCollapse
 {
     /// <summary>Default number of unique roles shown before “+N more”.</summary>
-    public const int DefaultMaxVisible = 3;
+    public const int DefaultMaxVisible = 2;
+
+    private static readonly HashSet<string> KnownCrewJobs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Creator",
+        "Executive Producer",
+        "Co-Executive Producer",
+        "Producer",
+        "Co-Producer",
+        "Associate Producer",
+        "Line Producer",
+        "Director",
+        "Co-Director",
+        "Writer",
+        "Screenplay",
+        "Story",
+        "Storyboard Artist",
+        "Characters",
+        "Editor",
+        "Supervising Editor",
+        "Director of Photography",
+        "Cinematography",
+        "Original Music Composer",
+        "Music",
+        "Actor",
+        "Self",
+        "Voice Director",
+        "Additional Writing",
+        "Consulting Producer",
+        "Supervising Producer",
+        "Co-Writer",
+        "Head Writer",
+        "Staff Writer"
+    };
 
     private static readonly Regex TrailingParenNotes = new(
         @"\s*\([^)]*\)\s*$",
@@ -91,6 +124,41 @@ public static class RoleCollapse
     }
 
     /// <summary>
+    /// For Cast cards, show billed characters before generic crew job titles
+    /// when one person was merged across cast + production credits.
+    /// </summary>
+    public static IReadOnlyList<string> PrioritizeCastCharacters(IReadOnlyList<string> uniqueRoles)
+    {
+        if (uniqueRoles.Count <= 1)
+        {
+            return uniqueRoles;
+        }
+
+        var characters = new List<string>();
+        var jobs = new List<string>();
+
+        foreach (var role in uniqueRoles)
+        {
+            if (IsKnownCrewJob(role))
+            {
+                jobs.Add(role);
+            }
+            else
+            {
+                characters.Add(role);
+            }
+        }
+
+        if (characters.Count == 0 || jobs.Count == 0)
+        {
+            return uniqueRoles;
+        }
+
+        characters.AddRange(jobs);
+        return characters;
+    }
+
+    /// <summary>
     /// Build a short label and full tooltip from already-collapsed unique names.
     /// </summary>
     /// <param name="uniqueRoles">Unique role display names.</param>
@@ -100,19 +168,42 @@ public static class RoleCollapse
     {
         if (uniqueRoles is null || uniqueRoles.Count == 0)
         {
-            return new RolePreview(string.Empty, string.Empty, 0);
+            return new RolePreview([], string.Empty, 0);
         }
 
         var visibleCount = Math.Clamp(maxVisible, 1, 10);
         var tooltip = string.Join(" · ", uniqueRoles);
         if (uniqueRoles.Count <= visibleCount)
         {
-            return new RolePreview(tooltip, tooltip, 0);
+            return new RolePreview(uniqueRoles.ToList(), tooltip, 0);
         }
 
-        var shown = string.Join(" · ", uniqueRoles.Take(visibleCount));
         var hidden = uniqueRoles.Count - visibleCount;
-        return new RolePreview(shown, tooltip, hidden);
+        return new RolePreview(uniqueRoles.Take(visibleCount).ToList(), tooltip, hidden);
+    }
+
+    private static bool IsKnownCrewJob(string role)
+    {
+        var trimmed = role.Trim();
+        if (trimmed.Length == 0)
+        {
+            return true;
+        }
+
+        if (KnownCrewJobs.Contains(trimmed))
+        {
+            return true;
+        }
+
+        foreach (var job in KnownCrewJobs)
+        {
+            if (trimmed.StartsWith(job + " ", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Split a credit on / and sensible commas into character/job segments.</summary>
@@ -213,7 +304,11 @@ public static class RoleCollapse
 }
 
 /// <summary>Collapsed role preview for UI cards.</summary>
-/// <param name="Label">Visible role line (without “+N more”).</param>
+/// <param name="VisibleRoles">Role lines shown on the card (one per row).</param>
 /// <param name="Tooltip">Full unique list for hover.</param>
-/// <param name="HiddenCount">How many unique names are omitted from <paramref name="Label"/>.</param>
-public readonly record struct RolePreview(string Label, string Tooltip, int HiddenCount);
+/// <param name="HiddenCount">How many unique names are omitted from <paramref name="VisibleRoles"/>.</param>
+public readonly record struct RolePreview(IReadOnlyList<string> VisibleRoles, string Tooltip, int HiddenCount)
+{
+    /// <summary>Legacy single-line label (middot-joined visible roles).</summary>
+    public string Label => string.Join(" · ", VisibleRoles);
+}

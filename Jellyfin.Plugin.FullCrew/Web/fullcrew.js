@@ -14,8 +14,39 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.7.5.1';
-    var ROLE_PREVIEW_MAX = 3;
+    var PLUGIN_VERSION = '1.7.5.2';
+    var ROLE_PREVIEW_MAX = 2;
+    var CREW_JOB_TITLES = {
+        'creator': 1,
+        'executive producer': 1,
+        'co-executive producer': 1,
+        'producer': 1,
+        'co-producer': 1,
+        'associate producer': 1,
+        'line producer': 1,
+        'director': 1,
+        'co-director': 1,
+        'writer': 1,
+        'screenplay': 1,
+        'story': 1,
+        'storyboard artist': 1,
+        'characters': 1,
+        'editor': 1,
+        'supervising editor': 1,
+        'director of photography': 1,
+        'cinematography': 1,
+        'original music composer': 1,
+        'music': 1,
+        'actor': 1,
+        'self': 1,
+        'voice director': 1,
+        'additional writing': 1,
+        'consulting producer': 1,
+        'supervising producer': 1,
+        'co-writer': 1,
+        'head writer': 1,
+        'staff writer': 1
+    };
     var ROLE_NAME_SUFFIXES = {
         jr: 1, 'jr.': 1, sr: 1, 'sr.': 1, ii: 1, iii: 1, iv: 1, v: 1, phd: 1, md: 1, esq: 1, 'esq.': 1
     };
@@ -1337,15 +1368,52 @@
             .map(function (entry) { return entry.display; });
     }
 
+    function isKnownCrewJob(role) {
+        var trimmed = String(role || '').trim();
+        if (!trimmed) {
+            return true;
+        }
+        var key = trimmed.toLowerCase();
+        if (CREW_JOB_TITLES[key]) {
+            return true;
+        }
+        var keys = Object.keys(CREW_JOB_TITLES);
+        for (var i = 0; i < keys.length; i++) {
+            if (key.indexOf(keys[i] + ' ') === 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function prioritizeCastRoles(roles) {
+        if (!roles || roles.length <= 1) {
+            return roles || [];
+        }
+        var characters = [];
+        var jobs = [];
+        roles.forEach(function (role) {
+            if (isKnownCrewJob(role)) {
+                jobs.push(role);
+            } else {
+                characters.push(role);
+            }
+        });
+        if (!characters.length || !jobs.length) {
+            return roles;
+        }
+        return characters.concat(jobs);
+    }
+
     function formatRolePreview(uniqueRoles, maxVisible) {
         var roles = uniqueRoles || [];
         var limit = Math.max(1, maxVisible || ROLE_PREVIEW_MAX);
         var tooltip = roles.join(' · ');
         if (roles.length <= limit) {
-            return { label: tooltip, tooltip: tooltip, hidden: 0 };
+            return { visible: roles.slice(), tooltip: tooltip, hidden: 0 };
         }
         return {
-            label: roles.slice(0, limit).join(' · '),
+            visible: roles.slice(0, limit),
             tooltip: tooltip,
             hidden: roles.length - limit
         };
@@ -1444,6 +1512,9 @@
             people.forEach(function (person) {
                 var personName = person.Name || person.name || 'Unknown';
                 var roles = resolvePersonRoles(person);
+                if (/^Cast$/i.test(name)) {
+                    roles = prioritizeCastRoles(roles);
+                }
                 var profileUrl = person.ProfileUrl || person.profileUrl;
                 var tmdbId = person.TmdbPersonId || person.tmdbPersonId;
                 var card;
@@ -1483,9 +1554,9 @@
                     if (preview.tooltip) {
                         roleList.title = preview.tooltip;
                     }
-                    if (preview.label) {
-                        roleList.appendChild(createElement('div', 'fullCrewPersonRole', preview.label));
-                    }
+                    preview.visible.forEach(function (roleLine) {
+                        roleList.appendChild(createElement('div', 'fullCrewPersonRole', roleLine));
+                    });
                     if (preview.hidden > 0) {
                         roleList.appendChild(
                             createElement('div', 'fullCrewPersonRoleMore', '+' + preview.hidden + ' more')

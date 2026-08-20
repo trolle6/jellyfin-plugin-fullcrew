@@ -12,7 +12,7 @@ internal static class PluginInfo
         typeof(Plugin).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
             ?.Split('+')[0]
         ?? typeof(Plugin).Assembly.GetName().Version?.ToString()
-        ?? "1.7.5.1";
+        ?? "1.7.5.2";
 
     /// <summary>User-Agent sent on TMDB / YouTube / OpenAI requests.</summary>
     public static string UserAgent { get; } = "Jellyfin-Plugin-FullCrew/" + Version;

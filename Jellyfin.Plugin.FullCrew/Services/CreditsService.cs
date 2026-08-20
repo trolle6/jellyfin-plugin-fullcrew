@@ -414,7 +414,11 @@ public class CreditsService
             // Aggregate TV credits often list dozens of near-duplicate character strings
             // (“Mr. Slate (voice)”, “Mr. Slate / Announcer (voice)”, …). Collapse those.
             IReadOnlyList<string> stackedRoles = RoleCollapse.Collapse(rawRoles);
-            if (!isCast && stackedRoles.Count > 1)
+            if (isCast && stackedRoles.Count > 1)
+            {
+                stackedRoles = RoleCollapse.PrioritizeCastCharacters(stackedRoles);
+            }
+            else if (!isCast && stackedRoles.Count > 1)
             {
                 stackedRoles = stackedRoles
                     .OrderBy(RoleSortIndex)

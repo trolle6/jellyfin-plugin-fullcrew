@@ -60,10 +60,10 @@ public class RoleCollapseTests
             "Judge (voice)"
         ]);
 
-        var preview = RoleCollapse.FormatPreview(unique, maxVisible: 3);
+        var preview = RoleCollapse.FormatPreview(unique, maxVisible: 2);
 
-        Assert.True(preview.HiddenCount >= 1);
-        Assert.Contains(" · ", preview.Label);
+        Assert.True(preview.HiddenCount >= 2);
+        Assert.Equal(2, preview.VisibleRoles.Count);
         Assert.DoesNotContain("+", preview.Label, StringComparison.Ordinal);
         Assert.Equal(string.Join(" · ", unique), preview.Tooltip);
     }
@@ -71,11 +71,28 @@ public class RoleCollapseTests
     [Fact]
     public void FormatPreview_NoHiddenWhenShort()
     {
-        var preview = RoleCollapse.FormatPreview(["Fred", "Barney"], maxVisible: 3);
+        var preview = RoleCollapse.FormatPreview(["Fred", "Barney"], maxVisible: 2);
 
         Assert.Equal(0, preview.HiddenCount);
+        Assert.Equal(["Fred", "Barney"], preview.VisibleRoles);
         Assert.Equal("Fred · Barney", preview.Label);
         Assert.Equal(preview.Label, preview.Tooltip);
+    }
+
+    [Fact]
+    public void PrioritizeCastCharacters_PutsBilledRolesBeforeCrewJobs()
+    {
+        var ordered = RoleCollapse.PrioritizeCastCharacters([
+            "Executive Producer",
+            "Director",
+            "Heinz Doofenshmirtz",
+            "Writer"
+        ]);
+
+        Assert.Equal("Heinz Doofenshmirtz", ordered[0]);
+        Assert.Equal("Executive Producer", ordered[1]);
+        Assert.Equal("Director", ordered[2]);
+        Assert.Equal("Writer", ordered[3]);
     }
 
     [Fact]
