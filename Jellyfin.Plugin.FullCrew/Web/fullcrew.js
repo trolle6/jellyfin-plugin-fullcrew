@@ -9,12 +9,12 @@
     /*   Core.el / Core.prop / Core.getJson / Core.PageTitle / Core.Ui    */
     /*   Core.CustomPage — mount/teardown for hash-routed overlays        */
     /*   Core.navigateToItem / Core.bindPageLoad / Core.findMount         */
-    /* Features: Crew accordion · Bumper/Trailer · Stats · Studio · Character rail */
+    /* Features: Crew accordion · Bumper/Trailer · Stats · Studio · Character rail · Audio Tracks */
     /* Route chrome (peek/apply) runs before the duplicate-script guard.  */
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.7.6.0';
+    var PLUGIN_VERSION = '1.8.0.0';
     var ROLE_PREVIEW_MAX = 2;
     var CREW_JOB_TITLES = {
         'creator': 1,
@@ -148,6 +148,9 @@
         }
         if (raw === '#/fullcrew/stats' || raw.indexOf('#/fullcrew/stats/') === 0) {
             return { kind: 'stats', title: 'Stats', bodyClass: STATS_BODY_CLASS };
+        }
+        if (raw === '#/fullcrew/audio' || raw.indexOf('#/fullcrew/audio/') === 0) {
+            return { kind: 'audio', title: 'Audio Tracks', bodyClass: STATS_BODY_CLASS };
         }
         if (raw.indexOf('#/fullcrew/studio/') === 0) {
             var enc = raw.slice('#/fullcrew/studio/'.length);
@@ -5175,9 +5178,553 @@
         syncSceneIdentifyButton();
     }
 
+    /* ================================================================== */
+    /* Feature: Audio Tracks                                              */
+    /* ================================================================== */
+
+    var AUDIO_PAGE_ID = 'fullCrewAudioPage';
+    var AUDIO_TAB_ID = 'fullCrewAudioTab';
+    var AUDIO_CHIP_ID = 'fullCrewAudioChips';
+    var AUDIO_HASH = '#/fullcrew/audio';
+    var AUDIO_PAGE_SIZE = 50;
+    var audioEnabled = true;
+    var audioState = {
+        types: [],
+        isIndexing: false,
+        typeId: 'commentary',
+        search: '',
+        language: '',
+        sort: 'name',
+        items: [],
+        total: 0,
+        languages: [],
+        loading: false
+    };
+
+    function isAudioRoute() {
+        var route = peekFullCrewRoute();
+        return !!(route && route.kind === 'audio');
+    }
+
+    function parseAudioQuery() {
+        var hash = window.location.hash || '';
+        var qIndex = hash.indexOf('?');
+        var params = Core.parseQuery(qIndex === -1 ? '' : hash.substring(qIndex + 1));
+        return {
+            type: params.type || 'commentary',
+            search: params.q || '',
+            language: params.lang || '',
+            sort: params.sort || 'name'
+        };
+    }
+
+    function writeAudioHash() {
+        var params = [];
+        if (audioState.typeId && audioState.typeId !== 'commentary') {
+            params.push('type=' + encodeURIComponent(audioState.typeId));
+        } else if (audioState.typeId === 'commentary') {
+            params.push('type=commentary');
+        }
+        if (audioState.search) {
+            params.push('q=' + encodeURIComponent(audioState.search));
+        }
+        if (audioState.language) {
+            params.push('lang=' + encodeURIComponent(audioState.language));
+        }
+        if (audioState.sort && audioState.sort !== 'name') {
+            params.push('sort=' + encodeURIComponent(audioState.sort));
+        }
+        var next = AUDIO_HASH + (params.length ? '?' + params.join('&') : '?type=commentary');
+        if ((window.location.hash || '') !== next) {
+            if (window.history && window.history.replaceState) {
+                window.history.replaceState(null, '', next);
+            } else {
+                window.location.hash = next;
+            }
+        }
+    }
+
+    function tearDownAudioPage() {
+        var page = document.getElementById(AUDIO_PAGE_ID);
+        if (page && page.parentNode) {
+            page.parentNode.removeChild(page);
+        }
+        var tab = document.getElementById(AUDIO_TAB_ID);
+        if (tab) {
+            tab.classList.remove('emby-tab-button-active');
+        }
+    }
+
+    function injectAudioTab() {
+        if (!audioEnabled) {
+            var existing = document.getElementById(AUDIO_TAB_ID);
+            if (existing && existing.parentNode) {
+                existing.parentNode.removeChild(existing);
+            }
+            return;
+        }
+
+        if (document.getElementById(AUDIO_TAB_ID)) {
+            var tab = document.getElementById(AUDIO_TAB_ID);
+            if (isAudioRoute()) {
+                tab.classList.add('emby-tab-button-active');
+            } else {
+                tab.classList.remove('emby-tab-button-active');
+            }
+            return;
+        }
+
+        var after = document.getElementById(STATS_TAB_ID) || findFavouritesTab();
+        if (!after || !after.parentNode) {
+            return;
+        }
+
+        var sample = after;
+        var node = document.createElement(sample.tagName === 'A' ? 'a' : 'button');
+        if (sample.tagName === 'A') {
+            node.href = AUDIO_HASH + '?type=commentary';
+        } else {
+            node.type = 'button';
+        }
+        node.id = AUDIO_TAB_ID;
+        node.className = String(sample.className || 'emby-tab-button emby-button')
+            .replace(/\bemby-tab-button-active\b/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        node.setAttribute('title', 'Audio');
+        node.setAttribute('aria-label', 'Audio');
+        node.textContent = 'Audio';
+        node.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            window.location.hash = AUDIO_HASH + '?type=commentary';
+        }, true);
+
+        if (after.nextSibling) {
+            after.parentNode.insertBefore(node, after.nextSibling);
+        } else {
+            after.parentNode.appendChild(node);
+        }
+    }
+
+    function audioImageUrl(itemId) {
+        var client = Core.apiClient();
+        if (client && typeof client.getImageUrl === 'function') {
+            return client.getImageUrl(itemId, { type: 'Primary', maxHeight: 360, quality: 80 });
+        }
+        return '/Items/' + itemId + '/Images/Primary?maxHeight=360&quality=80';
+    }
+
+    function pad2(n) {
+        return (n < 10 ? '0' : '') + n;
+    }
+
+    function audioItemHeading(item) {
+        var series = Core.prop(item, 'SeriesName', 'seriesName');
+        var name = Core.prop(item, 'Name', 'name') || '';
+        var season = Core.prop(item, 'SeasonNumber', 'seasonNumber');
+        var episode = Core.prop(item, 'EpisodeNumber', 'episodeNumber');
+        var year = Core.prop(item, 'ProductionYear', 'productionYear');
+        if (series) {
+            if (season != null || episode != null) {
+                return series + ' · S' + pad2(season || 0) + 'E' + pad2(episode || 0);
+            }
+            return series;
+        }
+        return year ? name + ' (' + year + ')' : name;
+    }
+
+    function renderAudioCard(item) {
+        var card = Core.el('a', 'fullCrewAudioCard');
+        var itemId = Core.prop(item, 'ItemId', 'itemId');
+        card.href = Core.detailsHashForItem(itemId);
+        card.addEventListener('click', function (e) {
+            e.preventDefault();
+            Core.navigateToItem(itemId);
+        });
+
+        var imageId = Core.prop(item, 'ImageItemId', 'imageItemId') || itemId;
+        var poster = Core.el('div', 'fullCrewAudioPoster');
+        var img = document.createElement('img');
+        img.alt = '';
+        img.loading = 'lazy';
+        img.src = audioImageUrl(imageId);
+        img.onerror = function () {
+            poster.classList.add('is-fallback');
+            if (img.parentNode) {
+                img.parentNode.removeChild(img);
+            }
+        };
+        poster.appendChild(img);
+        card.appendChild(poster);
+
+        var body = Core.el('div', 'fullCrewAudioCardBody');
+        body.appendChild(Core.el('div', 'fullCrewAudioCardKicker', audioItemHeading(item)));
+        var series = Core.prop(item, 'SeriesName', 'seriesName');
+        body.appendChild(Core.el('div', 'fullCrewAudioCardName', series ? (Core.prop(item, 'Name', 'name') || '') : (Core.prop(item, 'MediaType', 'mediaType') || '')));
+        var tracks = Core.prop(item, 'Tracks', 'tracks') || [];
+        tracks.slice(0, 3).forEach(function (track) {
+            body.appendChild(Core.el(
+                'div',
+                'fullCrewAudioCardTrack',
+                Core.prop(track, 'DisplayTitle', 'displayTitle') || Core.prop(track, 'Title', 'title') || ''
+            ));
+        });
+        card.appendChild(body);
+        return card;
+    }
+
+    function audioEmptyMessage() {
+        if (audioState.search || audioState.language) {
+            return 'No titles match those filters.';
+        }
+        if (audioState.isIndexing) {
+            return 'Still indexing the library. Try refresh in a moment.';
+        }
+        if (audioState.typeId === 'commentary') {
+            return 'No commentary tracks yet. Jellyfin only sees names stored on the audio stream (MKV/MP4 titles like “Commentary”). Scan the library, then refresh the index.';
+        }
+        return 'No tracks of this type yet. Titles come from the audio stream name in the file.';
+    }
+
+    function loadAudioItems(reset) {
+        if (!isAudioRoute()) {
+            return;
+        }
+        var page = document.getElementById(AUDIO_PAGE_ID);
+        if (!page) {
+            return;
+        }
+        if (reset) {
+            audioState.items = [];
+        }
+        var params = [
+            'type=' + encodeURIComponent(audioState.typeId || 'all'),
+            'startIndex=' + (reset ? 0 : audioState.items.length),
+            'limit=' + AUDIO_PAGE_SIZE
+        ];
+        if (audioState.search) {
+            params.push('search=' + encodeURIComponent(audioState.search));
+        }
+        if (audioState.language) {
+            params.push('language=' + encodeURIComponent(audioState.language));
+        }
+        if (audioState.sort) {
+            params.push('sort=' + encodeURIComponent(audioState.sort));
+        }
+        var status = page.querySelector('.fullCrewAudioStatus');
+        var grid = page.querySelector('.fullCrewAudioGrid');
+        var more = page.querySelector('.fullCrewAudioMore');
+        if (status && reset) {
+            status.textContent = 'Loading…';
+        }
+        audioState.loading = true;
+        Core.getJson('FullCrew/audio/items?' + params.join('&')).then(function (data) {
+            audioState.loading = false;
+            audioState.total = Core.prop(data, 'TotalCount', 'totalCount') || 0;
+            audioState.isIndexing = !!Core.prop(data, 'IsIndexing', 'isIndexing');
+            var incoming = Core.prop(data, 'Items', 'items') || [];
+            var langs = Core.prop(data, 'Languages', 'languages') || [];
+            if (langs.length) {
+                audioState.languages = langs;
+            }
+            if (reset && grid) {
+                grid.innerHTML = '';
+                audioState.items = incoming;
+            } else {
+                audioState.items = audioState.items.concat(incoming);
+            }
+            incoming.forEach(function (item) {
+                if (grid) {
+                    grid.appendChild(renderAudioCard(item));
+                }
+            });
+            if (status) {
+                status.textContent = audioState.items.length ? (audioState.total + (audioState.total === 1 ? ' title' : ' titles')) : audioEmptyMessage();
+            }
+            if (more) {
+                more.innerHTML = '';
+                if (audioState.items.length < audioState.total) {
+                    var btn = Core.el('button', 'fullCrewAudioButton', 'Load more');
+                    btn.type = 'button';
+                    btn.addEventListener('click', function () {
+                        loadAudioItems(false);
+                    });
+                    more.appendChild(btn);
+                }
+            }
+            refreshAudioLanguageSelect();
+        }).catch(function (err) {
+            audioState.loading = false;
+            console.warn('[FullCrew] audio items failed', err);
+            if (status) {
+                status.textContent = 'Could not load matching titles.';
+            }
+        });
+    }
+
+    function refreshAudioLanguageSelect() {
+        var page = document.getElementById(AUDIO_PAGE_ID);
+        if (!page) {
+            return;
+        }
+        var lang = page.querySelector('.fullCrewAudioSelect--lang');
+        if (!lang) {
+            return;
+        }
+        var current = audioState.language;
+        lang.innerHTML = '';
+        lang.appendChild(new Option('All languages', ''));
+        audioState.languages.forEach(function (name) {
+            lang.appendChild(new Option(name, name));
+        });
+        lang.value = current;
+    }
+
+    function paintAudioPage() {
+        var mount = Core.findMount();
+        var page = document.getElementById(AUDIO_PAGE_ID);
+        if (!page) {
+            page = Core.el('div', 'fullCrewPage fullCrewAudioPage');
+            page.id = AUDIO_PAGE_ID;
+            mount.appendChild(page);
+        }
+        page.innerHTML = '';
+
+        var wrap = Core.el('div', 'fullCrewAudioWrap');
+        var header = Core.el('div', 'fullCrewAudioHeader');
+        var titles = Core.el('div');
+        titles.appendChild(Core.el('h1', 'fullCrewAudioTitle', 'Audio Tracks'));
+        titles.appendChild(Core.el(
+            'p',
+            'fullCrewAudioLead',
+            'Browse by the kind of audio in the file — commentary, descriptions, dubs, isolated scores — without picking a show first.'
+        ));
+        header.appendChild(titles);
+        var refresh = Core.el('button', 'fullCrewAudioButton', audioState.isIndexing ? 'Indexing…' : 'Refresh index');
+        refresh.type = 'button';
+        refresh.disabled = audioState.isIndexing;
+        refresh.addEventListener('click', function () {
+            refresh.disabled = true;
+            refresh.textContent = 'Indexing…';
+            Core.postJson('FullCrew/audio/refresh', {}).then(function () {
+                window.setTimeout(function () {
+                    syncAudioUi();
+                }, 600);
+            }).catch(function () {
+                refresh.disabled = false;
+                refresh.textContent = 'Refresh index';
+            });
+        });
+        header.appendChild(refresh);
+        wrap.appendChild(header);
+
+        var chips = Core.el('div', 'fullCrewAudioChips');
+        function addChip(id, name, count) {
+            var chip = Core.el('button', 'fullCrewAudioChip' + (audioState.typeId === id ? ' is-active' : ''));
+            chip.type = 'button';
+            chip.appendChild(Core.el('span', 'fullCrewAudioChipName', name));
+            chip.appendChild(Core.el('span', 'fullCrewAudioChipCount', String(count || 0)));
+            chip.addEventListener('click', function () {
+                audioState.typeId = id;
+                writeAudioHash();
+                paintAudioPage();
+                loadAudioItems(true);
+            });
+            chips.appendChild(chip);
+        }
+        var allCount = audioState.types.reduce(function (sum, t) {
+            return sum + (Core.prop(t, 'ItemCount', 'itemCount') || 0);
+        }, 0);
+        addChip('all', 'All special audio', allCount);
+        audioState.types.forEach(function (type) {
+            addChip(Core.prop(type, 'Id', 'id'), Core.prop(type, 'Name', 'name'), Core.prop(type, 'ItemCount', 'itemCount'));
+        });
+        wrap.appendChild(chips);
+
+        var meta = null;
+        audioState.types.forEach(function (type) {
+            if (Core.prop(type, 'Id', 'id') === audioState.typeId) {
+                meta = type;
+            }
+        });
+        wrap.appendChild(Core.el(
+            'p',
+            'fullCrewAudioTypeDesc',
+            meta
+                ? (Core.prop(meta, 'Description', 'description') || '')
+                : (audioState.typeId === 'commentary'
+                    ? 'Director, cast, and crew commentary — across every show and movie.'
+                    : 'Every movie and episode that carries a labeled extra audio track.')
+        ));
+
+        var toolbar = Core.el('div', 'fullCrewAudioToolbar');
+        var search = document.createElement('input');
+        search.type = 'search';
+        search.className = 'fullCrewAudioSearch';
+        search.placeholder = 'Search title, show, or track name';
+        search.value = audioState.search;
+        search.addEventListener('change', function () {
+            audioState.search = search.value.trim();
+            writeAudioHash();
+            loadAudioItems(true);
+        });
+        search.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                audioState.search = search.value.trim();
+                writeAudioHash();
+                loadAudioItems(true);
+            }
+        });
+        toolbar.appendChild(search);
+
+        var lang = document.createElement('select');
+        lang.className = 'fullCrewAudioSelect fullCrewAudioSelect--lang';
+        lang.appendChild(new Option('All languages', ''));
+        audioState.languages.forEach(function (name) {
+            lang.appendChild(new Option(name, name));
+        });
+        lang.value = audioState.language;
+        lang.addEventListener('change', function () {
+            audioState.language = lang.value;
+            writeAudioHash();
+            loadAudioItems(true);
+        });
+        toolbar.appendChild(lang);
+
+        var sort = document.createElement('select');
+        sort.className = 'fullCrewAudioSelect';
+        [['name', 'Name'], ['series', 'Show'], ['year', 'Year'], ['date', 'Premiere'], ['added', 'Date added']].forEach(function (pair) {
+            sort.appendChild(new Option(pair[1], pair[0]));
+        });
+        sort.value = audioState.sort;
+        sort.addEventListener('change', function () {
+            audioState.sort = sort.value;
+            writeAudioHash();
+            loadAudioItems(true);
+        });
+        toolbar.appendChild(sort);
+        wrap.appendChild(toolbar);
+
+        wrap.appendChild(Core.el('div', 'fullCrewAudioStatus', ''));
+        wrap.appendChild(Core.el('div', 'fullCrewAudioGrid'));
+        wrap.appendChild(Core.el('div', 'fullCrewAudioMore'));
+        page.appendChild(wrap);
+        page.setAttribute('data-loaded', '1');
+    }
+
+    function renderAudioDetailChips() {
+        if (isAudioRoute()) {
+            return;
+        }
+        var views = document.querySelectorAll('.itemDetailPage, .view:not(.hide), .mainAnimatedPage:not(.hide)');
+        Array.prototype.forEach.call(views, function (view) {
+            if (view.classList.contains('hide')) {
+                return;
+            }
+            var itemId = view.getAttribute('data-id') || view.getAttribute('data-itemid');
+            if (!itemId) {
+                try {
+                    var hash = window.location.hash || '';
+                    var q = hash.indexOf('?');
+                    if (q !== -1) {
+                        itemId = Core.parseQuery(hash.substring(q + 1)).id;
+                    }
+                } catch (e) {
+                    itemId = null;
+                }
+            }
+            if (!itemId) {
+                return;
+            }
+            var existing = view.querySelector('#' + AUDIO_CHIP_ID);
+            if (existing && existing.getAttribute('data-item-id') === itemId) {
+                return;
+            }
+            Core.getJson('FullCrew/audio/item/' + encodeURIComponent(itemId)).then(function (data) {
+                var tracks = Core.prop(data, 'Tracks', 'tracks') || [];
+                if (!tracks.length || !document.body.contains(view)) {
+                    if (existing) {
+                        existing.remove();
+                    }
+                    return;
+                }
+                var bar = existing || Core.el('div', 'fullCrewAudioChipBar');
+                bar.id = AUDIO_CHIP_ID;
+                bar.setAttribute('data-item-id', itemId);
+                bar.innerHTML = '';
+                bar.appendChild(Core.el('div', 'fullCrewAudioChipBarLabel', 'Special audio'));
+                var seen = {};
+                tracks.forEach(function (track) {
+                    var typeId = Core.prop(track, 'TypeId', 'typeId');
+                    if (!typeId || seen[typeId]) {
+                        return;
+                    }
+                    seen[typeId] = true;
+                    var chip = Core.el('a', 'fullCrewAudioChip fullCrewAudioChip--link', Core.prop(track, 'TypeName', 'typeName') || typeId);
+                    chip.href = AUDIO_HASH + '?type=' + encodeURIComponent(typeId);
+                    bar.appendChild(chip);
+                });
+                tracks.slice(0, 3).forEach(function (track) {
+                    bar.appendChild(Core.el('span', 'fullCrewAudioChipBarTrack', Core.prop(track, 'DisplayTitle', 'displayTitle') || ''));
+                });
+                if (!bar.parentNode) {
+                    var credits = view.querySelector('#fullCrewSection');
+                    if (credits && credits.parentNode) {
+                        credits.parentNode.insertBefore(bar, credits);
+                    } else {
+                        (view.querySelector('.detailSection') || view).appendChild(bar);
+                    }
+                }
+            }).catch(function () { /* chips are optional */ });
+        });
+    }
+
+    function syncAudioUi() {
+        injectAudioTab();
+        if (!isAudioRoute()) {
+            tearDownAudioPage();
+            renderAudioDetailChips();
+            return;
+        }
+
+        var parsed = parseAudioQuery();
+        audioState.typeId = parsed.type;
+        audioState.search = parsed.search;
+        audioState.language = parsed.language;
+        audioState.sort = parsed.sort;
+
+        applyRouteChrome(peekFullCrewRoute(), { pending: false, setTitle: false });
+        Core.PageTitle.claim('Audio Tracks');
+        injectAudioTab();
+
+        Core.getJson('FullCrew/audio/types').then(function (data) {
+            audioEnabled = Core.prop(data, 'Enabled', 'enabled') !== false;
+            audioState.isIndexing = !!Core.prop(data, 'IsIndexing', 'isIndexing');
+            audioState.types = Core.prop(data, 'Types', 'types') || [];
+            if (!audioEnabled) {
+                tearDownAudioPage();
+                return;
+            }
+            if (!isAudioRoute()) {
+                return;
+            }
+            paintAudioPage();
+            loadAudioItems(true);
+        }).catch(function (err) {
+            console.warn('[FullCrew] audio types failed', err);
+            paintAudioPage();
+            var status = document.querySelector('.fullCrewAudioStatus');
+            if (status) {
+                status.textContent = 'Could not load audio types.';
+            }
+        });
+    }
+
     function scanAll() {
         scan();
         syncStatsUi();
+        syncAudioUi();
         syncSceneIdentifyButton();
         if (peekFullCrewRoute()) {
             Core.PageTitle.tick();

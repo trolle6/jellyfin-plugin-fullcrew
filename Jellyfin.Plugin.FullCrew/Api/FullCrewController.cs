@@ -28,6 +28,7 @@ public class FullCrewController : ControllerBase
     private readonly LibraryStatsService _libraryStatsService;
     private readonly StudioPageService _studioPageService;
     private readonly SceneIdentifyService _sceneIdentifyService;
+    private readonly AudioTrackIndexService _audioTrackIndex;
     private readonly IUserManager _userManager;
     private readonly ILogger<FullCrewController> _logger;
 
@@ -40,6 +41,7 @@ public class FullCrewController : ControllerBase
         LibraryStatsService libraryStatsService,
         StudioPageService studioPageService,
         SceneIdentifyService sceneIdentifyService,
+        AudioTrackIndexService audioTrackIndex,
         IUserManager userManager,
         ILogger<FullCrewController> logger)
     {
@@ -48,6 +50,7 @@ public class FullCrewController : ControllerBase
         _libraryStatsService = libraryStatsService;
         _studioPageService = studioPageService;
         _sceneIdentifyService = sceneIdentifyService;
+        _audioTrackIndex = audioTrackIndex;
         _userManager = userManager;
         _logger = logger;
     }
@@ -282,6 +285,57 @@ public class FullCrewController : ControllerBase
 
         var parts = branches.Split(['|', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return parts.Length == 0 ? null : parts;
+    }
+
+    /// <summary>
+    /// Gets special audio-type buckets across the library (commentary, dubs, …).
+    /// </summary>
+    [HttpGet("audio/types")]
+    [Authorize]
+    [ProducesResponseType(typeof(AudioTypesResponse), StatusCodes.Status200OK)]
+    public ActionResult<AudioTypesResponse> GetAudioTypes()
+    {
+        return Ok(_audioTrackIndex.GetTypes(TryGetCurrentUser()));
+    }
+
+    /// <summary>
+    /// Gets items that have a given special audio type, across every show/movie.
+    /// </summary>
+    [HttpGet("audio/items")]
+    [Authorize]
+    [ProducesResponseType(typeof(AudioTypeItemsResponse), StatusCodes.Status200OK)]
+    public ActionResult<AudioTypeItemsResponse> GetAudioItems(
+        [FromQuery] string? type,
+        [FromQuery] string? search,
+        [FromQuery] string? language,
+        [FromQuery] string? sort,
+        [FromQuery] int startIndex = 0,
+        [FromQuery] int limit = 50)
+    {
+        return Ok(_audioTrackIndex.GetItems(type, search, language, sort, startIndex, limit, TryGetCurrentUser()));
+    }
+
+    /// <summary>
+    /// Gets special audio tracks on one item (for detail-page chips).
+    /// </summary>
+    [HttpGet("audio/item/{itemId:guid}")]
+    [Authorize]
+    [ProducesResponseType(typeof(ItemAudioTracksResponse), StatusCodes.Status200OK)]
+    public ActionResult<ItemAudioTracksResponse> GetItemAudioTracks([FromRoute] Guid itemId)
+    {
+        return Ok(_audioTrackIndex.GetItemTracks(itemId));
+    }
+
+    /// <summary>
+    /// Rebuilds the special-audio index from the current library.
+    /// </summary>
+    [HttpPost("audio/refresh")]
+    [Authorize]
+    [ProducesResponseType(typeof(AudioTypesResponse), StatusCodes.Status200OK)]
+    public ActionResult<AudioTypesResponse> RefreshAudioIndex()
+    {
+        _audioTrackIndex.RequestRebuild();
+        return Ok(_audioTrackIndex.GetTypes(TryGetCurrentUser()));
     }
 
     /// <summary>

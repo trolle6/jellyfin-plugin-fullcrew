@@ -26,6 +26,10 @@ public class PluginConfiguration : BasePluginConfiguration
         OpenAiApiKey = string.Empty;
         OpenAiVisionModel = "gpt-4o-mini";
         BumpersCollectionName = "Bumpers";
+        EnableAudioBrowser = true;
+        IndexMovies = true;
+        IndexEpisodes = true;
+        IndexVideos = false;
         EnabledDepartments = (string[])CrewDepartments.DefaultOrder.Clone();
     }
 
@@ -98,4 +102,24 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets the department names to display.
     /// </summary>
     public string[] EnabledDepartments { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the library-wide audio type browser is enabled.
+    /// </summary>
+    public bool EnableAudioBrowser { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether movies are included in the audio index.
+    /// </summary>
+    public bool IndexMovies { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether episodes are included in the audio index.
+    /// </summary>
+    public bool IndexEpisodes { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether standalone videos are included in the audio index.
+    /// </summary>
+    public bool IndexVideos { get; set; }
 }

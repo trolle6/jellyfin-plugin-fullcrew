@@ -62,6 +62,39 @@
                     </div>
 
                     <div class="verticalSection">
+                        <h3 class="sectionTitle">Audio type browser</h3>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="EnableAudioBrowser" />
+                                <span>Show Audio tab (commentary and other special tracks)</span>
+                            </label>
+                        </div>
+                        <div class="fieldDescription">
+                            Browse every commentary, description, dub, or labeled extra audio track
+                            across the library without picking a show first. Uses the audio stream
+                            title stored in the file.
+                        </div>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="IndexMovies" />
+                                <span>Include movies</span>
+                            </label>
+                        </div>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="IndexEpisodes" />
+                                <span>Include episodes</span>
+                            </label>
+                        </div>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="IndexVideos" />
+                                <span>Include standalone videos</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
                         <h3 class="sectionTitle">Playback characters</h3>
                         <p class="fieldDescription">
                             On Jellyfin Web playback, press <strong>Y</strong> (or the people button on the player)
@@ -222,6 +255,10 @@
                         document.querySelector('#MaxPeoplePerDepartment').value =
                             config.MaxPeoplePerDepartment != null ? config.MaxPeoplePerDepartment : 100;
                         document.querySelector('#EnableLibraryStats').checked = config.EnableLibraryStats !== false;
+                        document.querySelector('#EnableAudioBrowser').checked = config.EnableAudioBrowser !== false;
+                        document.querySelector('#IndexMovies').checked = config.IndexMovies !== false;
+                        document.querySelector('#IndexEpisodes').checked = config.IndexEpisodes !== false;
+                        document.querySelector('#IndexVideos').checked = !!config.IndexVideos;
                         document.querySelector('#LibraryStatsYearSort').value =
                             config.LibraryStatsYearSort || 'OldestFirst';
                         document.querySelector('#EnableGlassPlayButtons').checked = config.EnableGlassPlayButtons !== false;
@@ -245,6 +282,10 @@
                         config.MaxPeoplePerDepartment =
                             parseInt(document.querySelector('#MaxPeoplePerDepartment').value, 10) || 100;
                         config.EnableLibraryStats = !!document.querySelector('#EnableLibraryStats').checked;
+                        config.EnableAudioBrowser = !!document.querySelector('#EnableAudioBrowser').checked;
+                        config.IndexMovies = !!document.querySelector('#IndexMovies').checked;
+                        config.IndexEpisodes = !!document.querySelector('#IndexEpisodes').checked;
+                        config.IndexVideos = !!document.querySelector('#IndexVideos').checked;
                         config.LibraryStatsYearSort = document.querySelector('#LibraryStatsYearSort').value || 'OldestFirst';
                         config.EnableGlassPlayButtons = !!document.querySelector('#EnableGlassPlayButtons').checked;
                         config.EnableSceneIdentify = !!document.querySelector('#EnableSceneIdentify').checked;

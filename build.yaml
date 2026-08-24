@@ -1,10 +1,10 @@
 ---
 name: "Full Crew"
 guid: "a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f"
-version: "1.7.6.0"
+version: "1.8.0.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
-overview: "Full cast and crew by department, break bumpers, library stats, studio pages, and a playback character rail"
+overview: "Full cast and crew, audio-type browsing, break bumpers, library stats, studio pages, and a playback character rail"
 description: >
   Fetches complete TMDB cast and crew for movies and series, groups people by
   department, and shows them in a polished accordion on Jellyfin Web item detail
@@ -18,6 +18,7 @@ owner: "trolle6"
 artifacts:
 - "Jellyfin.Plugin.FullCrew.dll"
 changelog: >
+  1.8.0: Audio Tracks browser for commentary and other special audio across the library.
   1.7.6: Release years list every year (oldest→newest by default) with sort options; no Top-N/Other fold.
   1.7.5.2: Cast cards show two role lines max; characters before crew jobs; fix overlap.
   1.7.5: Frosted-glass play buttons on episode thumbnails (configurable).
