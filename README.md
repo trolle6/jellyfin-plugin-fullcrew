@@ -1,8 +1,8 @@
 # Full Crew
 
-**Complete TMDB cast & crew on Jellyfin Web — Library Stats, studio profiles, break bumpers, and a local scene index you grow while watching.**
+**Complete TMDB cast & crew on Jellyfin Web — Audio Tracks, Library Stats, studio profiles, break bumpers, and a local scene index you grow while watching.**
 
-[![Version](https://img.shields.io/badge/version-1.7.2.0-00a4dc)](meta.json)
+[![Version](https://img.shields.io/badge/version-1.8.0.0-00a4dc)](meta.json)
 [![Jellyfin](https://img.shields.io/badge/Jellyfin-10.11%2B-00a4dc?logo=jellyfin&logoColor=white)](https://jellyfin.org)
 [![.NET](https://img.shields.io/badge/.NET-9.0-512BD4)](Jellyfin.Plugin.FullCrew/Jellyfin.Plugin.FullCrew.csproj)
 [![Repo](https://img.shields.io/badge/github-trolle6%2Fjellyfin--plugin--fullcrew-181717?logo=github)](https://github.com/trolle6/jellyfin-plugin-fullcrew)
@@ -31,6 +31,7 @@ Screenshots are not in the repo yet. Suggested paths once you capture them:
 
 - **Full cast & crew accordion** — Cast, Directing, Writing, Production, Camera, Editing, Sound, Art, Costume & Make-Up, Visual Effects, Lighting, Crew, and Other, with roles collapsed per person (unique names, “+N more”, tooltip)
 - **Media-only injection** — mounts on Movie, Series, Season, and Episode; deliberately skipped on Person and other entity detail shells
+- **Audio Tracks** — Home header tab → `#/fullcrew/audio?type=commentary` lists every commentary (or description/dub/isolated score) across the library, without picking a show first
 - **Library Stats** — Home header tab next to Favourites → `#/fullcrew/stats` with charts, auto insights, per-category drill-downs, and bucket item lists (e.g. every title that is Stereo / HEVC)
 - **Studio pages** — `#/fullcrew/studio/...` profile layout: TMDB company metadata, library titles, studio-scoped stats, name-root clusters from Stats
 - **Break bumpers** — detail-page Bumper button; prefers a local “Bumpers” collection/folder, then curated/search YouTube when enabled
@@ -105,6 +106,8 @@ Dashboard → Plugins → **Full Crew**
 | Cache hours | `12` | In-memory credits cache (1–168) |
 | Max people per department | `100` | Cap per accordion section |
 | Enable Library Stats | on | Stats tab + `/FullCrew/stats` API |
+| Enable audio type browser | on | Audio tab + `/FullCrew/audio` API |
+| Include movies / episodes / videos | on / on / off | What the audio index scans |
 | Enable bumpers | on | Bumper button on media detail pages |
 | Allow YouTube bumpers | on | YouTube curated/search when no local bumper; also gates trailer YouTube lookup |
 | Bumpers collection name | `Bumpers` | Preferred local collection/folder for bumpers |
@@ -131,6 +134,14 @@ Open a movie, series, season, or episode in Jellyfin Web. Below the usual detail
 - Overview: `#/fullcrew/stats`
 - Detail: `#/fullcrew/stats/{category}`
 - Bucket titles: `#/fullcrew/stats/{category}/items/{bucket}` (every contributing Movie/Series)
+
+### Audio Tracks
+
+Open the **Audio** tab next to Stats, or `#/fullcrew/audio?type=commentary`.
+
+The page lists movies and episodes by extra-audio kind (commentary, audio description, dub, isolated score/effects, karaoke, other labeled titles). Ordinary “English / Stereo / AAC” dialogue tracks are ignored. Search, language, and sort are on the page. Detail pages also show chips when special audio is present.
+
+Classification uses the **audio stream title** in the file. Untitled commentary cannot be seen until the track is named and the library is scanned — then **Refresh index**.
 
 ### Studio pages
 
@@ -173,8 +184,8 @@ Client assets (`fullcrew.js` / `fullcrew.css`) are embedded; URLs are version-qu
 ### Release packaging
 
 ```bash
-git tag v1.7.0.0
-git push origin v1.7.0.0
+git tag v1.8.0.0
+git push origin v1.8.0.0
 ```
 
 ---
@@ -204,6 +215,10 @@ The Y playback rail is TMDB-only. Leave **Enable scene identify** off unless you
 | `GET` | `/FullCrew/stats` | Library stats overview |
 | `GET` | `/FullCrew/stats/{category}` | Full ranked category list |
 | `GET` | `/FullCrew/stats/{category}/items` | Titles in one bucket |
+| `GET` | `/FullCrew/audio/types` | Special-audio buckets and counts |
+| `GET` | `/FullCrew/audio/items?type=commentary` | Library-wide list for one audio type |
+| `GET` | `/FullCrew/audio/item/{itemId}` | Special tracks on one item |
+| `POST` | `/FullCrew/audio/refresh` | Rebuild the in-memory audio index |
 | `GET` | `/FullCrew/studio?name=…` | Studio page (preferred) |
 | `GET` | `/FullCrew/studio/{name}` | Studio page (path) |
 | `GET` | `/FullCrew/studio/item/{itemId}` | Studio page by Jellyfin studio id |
