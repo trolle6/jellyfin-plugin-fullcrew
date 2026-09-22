@@ -59,10 +59,24 @@ public class ScriptInjectionService : IHostedService
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        TryExtractWebAssets();
+        try
+        {
+            TryExtractWebAssets();
 
-        // Try every injection path. JS Injector registration alone is not enough when its
-        // own loader was never written into index.html (common alongside Jellyfin Enhanced).
+            // Try every injection path. JS Injector registration alone is not enough when its
+            // own loader was never written into index.html (common alongside Jellyfin Enhanced).
+            StartInjection();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Full Crew: client injection failed during startup. The server will continue.");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void StartInjection()
+    {
         var fileTransformation = TryRegisterFileTransformation();
         var jsInjector = TryRegisterJavaScriptInjector();
         var indexHtml = TryPatchIndexHtml();
@@ -95,8 +109,6 @@ public class ScriptInjectionService : IHostedService
                 + "the Full Crew script in JS Injector, or manually insert: {ScriptTag}",
                 ScriptTag);
         }
-
-        return Task.CompletedTask;
     }
 
     private void TryExtractWebAssets()

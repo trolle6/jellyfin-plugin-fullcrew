@@ -2,7 +2,7 @@
 
 **Complete TMDB cast & crew on Jellyfin Web — Audio Tracks, Library Stats, studio profiles, break bumpers, and a local scene index you grow while watching.**
 
-[![Version](https://img.shields.io/badge/version-1.8.1.0-00a4dc)](meta.json)
+[![Version](https://img.shields.io/badge/version-1.8.2.0-00a4dc)](meta.json)
 [![Jellyfin](https://img.shields.io/badge/Jellyfin-10.11%2B-00a4dc?logo=jellyfin&logoColor=white)](https://jellyfin.org)
 [![.NET](https://img.shields.io/badge/.NET-9.0-512BD4)](Jellyfin.Plugin.FullCrew/Jellyfin.Plugin.FullCrew.csproj)
 [![Repo](https://img.shields.io/badge/github-trolle6%2Fjellyfin--plugin--fullcrew-181717?logo=github)](https://github.com/trolle6/jellyfin-plugin-fullcrew)
@@ -186,8 +186,8 @@ Client assets (`fullcrew.js` / `fullcrew.css`) are embedded; URLs are version-qu
 ### Release packaging
 
 ```bash
-git tag v1.8.1.0
-git push origin v1.8.1.0
+git tag v1.8.2.0
+git push origin v1.8.2.0
 ```
 
 ---

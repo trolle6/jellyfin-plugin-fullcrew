@@ -21,9 +21,11 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<StudioPageService>();
         serviceCollection.AddSingleton<SceneIndexStore>();
         serviceCollection.AddSingleton<SceneIdentifyService>();
-        serviceCollection.AddSingleton<AudioTrackIndexService>();
-        serviceCollection.AddHostedService(sp => sp.GetRequiredService<AudioTrackIndexService>());
         serviceCollection.AddSingleton<IStartupFilter, ScriptInjectionStartupFilter>();
         serviceCollection.AddHostedService<ScriptInjectionService>();
+
+        // Audio index is optional — a failure here must not prevent the host from starting.
+        serviceCollection.AddSingleton<AudioTrackIndexService>();
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<AudioTrackIndexService>());
     }
 }

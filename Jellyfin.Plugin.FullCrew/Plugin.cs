@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using Jellyfin.Plugin.FullCrew.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
+
+[assembly: Guid("a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f")]
 
 namespace Jellyfin.Plugin.FullCrew;
 

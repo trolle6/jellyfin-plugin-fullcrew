@@ -22,7 +22,6 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 public sealed class AudioTrackIndexService : IHostedService, IDisposable
 {
     private readonly ILibraryManager _libraryManager;
-    private readonly IMediaSourceManager _mediaSourceManager;
     private readonly ILogger<AudioTrackIndexService> _logger;
     private readonly object _sync = new();
     private readonly List<IndexedTrack> _tracks = [];
@@ -36,30 +35,44 @@ public sealed class AudioTrackIndexService : IHostedService, IDisposable
     /// </summary>
     public AudioTrackIndexService(
         ILibraryManager libraryManager,
-        IMediaSourceManager mediaSourceManager,
         ILogger<AudioTrackIndexService> logger)
     {
         _libraryManager = libraryManager;
-        _mediaSourceManager = mediaSourceManager;
         _logger = logger;
     }
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _libraryManager.ItemAdded += OnItemChanged;
-        _libraryManager.ItemUpdated += OnItemChanged;
-        _libraryManager.ItemRemoved += OnItemRemoved;
-        _ = Task.Run(() => RebuildSafe(), CancellationToken.None);
+        try
+        {
+            _libraryManager.ItemAdded += OnItemChanged;
+            _libraryManager.ItemUpdated += OnItemChanged;
+            _libraryManager.ItemRemoved += OnItemRemoved;
+            _ = Task.Run(() => RebuildSafe(), CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Full Crew: audio index did not start. The server will continue without it.");
+        }
+
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        _libraryManager.ItemAdded -= OnItemChanged;
-        _libraryManager.ItemUpdated -= OnItemChanged;
-        _libraryManager.ItemRemoved -= OnItemRemoved;
+        try
+        {
+            _libraryManager.ItemAdded -= OnItemChanged;
+            _libraryManager.ItemUpdated -= OnItemChanged;
+            _libraryManager.ItemRemoved -= OnItemRemoved;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Full Crew: audio index stop ignored an error.");
+        }
+
         return Task.CompletedTask;
     }
 
@@ -406,7 +419,7 @@ public sealed class AudioTrackIndexService : IHostedService, IDisposable
         IReadOnlyList<MediaStream> streams;
         try
         {
-            streams = _mediaSourceManager.GetMediaStreams(item.Id);
+            streams = item.GetMediaStreams();
         }
         catch (Exception ex)
         {
