@@ -48,9 +48,9 @@ jobs:
           print("version", version)
           PY
           ZIP="Jellyfin.Plugin.FullCrew_10.11.0.zip"
-          (cd "$OUT/pkg" && python3 - <<'PY'
+          python3 - <<'PY'
           import zipfile
-          zip_path = "../Jellyfin.Plugin.FullCrew_10.11.0.zip"
+          zip_path = "dist/Jellyfin.Plugin.FullCrew_10.11.0.zip"
           # 0o100666: regular file, world-writable after catalog extract.
           # Read-only zip attrs are a common source of meta.json Access Denied.
           mode = 0o100666 << 16
@@ -59,7 +59,7 @@ jobs:
                   info = zipfile.ZipInfo(name)
                   info.compress_type = zipfile.ZIP_DEFLATED
                   info.external_attr = mode
-                  with open(name, "rb") as fh:
+                  with open(f"dist/pkg/{name}", "rb") as fh:
                       z.writestr(info, fh.read())
           PY
           CHECKSUM=$(md5sum "$OUT/$ZIP" | awk '{print toupper($1)}')
