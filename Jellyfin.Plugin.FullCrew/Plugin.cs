@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Runtime.InteropServices;
 using Jellyfin.Plugin.FullCrew.Configuration;
 using MediaBrowser.Common.Configuration;
@@ -26,6 +27,23 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         : base(applicationPaths, xmlSerializer)
     {
         Instance = this;
+
+        // Jellyfin 10.11 rewrites meta.json whenever Version.ToString() equals
+        // the on-disk manifest version. A permission failure on that write is
+        // fatal. Never throw here — and keep the reported version string from
+        // matching the four-part meta.json / catalog value.
+        try
+        {
+            SetAttributes(
+                AssemblyFilePath,
+                DataFolderPath,
+                PluginFolderAccess.StartupSafeVersion(typeof(Plugin).Assembly.GetName().Version));
+            PluginFolderAccess.TryEnsureWritable(Path.GetDirectoryName(AssemblyFilePath));
+        }
+        catch
+        {
+            // Constructor must stay non-throwing.
+        }
     }
 
     /// <inheritdoc />
