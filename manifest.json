@@ -8,6 +8,14 @@
     "category": "Metadata",
     "versions": [
       {
+        "changelog": "1.8.1: Episode stills hide the play badge — click the thumbnail to play.",
+        "targetAbi": "10.11.0.0",
+        "version": "1.8.1.0",
+        "sourceUrl": "https://github.com/trolle6/jellyfin-plugin-fullcrew/releases/download/v1.8.1.0/Jellyfin.Plugin.FullCrew_10.11.0.zip",
+        "checksum": "EFFD5AE58B73FB779FED18AB2FE2818B",
+        "timestamp": "2026-09-22T10:31:46Z"
+      },
+      {
         "changelog": "1.8.0: Audio Tracks browser — commentary, descriptions, dubs, and other labeled extras across the whole library.",
         "targetAbi": "10.11.0.0",
         "version": "1.8.0.0",
