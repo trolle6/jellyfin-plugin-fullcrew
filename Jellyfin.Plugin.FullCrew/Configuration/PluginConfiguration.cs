@@ -21,7 +21,7 @@ public class PluginConfiguration : BasePluginConfiguration
         EnableYouTubeBumpers = true;
         EnableLibraryStats = true;
         LibraryStatsYearSort = "OldestFirst";
-        EnableGlassPlayButtons = true;
+        EnableGlassPlayButtons = false;
         EnableSceneIdentify = false;
         OpenAiApiKey = string.Empty;
         OpenAiVisionModel = "gpt-4o-mini";
@@ -72,8 +72,9 @@ public class PluginConfiguration : BasePluginConfiguration
     public string LibraryStatsYearSort { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether episode thumbnails in series/season
-    /// lists hide the play badge and use the whole still as the play target.
+    /// Unused. Kept so existing plugin-configurations XML still deserializes.
+    /// Episode play-badge / whole-thumbnail CSS is no longer injected — Jellyfin
+    /// already plays from the still by default.
     /// </summary>
     public bool EnableGlassPlayButtons { get; set; }
 

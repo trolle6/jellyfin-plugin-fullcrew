@@ -162,17 +162,8 @@
 
                     <div class="verticalSection">
                         <h3 class="sectionTitle">Web UI injection</h3>
-                        <div class="checkboxContainer">
-                            <label>
-                                <input is="emby-checkbox" type="checkbox" id="EnableGlassPlayButtons" />
-                                <span>Hide episode play badges — click the thumbnail to play</span>
-                            </label>
-                        </div>
-                        <div class="fieldDescription">
-                            Removes the play circle from episode stills in series/season lists.
-                            The whole thumbnail plays the episode; the image is left clear.
-                            Movie/show cards and other play buttons are unchanged.
-                        </div>
+                        <!-- Episode play-badge / whole-thumbnail override is ignored.
+                             Jellyfin already plays from the still; we no longer inject that CSS. -->
                         <p class="fieldDescription">
                             The plugin injects a script into Jellyfin Web. Prefer installing the
                             <strong>File Transformation</strong> plugin for Docker-safe injection.
@@ -262,7 +253,6 @@
                         document.querySelector('#IndexVideos').checked = !!config.IndexVideos;
                         document.querySelector('#LibraryStatsYearSort').value =
                             config.LibraryStatsYearSort || 'OldestFirst';
-                        document.querySelector('#EnableGlassPlayButtons').checked = config.EnableGlassPlayButtons !== false;
                         document.querySelector('#EnableSceneIdentify').checked = !!config.EnableSceneIdentify;
                         document.querySelector('#OpenAiApiKey').value = config.OpenAiApiKey || '';
                         document.querySelector('#OpenAiVisionModel').value = config.OpenAiVisionModel || 'gpt-4o-mini';
@@ -288,7 +278,7 @@
                         config.IndexEpisodes = !!document.querySelector('#IndexEpisodes').checked;
                         config.IndexVideos = !!document.querySelector('#IndexVideos').checked;
                         config.LibraryStatsYearSort = document.querySelector('#LibraryStatsYearSort').value || 'OldestFirst';
-                        config.EnableGlassPlayButtons = !!document.querySelector('#EnableGlassPlayButtons').checked;
+                        config.EnableGlassPlayButtons = false;
                         config.EnableSceneIdentify = !!document.querySelector('#EnableSceneIdentify').checked;
                         config.OpenAiApiKey = document.querySelector('#OpenAiApiKey').value;
                         config.OpenAiVisionModel = document.querySelector('#OpenAiVisionModel').value || 'gpt-4o-mini';
