@@ -10,7 +10,6 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using User = Jellyfin.Database.Implementations.Entities.User;
 
@@ -19,7 +18,7 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 /// <summary>
 /// Builds and serves an in-memory index of special audio tracks across the library.
 /// </summary>
-public sealed class AudioTrackIndexService : IHostedService, IDisposable
+public sealed class AudioTrackIndexService : IDisposable
 {
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger<AudioTrackIndexService> _logger;
@@ -28,6 +27,7 @@ public sealed class AudioTrackIndexService : IHostedService, IDisposable
 
     private DateTime? _indexedAt;
     private bool _isIndexing;
+    private bool _started;
     private bool _disposed;
 
     /// <summary>
@@ -41,9 +41,22 @@ public sealed class AudioTrackIndexService : IHostedService, IDisposable
         _logger = logger;
     }
 
-    /// <inheritdoc />
-    public Task StartAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Hooks library events and builds the index. Safe to call more than once.
+    /// Must not run during Jellyfin host start.
+    /// </summary>
+    public void EnsureStarted()
     {
+        lock (_sync)
+        {
+            if (_started || _disposed)
+            {
+                return;
+            }
+
+            _started = true;
+        }
+
         try
         {
             _libraryManager.ItemAdded += OnItemChanged;
@@ -55,25 +68,6 @@ public sealed class AudioTrackIndexService : IHostedService, IDisposable
         {
             _logger.LogWarning(ex, "Full Crew: audio index did not start. The server will continue without it.");
         }
-
-        return Task.CompletedTask;
-    }
-
-    /// <inheritdoc />
-    public Task StopAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            _libraryManager.ItemAdded -= OnItemChanged;
-            _libraryManager.ItemUpdated -= OnItemChanged;
-            _libraryManager.ItemRemoved -= OnItemRemoved;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Full Crew: audio index stop ignored an error.");
-        }
-
-        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
@@ -95,6 +89,7 @@ public sealed class AudioTrackIndexService : IHostedService, IDisposable
     /// </summary>
     public void RequestRebuild()
     {
+        EnsureStarted();
         _ = Task.Run(() => RebuildSafe(), CancellationToken.None);
     }
 
@@ -105,6 +100,7 @@ public sealed class AudioTrackIndexService : IHostedService, IDisposable
     /// <returns>Type overview.</returns>
     public AudioTypesResponse GetTypes(User? user)
     {
+        EnsureStarted();
         var config = Plugin.Instance?.Configuration;
         if (config?.EnableAudioBrowser == false)
         {
@@ -175,6 +171,7 @@ public sealed class AudioTrackIndexService : IHostedService, IDisposable
         int limit,
         User? user)
     {
+        EnsureStarted();
         var kind = AudioTrackKind.Find(typeId);
         var typeName = kind?.Name ?? "All special audio";
         var resolvedTypeId = kind?.Id ?? "all";
@@ -257,6 +254,7 @@ public sealed class AudioTrackIndexService : IHostedService, IDisposable
     /// <returns>Classified tracks, or empty when the item is missing.</returns>
     public ItemAudioTracksResponse GetItemTracks(Guid itemId)
     {
+        EnsureStarted();
         var item = _libraryManager.GetItemById(itemId);
         if (item is null)
         {

@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.FullCrew.Services;
@@ -32,6 +33,15 @@ public sealed class IndexHtmlInjectionMiddleware
     /// </summary>
     public async Task InvokeAsync(HttpContext context)
     {
+        try
+        {
+            context.RequestServices.GetService<ScriptInjectionService>()?.EnsureStarted();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Full Crew: deferred injection start failed.");
+        }
+
         if (!ShouldIntercept(context.Request))
         {
             await _next(context).ConfigureAwait(false);
