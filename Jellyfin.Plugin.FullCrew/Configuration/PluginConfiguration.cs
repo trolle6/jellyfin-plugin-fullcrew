@@ -26,6 +26,10 @@ public class PluginConfiguration : BasePluginConfiguration
         OpenAiApiKey = string.Empty;
         OpenAiVisionModel = "gpt-4o-mini";
         BumpersCollectionName = "Bumpers";
+        EnableAudioBrowser = true;
+        IndexMovies = true;
+        IndexEpisodes = true;
+        IndexVideos = false;
         EnabledDepartments = (string[])CrewDepartments.DefaultOrder.Clone();
     }
 
@@ -68,8 +72,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public string LibraryStatsYearSort { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether episode rows in series/season lists
-    /// use a frosted-glass play button instead of solid theme green on Jellyfin Web.
+    /// Gets or sets a value indicating whether episode thumbnails in series/season
+    /// lists hide the play badge and use the whole still as the play target.
     /// </summary>
     public bool EnableGlassPlayButtons { get; set; }
 
@@ -98,4 +102,24 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets the department names to display.
     /// </summary>
     public string[] EnabledDepartments { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the library-wide audio type browser is enabled.
+    /// </summary>
+    public bool EnableAudioBrowser { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether movies are included in the audio index.
+    /// </summary>
+    public bool IndexMovies { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether episodes are included in the audio index.
+    /// </summary>
+    public bool IndexEpisodes { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether standalone videos are included in the audio index.
+    /// </summary>
+    public bool IndexVideos { get; set; }
 }

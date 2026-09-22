@@ -8,6 +8,7 @@ namespace Jellyfin.Plugin.FullCrew;
 
 /// <summary>
 /// Registers plugin services with the DI container.
+/// Do not register IHostedService here — a failing hosted service aborts Jellyfin startup.
 /// </summary>
 public class PluginServiceRegistrator : IPluginServiceRegistrator
 {
@@ -21,7 +22,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<StudioPageService>();
         serviceCollection.AddSingleton<SceneIndexStore>();
         serviceCollection.AddSingleton<SceneIdentifyService>();
+        serviceCollection.AddSingleton<ScriptInjectionService>();
+        serviceCollection.AddSingleton<AudioTrackIndexService>();
         serviceCollection.AddSingleton<IStartupFilter, ScriptInjectionStartupFilter>();
-        serviceCollection.AddHostedService<ScriptInjectionService>();
     }
 }

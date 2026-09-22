@@ -14,7 +14,15 @@ public sealed class ScriptInjectionStartupFilter : IStartupFilter
     {
         return app =>
         {
-            app.UseMiddleware<IndexHtmlInjectionMiddleware>();
+            try
+            {
+                app.UseMiddleware<IndexHtmlInjectionMiddleware>();
+            }
+            catch
+            {
+                // Never block Jellyfin from starting if request-time injection cannot be wired.
+            }
+
             next(app);
         };
     }

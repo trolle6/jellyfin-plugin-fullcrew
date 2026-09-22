@@ -8,7 +8,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Controller;
 using MediaBrowser.Model.IO;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.FullCrew.Services;
@@ -16,7 +15,7 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 /// <summary>
 /// Injects the Full Crew client script into Jellyfin Web.
 /// </summary>
-public class ScriptInjectionService : IHostedService
+public class ScriptInjectionService
 {
     /// <summary>Version query used on client asset URLs for cache busting after upgrades.</summary>
     internal static string AssetVersion => PluginInfo.Version;
@@ -57,12 +56,36 @@ public class ScriptInjectionService : IHostedService
     }
 
     /// <inheritdoc />
-    public Task StartAsync(CancellationToken cancellationToken)
-    {
-        TryExtractWebAssets();
+    private bool _started;
 
-        // Try every injection path. JS Injector registration alone is not enough when its
-        // own loader was never written into index.html (common alongside Jellyfin Enhanced).
+    /// <summary>
+    /// Extracts assets and registers injection. Safe to call more than once.
+    /// Must not run during Jellyfin host start.
+    /// </summary>
+    public void EnsureStarted()
+    {
+        if (_started)
+        {
+            return;
+        }
+
+        _started = true;
+        try
+        {
+            TryExtractWebAssets();
+
+            // Try every injection path. JS Injector registration alone is not enough when its
+            // own loader was never written into index.html (common alongside Jellyfin Enhanced).
+            StartInjection();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Full Crew: client injection failed. The server will continue.");
+        }
+    }
+
+    private void StartInjection()
+    {
         var fileTransformation = TryRegisterFileTransformation();
         var jsInjector = TryRegisterJavaScriptInjector();
         var indexHtml = TryPatchIndexHtml();
@@ -95,8 +118,6 @@ public class ScriptInjectionService : IHostedService
                 + "the Full Crew script in JS Injector, or manually insert: {ScriptTag}",
                 ScriptTag);
         }
-
-        return Task.CompletedTask;
     }
 
     private void TryExtractWebAssets()
@@ -135,11 +156,12 @@ public class ScriptInjectionService : IHostedService
         }
     }
 
-    /// <inheritdoc />
-    public Task StopAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Best-effort unregister when the plugin is torn down.
+    /// </summary>
+    public void Stop()
     {
         TryUnregisterJavaScriptInjector();
-        return Task.CompletedTask;
     }
 
     private bool TryRegisterJavaScriptInjector()
