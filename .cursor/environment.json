@@ -1,0 +1,4 @@
+{
+  "name": "Jellyfin Full Crew Plugin",
+  "install": "bash .cursor/install.sh"
+}
