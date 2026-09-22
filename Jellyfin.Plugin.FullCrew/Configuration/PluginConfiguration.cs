@@ -72,8 +72,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public string LibraryStatsYearSort { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether episode rows in series/season lists
-    /// use a frosted-glass play button instead of solid theme green on Jellyfin Web.
+    /// Gets or sets a value indicating whether episode thumbnails in series/season
+    /// lists hide the play badge and use the whole still as the play target.
     /// </summary>
     public bool EnableGlassPlayButtons { get; set; }
 

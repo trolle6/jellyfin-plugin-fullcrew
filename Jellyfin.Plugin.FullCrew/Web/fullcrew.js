@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.8.0.0';
+    var PLUGIN_VERSION = '1.8.1.0';
     var ROLE_PREVIEW_MAX = 2;
     var CREW_JOB_TITLES = {
         'creator': 1,
@@ -60,35 +60,59 @@
 
     function glassPlayCssText() {
         var root = 'html.' + GLASS_PLAY_CLASS + ' body .listItem[data-type="Episode"]';
+        var image = root + ' .listItemImage,' + root + ' .listItemImageContainer,' + root + ' .listItem-image';
         var btn = root + ' button.listItemImageButton,' + root + ' .listItemImageButton';
-        var icon = root + ' .listItemImageButton-icon';
-        var hover = root + ' button.listItemImageButton:hover,' + root + ' .listItemImageButton:hover';
+        var icon = root + ' .listItemImageButton-icon,' + root + ' .listItemImageButton .material-icons';
+        var hover = btn + ':hover,' + btn + ':focus,' + btn + ':active';
         return (
             root + '{' +
-            '--btnMiniPlayColor:rgba(255,255,255,0.22)!important;' +
-            '--btnMiniPlayBorderColor:rgba(255,255,255,0.36)!important}' +
+            '--btnMiniPlayColor:transparent!important;' +
+            '--btnMiniPlayBorderColor:transparent!important}' +
+            image + '{' +
+            'position:relative!important;' +
+            'overflow:hidden!important;' +
+            'cursor:pointer!important}' +
             btn + '{' +
-            'background:rgba(255,255,255,0.22)!important;' +
-            'background-color:rgba(255,255,255,0.22)!important;' +
-            'backdrop-filter:blur(14px) saturate(175%)!important;' +
-            '-webkit-backdrop-filter:blur(14px) saturate(175%)!important;' +
-            'border:1px solid rgba(255,255,255,0.36)!important;' +
-            'border-radius:50%!important;' +
-            'box-shadow:0 2px 10px rgba(0,0,0,0.22)!important;' +
-            'color:rgba(255,255,255,0.94)!important;' +
-            'font-size:1.35em!important}' +
-            icon + '{' +
+            'position:absolute!important;' +
+            'inset:0!important;' +
+            'top:0!important;right:0!important;bottom:0!important;left:0!important;' +
+            'width:100%!important;' +
+            'height:100%!important;' +
+            'min-width:0!important;' +
+            'min-height:0!important;' +
+            'max-width:none!important;' +
+            'max-height:none!important;' +
+            'margin:0!important;' +
+            'padding:0!important;' +
             'background:transparent!important;' +
             'background-color:transparent!important;' +
-            'color:rgba(255,255,255,0.94)!important;' +
-            'padding:0.12em!important}' +
+            'backdrop-filter:none!important;' +
+            '-webkit-backdrop-filter:none!important;' +
+            'border:0!important;' +
+            'border-radius:inherit!important;' +
+            'box-shadow:none!important;' +
+            'color:transparent!important;' +
+            'font-size:0!important;' +
+            'line-height:0!important;' +
+            'opacity:1!important;' +
+            'transform:none!important;' +
+            'cursor:pointer!important;' +
+            'z-index:2!important}' +
+            btn + '::before,' + btn + '::after{' +
+            'content:none!important;' +
+            'display:none!important}' +
+            icon + '{' +
+            'display:none!important;' +
+            'opacity:0!important;' +
+            'visibility:hidden!important}' +
             hover + '{' +
-            'background:rgba(255,255,255,0.32)!important;' +
-            'background-color:rgba(255,255,255,0.32)!important;' +
-            'border-color:rgba(255,255,255,0.5)!important;' +
-            'box-shadow:0 3px 14px rgba(0,0,0,0.28)!important;' +
-            'color:#fff!important;' +
-            'transform:scale(1.08,1.08)!important}'
+            'background:transparent!important;' +
+            'background-color:transparent!important;' +
+            'box-shadow:none!important;' +
+            'transform:none!important}' +
+            btn + ':focus-visible{' +
+            'outline:2px solid var(--primary-color,#00a4dc)!important;' +
+            'outline-offset:-2px!important}'
         );
     }
 

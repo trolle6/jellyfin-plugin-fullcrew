@@ -2,7 +2,7 @@
 
 **Complete TMDB cast & crew on Jellyfin Web — Audio Tracks, Library Stats, studio profiles, break bumpers, and a local scene index you grow while watching.**
 
-[![Version](https://img.shields.io/badge/version-1.8.0.0-00a4dc)](meta.json)
+[![Version](https://img.shields.io/badge/version-1.8.1.0-00a4dc)](meta.json)
 [![Jellyfin](https://img.shields.io/badge/Jellyfin-10.11%2B-00a4dc?logo=jellyfin&logoColor=white)](https://jellyfin.org)
 [![.NET](https://img.shields.io/badge/.NET-9.0-512BD4)](Jellyfin.Plugin.FullCrew/Jellyfin.Plugin.FullCrew.csproj)
 [![Repo](https://img.shields.io/badge/github-trolle6%2Fjellyfin--plugin--fullcrew-181717?logo=github)](https://github.com/trolle6/jellyfin-plugin-fullcrew)
@@ -38,6 +38,7 @@ Screenshots are not in the repo yet. Suggested paths once you capture them:
 - **Trailer companion** — adds a Trailer button when Jellyfin’s native trailer control is missing
 - **Playback character rail** — press **Y** (or the OSD people button) for a side panel of billed characters: character name, actor name, and a still from this title when TMDB has a tagged photo. Full crew stays on the title page.
 - **Self-hosted injection** — File Transformation / JavaScript Injector / `index.html` patch, plus **early-boot** so `#/fullcrew/*` routes do not flash “page not found”
+- **Episode thumbnail play** — series/season lists hide the play circle; the still is the play target
 - **Configurable** — optional TMDB key, cache TTL, department toggles, bumper/YouTube/stats switches
 
 Credits are fetched on demand and **not** written into Jellyfin’s people library.
@@ -105,6 +106,7 @@ Dashboard → Plugins → **Full Crew**
 | OpenAI vision model | `gpt-4o-mini` | Vision-capable chat model |
 | Cache hours | `12` | In-memory credits cache (1–168) |
 | Max people per department | `100` | Cap per accordion section |
+| Hide episode play badges | on | Episode stills stay clear; click the thumbnail to play |
 | Enable Library Stats | on | Stats tab + `/FullCrew/stats` API |
 | Enable audio type browser | on | Audio tab + `/FullCrew/audio` API |
 | Include movies / episodes / videos | on / on / off | What the audio index scans |
@@ -184,8 +186,8 @@ Client assets (`fullcrew.js` / `fullcrew.css`) are embedded; URLs are version-qu
 ### Release packaging
 
 ```bash
-git tag v1.8.0.0
-git push origin v1.8.0.0
+git tag v1.8.1.0
+git push origin v1.8.1.0
 ```
 
 ---
