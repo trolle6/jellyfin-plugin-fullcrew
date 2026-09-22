@@ -8,6 +8,14 @@
     "category": "Metadata",
     "versions": [
       {
+        "changelog": "1.8.4: Survive a non-writable meta.json so Jellyfin 10.11 does not abort boot when SMB-copied plugin folders cannot be rewritten.",
+        "targetAbi": "10.11.0.0",
+        "version": "1.8.4.0",
+        "sourceUrl": "https://github.com/trolle6/jellyfin-plugin-fullcrew/releases/download/v1.8.4.0/Jellyfin.Plugin.FullCrew_10.11.0.zip",
+        "checksum": "7B7AE713849861F0B6B096AC7671F41B",
+        "timestamp": "2026-09-22T17:33:00Z"
+      },
+      {
         "changelog": "1.8.3: Do not register hosted services — Full Crew must not abort Jellyfin startup.",
         "targetAbi": "10.11.0.0",
         "version": "1.8.3.0",

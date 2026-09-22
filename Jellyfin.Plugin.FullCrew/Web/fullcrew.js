@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.8.3.0';
+    var PLUGIN_VERSION = '1.8.4.0';
     var ROLE_PREVIEW_MAX = 2;
     var CREW_JOB_TITLES = {
         'creator': 1,
