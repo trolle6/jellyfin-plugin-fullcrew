@@ -9,12 +9,12 @@ public class PluginFolderAccessTests
     [Fact]
     public void StartupSafeVersion_IsThreePart_AndDoesNotEqualFourPartAssemblyString()
     {
-        var assembly = new Version(1, 8, 4, 0);
+        var assembly = new Version(1, 8, 5, 0);
         var safe = PluginFolderAccess.StartupSafeVersion(assembly);
 
-        Assert.Equal("1.8.4", safe.ToString());
+        Assert.Equal("1.8.5", safe.ToString());
         Assert.NotEqual(assembly.ToString(), safe.ToString());
-        Assert.NotEqual("1.8.4.0", safe.ToString());
+        Assert.NotEqual("1.8.5.0", safe.ToString());
     }
 
     [Theory]
@@ -31,7 +31,7 @@ public class PluginFolderAccessTests
     [Fact]
     public void StartupSafeVersion_NullFallsBackToThreePart()
     {
-        Assert.Equal("1.8.4", PluginFolderAccess.StartupSafeVersion(null).ToString());
+        Assert.Equal("1.8.5", PluginFolderAccess.StartupSafeVersion(null).ToString());
     }
 
     [Fact]

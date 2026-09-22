@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.8.4.0';
+    var PLUGIN_VERSION = '1.8.5.0';
     var ROLE_PREVIEW_MAX = 2;
     var CREW_JOB_TITLES = {
         'creator': 1,
@@ -55,108 +55,35 @@
     var ROUTE_PENDING_CLASS = 'fullCrewRoutePending';
     var STATS_BODY_CLASS = 'fullCrewStatsActive';
     var STUDIO_BODY_CLASS = 'fullCrewStudioActive';
+    /* ------------------------------------------------------------------ */
+    /* Episode play-badge / "whole thumbnail plays" override — IGNORED.   */
+    /* Jellyfin already plays from the still by default. Do not hide the  */
+    /* play circle or stretch the overlay. Strip leftovers from 1.7–1.8.4 */
+    /* so a hard-refresh restores stock episode cards.                    */
+    /*                                                                    */
+    /* var GLASS_PLAY_CLASS = 'fullCrewGlassPlay';                        */
+    /* function glassPlayCssText() { ... hide .listItemImageButton ... }  */
+    /* function applyGlassPlayChrome(enabled) { inject CSS + class }      */
+    /* applyGlassPlayChrome(true);                                        */
+    /* ------------------------------------------------------------------ */
     var GLASS_PLAY_CLASS = 'fullCrewGlassPlay';
     var GLASS_PLAY_STYLE_ID = 'fullCrewGlassPlayStyles';
 
-    function glassPlayCssText() {
-        var root = 'html.' + GLASS_PLAY_CLASS + ' body .listItem[data-type="Episode"]';
-        var image = root + ' .listItemImage,' + root + ' .listItemImageContainer,' + root + ' .listItem-image';
-        var btn = root + ' button.listItemImageButton,' + root + ' .listItemImageButton';
-        var icon = root + ' .listItemImageButton-icon,' + root + ' .listItemImageButton .material-icons';
-        var hover = btn + ':hover,' + btn + ':focus,' + btn + ':active';
-        return (
-            root + '{' +
-            '--btnMiniPlayColor:transparent!important;' +
-            '--btnMiniPlayBorderColor:transparent!important}' +
-            image + '{' +
-            'position:relative!important;' +
-            'overflow:hidden!important;' +
-            'cursor:pointer!important}' +
-            btn + '{' +
-            'position:absolute!important;' +
-            'inset:0!important;' +
-            'top:0!important;right:0!important;bottom:0!important;left:0!important;' +
-            'width:100%!important;' +
-            'height:100%!important;' +
-            'min-width:0!important;' +
-            'min-height:0!important;' +
-            'max-width:none!important;' +
-            'max-height:none!important;' +
-            'margin:0!important;' +
-            'padding:0!important;' +
-            'background:transparent!important;' +
-            'background-color:transparent!important;' +
-            'backdrop-filter:none!important;' +
-            '-webkit-backdrop-filter:none!important;' +
-            'border:0!important;' +
-            'border-radius:inherit!important;' +
-            'box-shadow:none!important;' +
-            'color:transparent!important;' +
-            'font-size:0!important;' +
-            'line-height:0!important;' +
-            'opacity:1!important;' +
-            'transform:none!important;' +
-            'cursor:pointer!important;' +
-            'z-index:2!important}' +
-            btn + '::before,' + btn + '::after{' +
-            'content:none!important;' +
-            'display:none!important}' +
-            icon + '{' +
-            'display:none!important;' +
-            'opacity:0!important;' +
-            'visibility:hidden!important}' +
-            hover + '{' +
-            'background:transparent!important;' +
-            'background-color:transparent!important;' +
-            'box-shadow:none!important;' +
-            'transform:none!important}' +
-            btn + ':focus-visible{' +
-            'outline:2px solid var(--primary-color,#00a4dc)!important;' +
-            'outline-offset:-2px!important}'
-        );
-    }
-
-    function ensureGlassPlayStyles(enabled) {
-        var existing = document.getElementById(GLASS_PLAY_STYLE_ID);
-        if (enabled === false) {
-            if (existing) {
-                existing.parentNode.removeChild(existing);
-            }
-            return;
-        }
-
-        var style = existing;
-        if (!style) {
-            style = document.createElement('style');
-            style.id = GLASS_PLAY_STYLE_ID;
-        }
-        style.textContent = glassPlayCssText();
-
-        var parent = document.head || document.documentElement;
-        if (parent) {
-            parent.appendChild(style);
-        }
-    }
-
-    function applyGlassPlayChrome(enabled) {
+    function stripLeftoverGlassPlayChrome() {
         var root = document.documentElement;
-        var on = enabled !== false;
-        if (on) {
-            root.classList.add(GLASS_PLAY_CLASS);
-            if (document.body) {
-                document.body.classList.add(GLASS_PLAY_CLASS);
-            }
-            ensureGlassPlayStyles(true);
-        } else {
+        if (root) {
             root.classList.remove(GLASS_PLAY_CLASS);
-            if (document.body) {
-                document.body.classList.remove(GLASS_PLAY_CLASS);
-            }
-            ensureGlassPlayStyles(false);
+        }
+        if (document.body) {
+            document.body.classList.remove(GLASS_PLAY_CLASS);
+        }
+        var existing = document.getElementById(GLASS_PLAY_STYLE_ID);
+        if (existing && existing.parentNode) {
+            existing.parentNode.removeChild(existing);
         }
     }
 
-    applyGlassPlayChrome(true);
+    stripLeftoverGlassPlayChrome();
 
     /**
      * Parse hash ASAP (no DOM required). Used by early chrome + routers.
@@ -2920,10 +2847,9 @@
     }
 
     function refreshGlassPlayEnabled() {
-        return fetchPluginConfig().then(function (config) {
-            var flag = config ? prop(config, 'EnableGlassPlayButtons', 'enableGlassPlayButtons') : undefined;
-            applyGlassPlayChrome(flag !== false);
-        });
+        // Feature ignored: do not read EnableGlassPlayButtons or inject CSS.
+        stripLeftoverGlassPlayChrome();
+        return Promise.resolve(false);
     }
 
     function refreshStatsEnabled() {
@@ -5771,22 +5697,9 @@
             scanAll();
         });
         syncYearSortFromConfig();
-        refreshGlassPlayEnabled().then(function () {
-            ensureGlassPlayStyles(document.documentElement.classList.contains(GLASS_PLAY_CLASS));
-        });
-        window.setTimeout(function () {
-            if (document.documentElement.classList.contains(GLASS_PLAY_CLASS)) {
-                ensureGlassPlayStyles(true);
-            }
-        }, 1500);
+        refreshGlassPlayEnabled();
         initSceneIdentify();
         scanAll();
-
-        document.addEventListener('viewshow', function () {
-            if (document.documentElement.classList.contains(GLASS_PLAY_CLASS)) {
-                ensureGlassPlayStyles(true);
-            }
-        }, true);
 
         var observer = new MutationObserver(function (mutations) {
             if (mutationTouchesFullCrewOnly(mutations)) {

@@ -2,7 +2,7 @@
 
 **Complete TMDB cast & crew on Jellyfin Web — Audio Tracks, Library Stats, studio profiles, break bumpers, and a local scene index you grow while watching.**
 
-[![Version](https://img.shields.io/badge/version-1.8.4.0-00a4dc)](meta.json)
+[![Version](https://img.shields.io/badge/version-1.8.5.0-00a4dc)](meta.json)
 [![Jellyfin](https://img.shields.io/badge/Jellyfin-10.11%2B-00a4dc?logo=jellyfin&logoColor=white)](https://jellyfin.org)
 [![.NET](https://img.shields.io/badge/.NET-9.0-512BD4)](Jellyfin.Plugin.FullCrew/Jellyfin.Plugin.FullCrew.csproj)
 [![Repo](https://img.shields.io/badge/github-trolle6%2Fjellyfin--plugin--fullcrew-181717?logo=github)](https://github.com/trolle6/jellyfin-plugin-fullcrew)
@@ -38,7 +38,6 @@ Screenshots are not in the repo yet. Suggested paths once you capture them:
 - **Trailer companion** — adds a Trailer button when Jellyfin’s native trailer control is missing
 - **Playback character rail** — press **Y** (or the OSD people button) for a side panel of billed characters: character name, actor name, and a still from this title when TMDB has a tagged photo. Full crew stays on the title page.
 - **Self-hosted injection** — File Transformation / JavaScript Injector / `index.html` patch, plus **early-boot** so `#/fullcrew/*` routes do not flash “page not found”
-- **Episode thumbnail play** — series/season lists hide the play circle; the still is the play target
 - **Configurable** — optional TMDB key, cache TTL, department toggles, bumper/YouTube/stats switches
 
 Credits are fetched on demand and **not** written into Jellyfin’s people library.
@@ -89,11 +88,11 @@ Or before `</body>` in `index.html`:
 ### Manual
 
 1. Build (see [Building from source](#building-from-source)).
-2. Copy `Jellyfin.Plugin.FullCrew.dll` and `meta.json` into a **single** plugin folder, e.g. `plugins/Jellyfin.Plugin.FullCrew_1.8.4.0/`. Remove any older `Jellyfin.Plugin.FullCrew_*` / `Full Crew_*` folders first — Jellyfin 10.11 will try to load every copy.
+2. Copy `Jellyfin.Plugin.FullCrew.dll` and `meta.json` into a **single** plugin folder, e.g. `plugins/Jellyfin.Plugin.FullCrew_1.8.5.0/`. Remove any older `Jellyfin.Plugin.FullCrew_*` / `Full Crew_*` folders first — Jellyfin 10.11 will try to load every copy.
 3. The Jellyfin process must be able to **write** that folder (`chown` to the container `PUID`, or `chmod 666 meta.json`). SMB copies as another user are the usual cause of `Access to the path '.../meta.json' is denied`.
 4. **Stop → Start** Jellyfin, then hard-refresh the web client.
 
-1.8.4 still starts if `meta.json` is not writable. 1.8.1–1.8.3 do not — they take the whole server down. Replace those DLLs; do not leave `Jellyfin.Plugin.FullCrew_10.11.0` with 1.8.1 on disk.
+1.8.4+ still starts if `meta.json` is not writable. 1.8.1–1.8.3 do not — they take the whole server down. Replace those DLLs; do not leave `Jellyfin.Plugin.FullCrew_10.11.0` with 1.8.1 on disk.
 
 ---
 
@@ -109,7 +108,6 @@ Dashboard → Plugins → **Full Crew**
 | OpenAI vision model | `gpt-4o-mini` | Vision-capable chat model |
 | Cache hours | `12` | In-memory credits cache (1–168) |
 | Max people per department | `100` | Cap per accordion section |
-| Hide episode play badges | on | Episode stills stay clear; click the thumbnail to play |
 | Enable Library Stats | on | Stats tab + `/FullCrew/stats` API |
 | Enable audio type browser | on | Audio tab + `/FullCrew/audio` API |
 | Include movies / episodes / videos | on / on / off | What the audio index scans |
@@ -189,8 +187,8 @@ Client assets (`fullcrew.js` / `fullcrew.css`) are embedded; URLs are version-qu
 ### Release packaging
 
 ```bash
-git tag v1.8.4.0
-git push origin v1.8.4.0
+git tag v1.8.5.0
+git push origin v1.8.5.0
 ```
 
 ---
