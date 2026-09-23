@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.8.5.0';
+    var PLUGIN_VERSION = '1.8.9.0';
     var ROLE_PREVIEW_MAX = 2;
     var CREW_JOB_TITLES = {
         'creator': 1,
@@ -101,7 +101,8 @@
             return { kind: 'stats', title: 'Stats', bodyClass: STATS_BODY_CLASS };
         }
         if (raw === '#/fullcrew/audio' || raw.indexOf('#/fullcrew/audio/') === 0) {
-            return { kind: 'audio', title: 'Audio Tracks', bodyClass: STATS_BODY_CLASS };
+            // Legacy hash — treat as Stats until redirectLegacyAudioHash() rewrites it.
+            return { kind: 'stats', title: 'Stats', bodyClass: STATS_BODY_CLASS };
         }
         if (raw.indexOf('#/fullcrew/studio/') === 0) {
             var enc = raw.slice('#/fullcrew/studio/'.length);
@@ -121,8 +122,13 @@
      */
     var TitleLock = (function () {
         var existing = window.__fullCrewTitleLock;
-        if (existing && existing.__fullCrewTitleLockV2) {
+        if (existing && existing.__fullCrewTitleLockV3) {
             return existing;
+        }
+        if (existing && typeof existing.release === 'function') {
+            try {
+                existing.release();
+            } catch (e) { /* replace older lock */ }
         }
 
         var desired = (existing && typeof existing.desired === 'function')
@@ -131,7 +137,6 @@
         var hooked = !!(window.__fcTitleHooked || (existing && existing.isHooked && existing.isHooked()));
         var nativeGet = window.__fcTitleNativeGet || null;
         var nativeSet = window.__fcTitleNativeSet || null;
-        var rafId = 0;
 
         function resolveNative() {
             if (typeof nativeGet === 'function' && typeof nativeSet === 'function') {
@@ -181,10 +186,13 @@
                         if (desired != null && peekFullCrewRoute()) {
                             var next = value == null ? '' : String(value);
                             if (next !== desired) {
-                                // Swallow Jellyfin "Page not found" (and any other overwrite).
-                                writeNative(desired);
+                                // Swallow without writing when the tab already shows our label.
+                                if (currentTitle() !== desired) {
+                                    writeNative(desired);
+                                }
                                 return;
                             }
+                            return;
                         }
                         writeNative(value);
                     }
@@ -197,62 +205,39 @@
             }
         }
 
-        function stopRaf() {
-            if (rafId) {
-                try {
-                    window.cancelAnimationFrame(rafId);
-                } catch (e) { /* ignore */ }
-                rafId = 0;
+        function currentTitle() {
+            try {
+                return resolveNative() ? nativeGet.call(document) : (document.title || '');
+            } catch (e) {
+                return document.title || '';
             }
-        }
-
-        function startRaf() {
-            if (rafId || typeof window.requestAnimationFrame !== 'function') {
-                return;
-            }
-            function tick() {
-                rafId = 0;
-                if (desired == null) {
-                    return;
-                }
-                if (!peekFullCrewRoute()) {
-                    // Route left without release — drop lock so Home can own the title.
-                    desired = null;
-                    window.__fcTitleDesired = null;
-                    return;
-                }
-                try {
-                    var cur = resolveNative() ? nativeGet.call(document) : (document.title || '');
-                    if (cur !== desired) {
-                        writeNative(desired);
-                    }
-                } catch (e) { /* ignore */ }
-                rafId = window.requestAnimationFrame(tick);
-            }
-            rafId = window.requestAnimationFrame(tick);
         }
 
         function hold(title) {
-            desired = title || 'Full Crew';
+            var next = title || 'Full Crew';
+            if (desired === next && currentTitle() === next) {
+                ensureHook();
+                return;
+            }
+            desired = next;
             window.__fcTitleDesired = desired;
             ensureHook();
             writeNative(desired);
-            startRaf();
         }
 
         function release() {
             desired = null;
             window.__fcTitleDesired = null;
-            stopRaf();
         }
 
         var api = {
-            __fullCrewTitleLockV2: true,
+            __fullCrewTitleLockV3: true,
             hold: hold,
             release: release,
             desired: function () {
                 return desired;
             },
+            current: currentTitle,
             isHooked: function () {
                 return hooked;
             }
@@ -279,12 +264,19 @@
             'body.' + STATS_BODY_CLASS + ' .mainAnimatedPages .emptyMessage,' +
             'body.' + STUDIO_BODY_CLASS + ' .mainAnimatedPages .emptyMessage' +
             '{visibility:hidden!important;pointer-events:none!important;opacity:0!important}' +
-            /* Avoid "Page not found" flashing in the skin header while pending */
+            /* Hide Jellyfin's header title for the whole route — writing it
+             * ourselves fights the skin and blinks names in the tab/header. */
             'html.' + ROUTE_PENDING_CLASS + ' .skinHeader .pageTitle,' +
             'html.' + ROUTE_PENDING_CLASS + ' .skinHeader .headerTitle,' +
             'html.' + ROUTE_PENDING_CLASS + ' .headerTop .pageTitle,' +
-            'html.' + STATS_BODY_CLASS + '.' + ROUTE_PENDING_CLASS + ' .skinHeader .pageTitle,' +
-            'html.' + STUDIO_BODY_CLASS + '.' + ROUTE_PENDING_CLASS + ' .skinHeader .pageTitle' +
+            'html.' + STATS_BODY_CLASS + ' .skinHeader .pageTitle,' +
+            'html.' + STATS_BODY_CLASS + ' .skinHeader .headerTitle,' +
+            'html.' + STATS_BODY_CLASS + ' .headerTop .pageTitle,' +
+            'html.' + STUDIO_BODY_CLASS + ' .skinHeader .pageTitle,' +
+            'html.' + STUDIO_BODY_CLASS + ' .skinHeader .headerTitle,' +
+            'html.' + STUDIO_BODY_CLASS + ' .headerTop .pageTitle,' +
+            'body.' + STATS_BODY_CLASS + ' .skinHeader .pageTitle,' +
+            'body.' + STUDIO_BODY_CLASS + ' .skinHeader .pageTitle' +
             '{visibility:hidden!important}' +
             /* Full-viewport host under header (avoid ~30% Jellyfin bleed from 70vh) */
             'body.' + STATS_BODY_CLASS + ' .mainAnimatedPages,' +
@@ -615,129 +607,43 @@
         }
 
         /**
-         * First-class document + skinHeader pageTitle ownership.
-         * Only while on #/fullcrew/* — never rewrite Home brand/"Jellyfin" chrome.
-         * claim()/release() set intent; TitleLock intercepts document.title writes
-         * synchronously (MutationObserver alone still allows one tab-title frame of
-         * "Page not found"). Header text is re-applied via MutationObserver.
+         * Browser-tab ownership for #/fullcrew/* only.
+         * TitleLock intercepts document.title. We do not write the skin header —
+         * CSS hides Jellyfin's "Page not found" / item name so the tab cannot blink.
          */
         var PageTitle = (function () {
             var owned = false;
             var label = '';
-            var applying = false;
             var titleObserver = null;
             var PREV_DOC = 'data-fullcrew-prev-title';
-            var OWNED = 'data-fullcrew-owned-title';
-            var PREV_HDR = 'data-fullcrew-prev-header';
-            /* Narrow: real page titles only — never bare .headerTitle / h1 / sectionTitle
-             * (those match brand chips and home section headers → "Stats"/"Jellyfin" stickers). */
-            var HEADER_SEL =
-                '.skinHeader .headerLeft .pageTitle, .skinHeader .pageTitle, .headerTop .pageTitle';
-
-            function headerNodes() {
-                return document.querySelectorAll(HEADER_SEL);
-            }
-
-            function ownedNodesEverywhere() {
-                return document.querySelectorAll('[' + OWNED + '="1"]');
-            }
-
-            function isOurTab(node) {
-                return !!(node && (node.id === 'fullCrewStatsTab' || (node.closest && node.closest('#fullCrewStatsTab'))));
-            }
 
             function onFullCrewRoute() {
                 return !!peekFullCrewRoute();
             }
 
-            /** Single visible pageTitle — owning several leaves overlapping stickers. */
-            function primaryHeaderNode() {
-                var nodes = headerNodes();
-                for (var i = 0; i < nodes.length; i++) {
-                    var node = nodes[i];
-                    if (!node || isOurTab(node)) {
-                        continue;
-                    }
-                    if (node.offsetParent === null && node.getClientRects && !node.getClientRects().length) {
-                        continue;
-                    }
-                    return node;
-                }
-                return nodes.length ? nodes[0] : null;
-            }
-
-            function scrubNode(node) {
-                if (!node) {
+            function rememberRestoreTitle() {
+                if (document.documentElement.getAttribute(PREV_DOC)) {
                     return;
                 }
-                if (node.getAttribute(OWNED) !== '1' && node.getAttribute(PREV_HDR) == null) {
-                    return;
+                var cur = TitleLock.current ? TitleLock.current() : (document.title || '');
+                if (!/page not found/i.test(cur) && cur !== label && cur) {
+                    document.documentElement.setAttribute(PREV_DOC, cur);
+                } else {
+                    document.documentElement.setAttribute(PREV_DOC, 'Jellyfin');
                 }
-                var prevHdr = node.getAttribute(PREV_HDR);
-                // Always restore prior text (including '') so we never leave "Stats" behind.
-                if (prevHdr != null) {
-                    node.textContent = prevHdr;
-                }
-                node.removeAttribute(PREV_HDR);
-                node.removeAttribute(OWNED);
-            }
-
-            function dropOwnership() {
-                owned = false;
-                label = '';
-                TitleLock.release();
             }
 
             function apply() {
-                if (!owned || applying) {
+                if (!owned) {
                     return;
                 }
-                // Never keep title ownership off Full Crew routes (Home/Favourites/etc.).
                 if (!onFullCrewRoute()) {
                     dropOwnership();
                     restore();
                     return;
                 }
-                applying = true;
-                try {
-                    if (!document.documentElement.getAttribute(PREV_DOC)) {
-                        var cur = document.title || '';
-                        // Don't stash "Page not found" / our own label as the restore target.
-                        if (!/page not found/i.test(cur) && cur !== label) {
-                            document.documentElement.setAttribute(PREV_DOC, cur);
-                        } else if (!document.documentElement.getAttribute(PREV_DOC)) {
-                            document.documentElement.setAttribute(PREV_DOC, 'Jellyfin');
-                        }
-                    }
-                    TitleLock.hold(label);
-
-                    var primary = primaryHeaderNode();
-                    // Drop ownership on any stale/extra nodes so Home never shows dual stickers.
-                    Array.prototype.forEach.call(ownedNodesEverywhere(), function (node) {
-                        if (node !== primary) {
-                            scrubNode(node);
-                        }
-                    });
-
-                    if (!primary) {
-                        applying = false;
-                        return;
-                    }
-
-                    var text = (primary.textContent || '').replace(/\s+/g, ' ').trim();
-                    if (!primary.getAttribute(PREV_HDR)) {
-                        if (text && !/page not found/i.test(text) && text !== label) {
-                            primary.setAttribute(PREV_HDR, text);
-                        } else {
-                            primary.setAttribute(PREV_HDR, '');
-                        }
-                    }
-                    primary.setAttribute(OWNED, '1');
-                    if (primary.textContent !== label) {
-                        primary.textContent = label;
-                    }
-                } catch (e) { /* ignore */ }
-                applying = false;
+                rememberRestoreTitle();
+                TitleLock.hold(label);
             }
 
             function restore() {
@@ -745,18 +651,16 @@
                 try {
                     var prev = document.documentElement.getAttribute(PREV_DOC);
                     if (prev != null) {
-                        // TitleLock must already be released so this write sticks.
                         document.title = prev;
                         document.documentElement.removeAttribute(PREV_DOC);
                     }
                 } catch (e) { /* ignore */ }
-                Array.prototype.forEach.call(ownedNodesEverywhere(), scrubNode);
-                // Also clear any nodes matching the header selector that still carry attrs.
-                Array.prototype.forEach.call(headerNodes(), function (node) {
-                    if (node && (node.getAttribute(OWNED) === '1' || node.getAttribute(PREV_HDR) != null)) {
-                        scrubNode(node);
-                    }
-                });
+            }
+
+            function dropOwnership() {
+                owned = false;
+                label = '';
+                TitleLock.release();
             }
 
             function stopObserver() {
@@ -770,8 +674,12 @@
                 if (titleObserver || typeof MutationObserver === 'undefined') {
                     return;
                 }
+                var head = document.head;
+                if (!head) {
+                    return;
+                }
                 titleObserver = new MutationObserver(function () {
-                    if (!owned || applying) {
+                    if (!owned) {
                         return;
                     }
                     if (!onFullCrewRoute()) {
@@ -779,30 +687,15 @@
                         restore();
                         return;
                     }
-                    var primary = primaryHeaderNode();
-                    var titleWrong = (document.title || '') !== label ||
-                        /page not found/i.test(document.title || '');
-                    if (titleWrong || !primary || primary.getAttribute(OWNED) !== '1' ||
-                        primary.textContent !== label) {
-                        apply();
+                    if (TitleLock.current() !== label) {
+                        TitleLock.hold(label);
                     }
                 });
-                titleObserver.observe(document.documentElement, {
+                titleObserver.observe(head, {
                     subtree: true,
                     childList: true,
                     characterData: true
                 });
-                // Also watch <title> directly when present (some skins replace the node).
-                try {
-                    var titleEl = document.querySelector('head > title') || document.querySelector('title');
-                    if (titleEl) {
-                        titleObserver.observe(titleEl, {
-                            characterData: true,
-                            childList: true,
-                            subtree: true
-                        });
-                    }
-                } catch (e) { /* ignore */ }
             }
 
             return {
@@ -811,13 +704,21 @@
                         this.release();
                         return;
                     }
+                    var next = titleText || 'Full Crew';
+                    if (owned && label === next && TitleLock.desired() === next &&
+                        TitleLock.current() === next) {
+                        startObserver();
+                        return;
+                    }
                     owned = true;
-                    label = titleText || 'Full Crew';
-                    TitleLock.hold(label);
+                    label = next;
                     apply();
                     startObserver();
                 },
                 release: function () {
+                    if (!owned && TitleLock.desired() == null) {
+                        return;
+                    }
                     dropOwnership();
                     restore();
                 },
@@ -829,7 +730,9 @@
                         this.release();
                         return;
                     }
-                    apply();
+                    if (TitleLock.current() !== label) {
+                        TitleLock.hold(label);
+                    }
                 },
                 isOwned: function () {
                     return owned;
@@ -896,12 +799,13 @@
                     }
                 });
                 var poster = el('div', 'fullCrewStudioPoster');
-                var imgUrl = primaryImageUrl(id);
-                if (imgUrl && opts.imageTag) {
+                var imgUrl = primaryImageUrl(opts.imageId || id, 240);
+                if (imgUrl && (opts.imageTag || opts.imageId || opts.forceImage)) {
                     var img = el('img', 'fullCrewStudioPosterImg');
                     img.src = imgUrl;
                     img.alt = opts.name || '';
                     img.loading = 'lazy';
+                    img.decoding = 'async';
                     img.onerror = function () {
                         var fallback = el('div', 'fullCrewStudioPosterFallback', (opts.type || 'Title').charAt(0));
                         if (img.parentNode) {
@@ -2315,6 +2219,7 @@
     var STATS_PAGE_ID = 'fullCrewStatsPage';
     var STUDIO_PAGE_ID = 'fullCrewStudioPage';
     var STATS_HASH = '#/fullcrew/stats';
+    var AUDIO_TRACKS_CATEGORY = 'audioTracks';
     var STATS_VIEW_KEY = 'fullCrew.statsViewMode';
     var STATS_DETAIL_VIEW_KEY = 'fullCrew.statsDetailViewMode';
     var PLUGIN_UNIQUE_ID = PLUGIN_GUID;
@@ -2358,10 +2263,12 @@
     var statsBucketItemsFetchInFlight = {};
     var statsDetailBuckets = null;
     var statsDetailCategoryKey = null;
+    var statsDetailRenderCap = 80;
 
     var BUCKET_ITEMS_CATEGORY_KEYS = {
         types: 1, resolutions: 1, hdr: 1, videoCodecs: 1, audioChannels: 1, audioCodecs: 1,
-        genres: 1, studios: 1, collections: 1, decades: 1, years: 1, ratings: 1, community: 1, tags: 1, languages: 1
+        genres: 1, studios: 1, collections: 1, decades: 1, years: 1, ratings: 1, community: 1, tags: 1, languages: 1,
+        audioTracks: 1
     };
 
     var YEAR_SORT_STORAGE_KEY = 'fullCrewYearSort';
@@ -2531,8 +2438,14 @@
         return STATS_HASH + '/' + encodeURIComponent(categoryKey) + '/items/' + encodeURIComponent(String(bucketName || ''));
     }
 
+    function isAudioTracksCategory(categoryKey) {
+        var key = String(categoryKey || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+        return key === 'audiotracks' || key === 'specialaudio' || key === 'specialaudiotracks';
+    }
+
     function categorySupportsBucketItems(categoryKey) {
         if (!categoryKey) { return false; }
+        if (isAudioTracksCategory(categoryKey)) { return true; }
         if (BUCKET_ITEMS_CATEGORY_KEYS[categoryKey]) { return true; }
         var values = Object.keys(PEOPLE_CATEGORY_KEYS).map(function (k) { return PEOPLE_CATEGORY_KEYS[k]; });
         return values.indexOf(categoryKey) !== -1;
@@ -2696,7 +2609,8 @@
         }
 
         if (categoryKey && categorySupportsBucketItems(categoryKey) && bucket.name) {
-            var itemsHash = statsBucketItemsHash(categoryKey, bucket.name);
+            var slug = (isAudioTracksCategory(categoryKey) && (bucket.id || bucket.Id)) || bucket.name;
+            var itemsHash = statsBucketItemsHash(categoryKey, slug);
             el = createElement('a', className + ' fullCrewStatsItemLink', label);
             el.href = itemsHash;
             el.setAttribute('title', bucket.name + ' — list titles in this bucket');
@@ -2869,6 +2783,19 @@
         return statsConfigPromise;
     }
 
+    function pollUntilReady(path, attempt) {
+        return Core.getJson(path).then(function (data) {
+            if (prop(data, 'IsBuilding', 'isBuilding') && (attempt || 0) < 45) {
+                return new Promise(function (resolve, reject) {
+                    window.setTimeout(function () {
+                        pollUntilReady(path, (attempt || 0) + 1).then(resolve).catch(reject);
+                    }, (attempt || 0) < 4 ? 700 : 2000);
+                });
+            }
+            return data;
+        });
+    }
+
     function fetchStats() {
         if (statsCachedData) {
             return Promise.resolve(statsCachedData);
@@ -2877,11 +2804,13 @@
             return statsFetchInFlight;
         }
 
-        statsFetchInFlight = Core.getJson('FullCrew/stats')
+        statsFetchInFlight = pollUntilReady('FullCrew/stats', 0)
             .then(function (data) {
-                statsCachedData = data;
+                if (!prop(data, 'IsBuilding', 'isBuilding')) {
+                    statsCachedData = data;
+                }
                 statsFetchInFlight = null;
-                return data;
+                return attachSpecialAudioSection(data);
             })
             .catch(function (err) {
                 statsFetchInFlight = null;
@@ -2893,6 +2822,9 @@
 
     function fetchStatsCategory(category) {
         var key = String(category || '');
+        if (isAudioTracksCategory(key)) {
+            return fetchAudioTracksCategory();
+        }
         if (statsCategoryCache[key]) {
             return Promise.resolve(statsCategoryCache[key]);
         }
@@ -2900,9 +2832,11 @@
             return statsCategoryFetchInFlight[key];
         }
 
-        statsCategoryFetchInFlight[key] = Core.getJson('FullCrew/stats/' + encodeURIComponent(key))
+        statsCategoryFetchInFlight[key] = pollUntilReady('FullCrew/stats/' + encodeURIComponent(key), 0)
             .then(function (data) {
-                statsCategoryCache[key] = data;
+                if (!prop(data, 'IsBuilding', 'isBuilding')) {
+                    statsCategoryCache[key] = data;
+                }
                 delete statsCategoryFetchInFlight[key];
                 return data;
             })
@@ -2914,20 +2848,123 @@
         return statsCategoryFetchInFlight[key];
     }
 
-    function fetchStatsBucketItems(category, bucket) {
+    var STATS_BUCKET_PAGE_SIZE = 80;
+
+    function audioTypesToBuckets(types) {
+        var list = types || [];
+        var total = 0;
+        list.forEach(function (t) {
+            total += Number(prop(t, 'ItemCount', 'itemCount')) || 0;
+        });
+        if (!total) {
+            total = 1;
+        }
+        return list.map(function (t) {
+            var count = Number(prop(t, 'ItemCount', 'itemCount')) || 0;
+            return {
+                name: prop(t, 'Name', 'name') || prop(t, 'Id', 'id'),
+                id: prop(t, 'Id', 'id'),
+                count: count,
+                percent: (count / total) * 100
+            };
+        });
+    }
+
+    function attachSpecialAudioSection(data) {
+        if (!data) {
+            return Promise.resolve(data);
+        }
+        return ensureAudioTypes().then(function (types) {
+            if (audioEnabled && types && types.length) {
+                data.SpecialAudio = audioTypesToBuckets(types);
+            }
+            return data;
+        }).catch(function () {
+            return data;
+        });
+    }
+
+    function fetchAudioTracksCategory() {
+        if (statsCategoryCache[AUDIO_TRACKS_CATEGORY]) {
+            return Promise.resolve(statsCategoryCache[AUDIO_TRACKS_CATEGORY]);
+        }
+        return ensureAudioTypes().then(function (types) {
+            var buckets = audioTypesToBuckets(types);
+            var payload = {
+                Category: AUDIO_TRACKS_CATEGORY,
+                Title: 'Special audio',
+                DenominatorHint: 'Share of titles that have a labeled special-audio track',
+                Buckets: buckets,
+                TotalBuckets: buckets.length,
+                GeneratedAt: new Date().toISOString()
+            };
+            statsCategoryCache[AUDIO_TRACKS_CATEGORY] = payload;
+            return payload;
+        });
+    }
+
+    function audioItemToBucketCard(item) {
+        var series = prop(item, 'SeriesName', 'seriesName');
+        var name = prop(item, 'Name', 'name') || 'Untitled';
+        var season = prop(item, 'SeasonNumber', 'seasonNumber');
+        var episode = prop(item, 'EpisodeNumber', 'episodeNumber');
+        if (series && (season != null || episode != null)) {
+            name = series + ' · S' + (season || 0) + 'E' + (episode || 0);
+        } else if (series) {
+            name = series;
+        }
+        return {
+            Id: prop(item, 'ItemId', 'itemId'),
+            Name: name,
+            Type: prop(item, 'MediaType', 'mediaType') || '',
+            ProductionYear: prop(item, 'ProductionYear', 'productionYear'),
+            ImageTag: '1',
+            imageId: prop(item, 'ImageItemId', 'imageItemId')
+        };
+    }
+
+    function fetchAudioTrackBucketItems(typeId, startIndex) {
+        var start = startIndex || 0;
+        var path = 'FullCrew/audio/items?type=' + encodeURIComponent(typeId || 'all')
+            + '&startIndex=' + start + '&limit=' + STATS_BUCKET_PAGE_SIZE + '&sort=name';
+        return Core.getJson(path).then(function (data) {
+            var incoming = prop(data, 'Items', 'items') || [];
+            var total = Number(prop(data, 'TotalCount', 'totalCount')) || incoming.length;
+            var typeName = prop(data, 'TypeName', 'typeName') || typeId;
+            return {
+                Category: AUDIO_TRACKS_CATEGORY,
+                CategoryTitle: 'Special audio',
+                Bucket: typeName,
+                BucketId: prop(data, 'TypeId', 'typeId') || typeId,
+                StartIndex: start,
+                TotalCount: total,
+                HasMore: start + incoming.length < total,
+                Items: incoming.map(audioItemToBucketCard)
+            };
+        });
+    }
+
+    function fetchStatsBucketItems(category, bucket, startIndex) {
         var cat = String(category || '');
         var name = String(bucket || '');
-        var cacheKey = cat + '\0' + name;
-        if (statsBucketItemsCache[cacheKey]) {
+        var start = startIndex || 0;
+        if (isAudioTracksCategory(cat)) {
+            return fetchAudioTrackBucketItems(name, start);
+        }
+        var cacheKey = cat + '\0' + name + '\0' + start;
+        if (start === 0 && statsBucketItemsCache[cacheKey]) {
             return Promise.resolve(statsBucketItemsCache[cacheKey]);
         }
         if (statsBucketItemsFetchInFlight[cacheKey]) {
             return statsBucketItemsFetchInFlight[cacheKey];
         }
-        var path = 'FullCrew/stats/' + encodeURIComponent(cat) + '/items?bucket=' + encodeURIComponent(name);
-        statsBucketItemsFetchInFlight[cacheKey] = Core.getJson(path)
+        var path = 'FullCrew/stats/' + encodeURIComponent(cat) + '/items?bucket=' + encodeURIComponent(name)
+            + '&startIndex=' + start + '&limit=' + STATS_BUCKET_PAGE_SIZE;
+        statsBucketItemsFetchInFlight[cacheKey] = pollUntilReady(path, 0)
             .then(function (data) {
-                statsBucketItemsCache[cacheKey] = data;
+                if (start === 0) {
+                    statsBucketItemsCache[cacheKey] = data;
+                }
                 delete statsBucketItemsFetchInFlight[cacheKey];
                 return data;
             })
@@ -3249,17 +3286,12 @@
                 styleStatsTabLikeNative(existing, findFavouritesTab(slider) || findHomeTab(slider), true);
             }
             setStatsTabSelected(true);
-            setStatsDocumentTitle(true);
             return;
         }
 
         if (existing && document.body.contains(existing)) {
             styleStatsTabLikeNative(existing, findFavouritesTab() || findHomeTab(), false);
             setStatsTabSelected(false);
-            // Do not touch document title on normal Home/Favourites — avoids Stats blink.
-            if (Core.PageTitle.isOwned() && !isStudioRoute()) {
-                setStatsDocumentTitle(false);
-            }
             wireNativeTabExit(findHomeTab());
             wireNativeTabExit(findFavouritesTab());
             return;
@@ -3288,7 +3320,9 @@
         if (tab && tab.parentNode) {
             tab.parentNode.removeChild(tab);
         }
-        setStatsDocumentTitle(false);
+        if (!peekFullCrewRoute()) {
+            setStatsDocumentTitle(false);
+        }
     }
 
     function setStatsTabSelected(selected) {
@@ -3329,9 +3363,6 @@
         }
         statsDetailBuckets = null;
         setStatsTabSelected(false);
-        if (!isStudioRoute()) {
-            setStatsDocumentTitle(false);
-        }
     }
 
     function mountStatsPage() {
@@ -3511,7 +3542,7 @@
             // Pending until *this* route's page exists — not "any" Full Crew page.
             // Otherwise Stats→Studio clears pending while Stats is still mounted, then
             // tearDownStats leaves a frame of Jellyfin 404 chrome (the studio blink).
-            applyRouteChrome(early, { pending: !routePageMounted(early), setTitle: true });
+            applyRouteChrome(early, { pending: !routePageMounted(early), setTitle: false });
             claimRouteTitle(early);
         } else {
             applyRouteChrome(null);
@@ -3561,6 +3592,42 @@
         maybeOpenFavoritesFromFlag();
     }
 
+    function scheduleIdle(fn) {
+        if (typeof window.requestAnimationFrame === 'function') {
+            return window.requestAnimationFrame(fn);
+        }
+        return window.setTimeout(fn, 16);
+    }
+
+    function paintStatsChartsIdle(page, pending, mode) {
+        function paintBatch() {
+            if (!page || !document.body.contains(page) || !pending.length) {
+                return;
+            }
+            var n = Math.min(2, pending.length);
+            var i;
+            for (i = 0; i < n; i++) {
+                var job = pending.shift();
+                if (!job || !job.host) {
+                    continue;
+                }
+                renderChartInto(
+                    job.host,
+                    applyYearSortIfNeeded(job.buckets, job.categoryKey),
+                    mode,
+                    true,
+                    job.categoryKey
+                );
+            }
+            if (pending.length) {
+                scheduleIdle(paintBatch);
+            }
+        }
+        if (pending.length) {
+            scheduleIdle(paintBatch);
+        }
+    }
+
     function formatPercent(value) {
         var n = Number(value);
         if (!isFinite(n)) {
@@ -3599,10 +3666,11 @@
             { title: 'Video codecs', categoryKey: 'videoCodecs', keyPascal: 'VideoCodecs', keyCamel: 'videoCodecs' },
             { title: 'Audio channels', categoryKey: 'audioChannels', keyPascal: 'AudioChannels', keyCamel: 'audioChannels' },
             { title: 'Audio codecs', categoryKey: 'audioCodecs', keyPascal: 'AudioCodecs', keyCamel: 'audioCodecs' },
+            { title: 'Special audio', categoryKey: AUDIO_TRACKS_CATEGORY, keyPascal: 'SpecialAudio', keyCamel: 'specialAudio', hint: 'Commentary, descriptions, dubs, and other labeled tracks' },
             { title: 'Genres', categoryKey: 'genres', keyPascal: 'Genres', keyCamel: 'genres', hint: 'Share of genre tags · top names (full list via title)' },
             { title: 'Studios', categoryKey: 'studios', keyPascal: 'Studios', keyCamel: 'studios', hint: 'Share of studio credits · top names (full list via title)' },
             { title: 'Collections', categoryKey: 'collections', keyPascal: 'Collections', keyCamel: 'collections', hint: 'Share of collection memberships' },
-            { title: 'Release years', categoryKey: 'years', keyPascal: 'Years', keyCamel: 'years', hint: 'Every production year · click a year to list matching titles' },
+            { title: 'Release years', categoryKey: 'years', keyPascal: 'Years', keyCamel: 'years', hint: 'Recent years on this page · open the title for every year' },
             { title: 'Decades', categoryKey: 'decades', keyPascal: 'Decades', keyCamel: 'decades' },
             { title: 'Official ratings', categoryKey: 'ratings', keyPascal: 'OfficialRatings', keyCamel: 'officialRatings' },
             { title: 'Community scores', categoryKey: 'community', keyPascal: 'CommunityRatings', keyCamel: 'communityRatings' },
@@ -3702,9 +3770,21 @@
         ctx.fill();
     }
 
-    function renderChartInto(container, buckets, mode, omitDominantOther, categoryKey) {
+    function renderChartInto(container, buckets, mode, omitDominantOther, categoryKey, options) {
         container.innerHTML = '';
         var items = chartDisplayBuckets(buckets, !!omitDominantOther);
+        options = options || {};
+        var cap = options.maxVisible;
+        if (cap == null) {
+            cap = omitDominantOther
+                ? (mode === 'pie' ? 10 : 16)
+                : (mode === 'pie' ? 16 : 80);
+        }
+        var hidden = 0;
+        if (items.length > cap) {
+            hidden = items.length - cap;
+            items = items.slice(0, cap);
+        }
         if (!items.length) {
             container.appendChild(createElement('div', 'fullCrewStatsEmpty', 'No data'));
             return;
@@ -3716,6 +3796,7 @@
                 appendClusteredRankItem(list, bucket, 0, categoryKey);
             });
             container.appendChild(list);
+            appendChartOverflowHint(container, hidden, options);
             return;
         }
 
@@ -3731,6 +3812,7 @@
                 appendClusteredBarRow(bars, bucket, max, 0, index, categoryKey);
             });
             container.appendChild(bars);
+            appendChartOverflowHint(container, hidden, options);
             return;
         }
 
@@ -3801,6 +3883,23 @@
         wrap.appendChild(legend);
         container.appendChild(wrap);
         drawPieChart(canvas, items);
+        appendChartOverflowHint(container, hidden, options);
+    }
+
+    function appendChartOverflowHint(container, hidden, options) {
+        if (!hidden) {
+            return;
+        }
+        if (options && typeof options.onShowMore === 'function') {
+            var btn = createElement('button', 'fullCrewStatsMoreBtn', 'Show ' + hidden + ' more');
+            btn.type = 'button';
+            btn.addEventListener('click', options.onShowMore);
+            container.appendChild(btn);
+            return;
+        }
+        container.appendChild(
+            createElement('p', 'fullCrewStatsSectionHint', '+' + hidden + ' more — open the section title for the full list')
+        );
     }
 
     function renderStatsContent(page, data) {
@@ -3859,6 +3958,7 @@
 
         var sections = collectStatsSections(data);
         var grid = createElement('div', 'fullCrewStatsGrid');
+        var pendingCharts = [];
         sections.forEach(function (section) {
             var buckets = section.buckets || normalizeBuckets(prop(data, section.keyPascal, section.keyCamel));
             if (!buckets.length) {
@@ -3896,18 +3996,17 @@
             if (section.categoryKey) {
                 chartHost.setAttribute('data-category', section.categoryKey);
             }
-            renderChartInto(
-                chartHost,
-                applyYearSortIfNeeded(buckets, section.categoryKey || null),
-                mode,
-                true,
-                section.categoryKey || null
-            );
             card.appendChild(chartHost);
             card._buckets = buckets;
             grid.appendChild(card);
+            pendingCharts.push({
+                host: chartHost,
+                buckets: buckets,
+                categoryKey: section.categoryKey || null
+            });
         });
         body.appendChild(grid);
+        paintStatsChartsIdle(page, pendingCharts, mode);
 
         var generatedAt = prop(data, 'GeneratedAt', 'generatedAt');
         if (generatedAt) {
@@ -3961,7 +4060,13 @@
                 }).filter(Boolean);
             }
             buckets = applyYearSortIfNeeded(buckets, statsDetailCategoryKey);
-            renderChartInto(detailHost, buckets, mode, false, statsDetailCategoryKey);
+            renderChartInto(detailHost, buckets, mode, false, statsDetailCategoryKey, {
+                maxVisible: statsDetailRenderCap,
+                onShowMore: function () {
+                    statsDetailRenderCap += 80;
+                    reRenderStatsCharts(page, true);
+                }
+            });
             return;
         }
 
@@ -4049,7 +4154,7 @@
         page.appendChild(header);
 
         var body = createElement('div', 'fullCrewStatsBody');
-        body.appendChild(createElement('div', 'fullCrewStatsStatus', 'Loading library stats…'));
+        body.appendChild(createElement('div', 'fullCrewStatsStatus', 'Building library stats… this can take a moment on a large library.'));
         page.appendChild(body);
         return page;
     }
@@ -4114,6 +4219,7 @@
         var totalBuckets = Number(prop(data, 'TotalBuckets', 'totalBuckets')) || 0;
         var buckets = normalizeBuckets(prop(data, 'Buckets', 'buckets'));
         statsDetailBuckets = buckets;
+        statsDetailRenderCap = 80;
         if (!statsDetailCategoryKey) {
             statsDetailCategoryKey = String(prop(data, 'Category', 'category') || '').toLowerCase();
         }
@@ -4133,7 +4239,11 @@
         search.placeholder = 'Filter…';
         search.setAttribute('aria-label', 'Filter ranking');
         search.addEventListener('input', function () {
-            reRenderStatsCharts(page, true);
+            window.clearTimeout(search._fcTimer);
+            search._fcTimer = window.setTimeout(function () {
+                statsDetailRenderCap = 80;
+                reRenderStatsCharts(page, true);
+            }, 200);
         });
         toolbar.appendChild(search);
 
@@ -4167,7 +4277,14 @@
             applyYearSortIfNeeded(buckets, statsDetailCategoryKey),
             getStatsViewMode(true),
             false,
-            statsDetailCategoryKey
+            statsDetailCategoryKey,
+            {
+                maxVisible: statsDetailRenderCap,
+                onShowMore: function () {
+                    statsDetailRenderCap += 80;
+                    reRenderStatsCharts(page, true);
+                }
+            }
         );
 
         var generatedAt = prop(data, 'GeneratedAt', 'generatedAt');
@@ -4176,6 +4293,18 @@
         }
     }
 
+
+    function statsBucketCard(t) {
+        return Core.Ui.posterCard({
+            id: prop(t, 'Id', 'id'),
+            imageId: prop(t, 'imageId', 'ImageItemId') || prop(t, 'ImageItemId', 'imageItemId'),
+            name: prop(t, 'Name', 'name'),
+            type: String(prop(t, 'Type', 'type') || ''),
+            year: prop(t, 'ProductionYear', 'productionYear'),
+            imageTag: prop(t, 'ImageTag', 'imageTag'),
+            forceImage: true
+        });
+    }
 
     function renderStatsBucketContent(page, data, route) {
         var body = page.querySelector('.fullCrewStatsBody');
@@ -4188,6 +4317,7 @@
         var items = prop(data, 'Items', 'items') || [];
         var totalCount = Number(prop(data, 'TotalCount', 'totalCount'));
         if (!isFinite(totalCount)) { totalCount = items.length; }
+        var hasMore = !!(prop(data, 'HasMore', 'hasMore'));
         var truncated = !!(prop(data, 'Truncated', 'truncated'));
 
         var titleEl = page.querySelector('.fullCrewStatsTitle');
@@ -4202,7 +4332,6 @@
             'p',
             'fullCrewStatsSectionHint',
             'Items in this bucket · ' + categoryTitle + ' · ' + totalCount +
-                (truncated ? ' (showing first ' + items.length + ')' : '') +
                 ' title' + (totalCount === 1 ? '' : 's')
         ));
 
@@ -4211,27 +4340,45 @@
             return;
         }
 
-        var movies = [];
-        var shows = [];
+        var grid = createElement('div', 'fullCrewStatsItemGrid');
         items.forEach(function (t) {
-            var type = String(prop(t, 'Type', 'type') || '');
-            var card = {
-                id: prop(t, 'Id', 'id'),
-                name: prop(t, 'Name', 'name'),
-                type: type,
-                year: prop(t, 'ProductionYear', 'productionYear'),
-                imageTag: prop(t, 'ImageTag', 'imageTag')
-            };
-            if (/series/i.test(type)) { shows.push(Core.Ui.posterCard(card)); }
-            else { movies.push(Core.Ui.posterCard(card)); }
+            grid.appendChild(statsBucketCard(t));
         });
+        body.appendChild(grid);
 
-        if (movies.length && shows.length) {
-            body.appendChild(Core.Ui.posterRow('Movies', movies));
-            body.appendChild(Core.Ui.posterRow('Shows', shows));
-        } else {
-            body.appendChild(Core.Ui.posterRow('In your library', movies.length ? movies : shows));
+        var moreHost = createElement('div', 'fullCrewStatsMore');
+        body.appendChild(moreHost);
+        var loaded = items.length;
+        function paintMoreButton() {
+            moreHost.innerHTML = '';
+            if (!hasMore) {
+                if (truncated) {
+                    moreHost.appendChild(createElement('p', 'fullCrewStatsSectionHint', 'Stopped at the safety cap.'));
+                }
+                return;
+            }
+            var btn = createElement('button', 'fullCrewStatsMoreBtn', 'Load more');
+            btn.type = 'button';
+            btn.addEventListener('click', function () {
+                btn.disabled = true;
+                btn.textContent = 'Loading…';
+                fetchStatsBucketItems(categoryKey, prop(data, 'BucketId', 'bucketId') || bucketName, loaded).then(function (next) {
+                    var extra = prop(next, 'Items', 'items') || [];
+                    extra.forEach(function (t) {
+                        grid.appendChild(statsBucketCard(t));
+                    });
+                    loaded += extra.length;
+                    hasMore = !!(prop(next, 'HasMore', 'hasMore'));
+                    truncated = !!(prop(next, 'Truncated', 'truncated'));
+                    paintMoreButton();
+                }).catch(function () {
+                    btn.disabled = false;
+                    btn.textContent = 'Load more';
+                });
+            });
+            moreHost.appendChild(btn);
         }
+        paintMoreButton();
 
         var generatedAt = prop(data, 'GeneratedAt', 'generatedAt');
         if (generatedAt) {
@@ -4641,6 +4788,7 @@
                     return false;
                 }
                 if (n.id === STATS_PAGE_ID || n.id === STUDIO_PAGE_ID || n.id === STATS_TAB_ID ||
+                    n.id === AUDIO_CHIP_ID ||
                     n.id === CRITICAL_STYLE_ID || n.id === STYLE_ID || n.id === SECTION_ID) {
                     continue;
                 }
@@ -5129,62 +5277,30 @@
     }
 
     /* ================================================================== */
-    /* Feature: Audio Tracks                                              */
+    /* Feature: Special audio (Stats category + item-page chips)          */
     /* ================================================================== */
 
-    var AUDIO_PAGE_ID = 'fullCrewAudioPage';
-    var AUDIO_TAB_ID = 'fullCrewAudioTab';
     var AUDIO_CHIP_ID = 'fullCrewAudioChips';
-    var AUDIO_HASH = '#/fullcrew/audio';
-    var AUDIO_PAGE_SIZE = 50;
     var audioEnabled = true;
-    var audioState = {
-        types: [],
-        isIndexing: false,
-        typeId: 'commentary',
-        search: '',
-        language: '',
-        sort: 'name',
-        items: [],
-        total: 0,
-        languages: [],
-        loading: false
-    };
+    var audioTypesFetched = false;
+    var audioTypesPromise = null;
+    var audioState = { types: [], isIndexing: false };
 
-    function isAudioRoute() {
-        var route = peekFullCrewRoute();
-        return !!(route && route.kind === 'audio');
-    }
-
-    function parseAudioQuery() {
+    function redirectLegacyAudioHash() {
         var hash = window.location.hash || '';
+        var raw = hash.split('?')[0];
+        if (raw.indexOf('#!/') === 0) {
+            raw = '#' + raw.slice(2);
+        }
+        if (raw !== '#/fullcrew/audio' && raw.indexOf('#/fullcrew/audio/') !== 0) {
+            return false;
+        }
         var qIndex = hash.indexOf('?');
         var params = Core.parseQuery(qIndex === -1 ? '' : hash.substring(qIndex + 1));
-        return {
-            type: params.type || 'commentary',
-            search: params.q || '',
-            language: params.lang || '',
-            sort: params.sort || 'name'
-        };
-    }
-
-    function writeAudioHash() {
-        var params = [];
-        if (audioState.typeId && audioState.typeId !== 'commentary') {
-            params.push('type=' + encodeURIComponent(audioState.typeId));
-        } else if (audioState.typeId === 'commentary') {
-            params.push('type=commentary');
-        }
-        if (audioState.search) {
-            params.push('q=' + encodeURIComponent(audioState.search));
-        }
-        if (audioState.language) {
-            params.push('lang=' + encodeURIComponent(audioState.language));
-        }
-        if (audioState.sort && audioState.sort !== 'name') {
-            params.push('sort=' + encodeURIComponent(audioState.sort));
-        }
-        var next = AUDIO_HASH + (params.length ? '?' + params.join('&') : '?type=commentary');
+        var type = params.type || '';
+        var next = type && type !== 'all'
+            ? statsBucketItemsHash(AUDIO_TRACKS_CATEGORY, type)
+            : statsDetailHash(AUDIO_TRACKS_CATEGORY);
         if ((window.location.hash || '') !== next) {
             if (window.history && window.history.replaceState) {
                 window.history.replaceState(null, '', next);
@@ -5192,379 +5308,20 @@
                 window.location.hash = next;
             }
         }
+        return true;
     }
 
-    function tearDownAudioPage() {
-        var page = document.getElementById(AUDIO_PAGE_ID);
-        if (page && page.parentNode) {
-            page.parentNode.removeChild(page);
-        }
-        var tab = document.getElementById(AUDIO_TAB_ID);
-        if (tab) {
-            tab.classList.remove('emby-tab-button-active');
-        }
-    }
-
-    function injectAudioTab() {
-        if (!audioEnabled) {
-            var existing = document.getElementById(AUDIO_TAB_ID);
-            if (existing && existing.parentNode) {
-                existing.parentNode.removeChild(existing);
-            }
-            return;
-        }
-
-        if (document.getElementById(AUDIO_TAB_ID)) {
-            var tab = document.getElementById(AUDIO_TAB_ID);
-            if (isAudioRoute()) {
-                tab.classList.add('emby-tab-button-active');
-            } else {
-                tab.classList.remove('emby-tab-button-active');
-            }
-            return;
-        }
-
-        var after = document.getElementById(STATS_TAB_ID) || findFavouritesTab();
-        if (!after || !after.parentNode) {
-            return;
-        }
-
-        var sample = after;
-        var node = document.createElement(sample.tagName === 'A' ? 'a' : 'button');
-        if (sample.tagName === 'A') {
-            node.href = AUDIO_HASH + '?type=commentary';
-        } else {
-            node.type = 'button';
-        }
-        node.id = AUDIO_TAB_ID;
-        node.className = String(sample.className || 'emby-tab-button emby-button')
-            .replace(/\bemby-tab-button-active\b/g, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-        node.setAttribute('title', 'Audio');
-        node.setAttribute('aria-label', 'Audio');
-        node.textContent = 'Audio';
-        node.addEventListener('click', function (e) {
-            e.preventDefault();
-            e.stopPropagation();
-            window.location.hash = AUDIO_HASH + '?type=commentary';
-        }, true);
-
-        if (after.nextSibling) {
-            after.parentNode.insertBefore(node, after.nextSibling);
-        } else {
-            after.parentNode.appendChild(node);
-        }
-    }
-
-    function audioImageUrl(itemId) {
-        var client = Core.apiClient();
-        if (client && typeof client.getImageUrl === 'function') {
-            return client.getImageUrl(itemId, { type: 'Primary', maxHeight: 360, quality: 80 });
-        }
-        return '/Items/' + itemId + '/Images/Primary?maxHeight=360&quality=80';
-    }
-
-    function pad2(n) {
-        return (n < 10 ? '0' : '') + n;
-    }
-
-    function audioItemHeading(item) {
-        var series = Core.prop(item, 'SeriesName', 'seriesName');
-        var name = Core.prop(item, 'Name', 'name') || '';
-        var season = Core.prop(item, 'SeasonNumber', 'seasonNumber');
-        var episode = Core.prop(item, 'EpisodeNumber', 'episodeNumber');
-        var year = Core.prop(item, 'ProductionYear', 'productionYear');
-        if (series) {
-            if (season != null || episode != null) {
-                return series + ' · S' + pad2(season || 0) + 'E' + pad2(episode || 0);
-            }
-            return series;
-        }
-        return year ? name + ' (' + year + ')' : name;
-    }
-
-    function renderAudioCard(item) {
-        var card = Core.el('a', 'fullCrewAudioCard');
-        var itemId = Core.prop(item, 'ItemId', 'itemId');
-        card.href = Core.detailsHashForItem(itemId);
-        card.addEventListener('click', function (e) {
-            e.preventDefault();
-            Core.navigateToItem(itemId);
-        });
-
-        var imageId = Core.prop(item, 'ImageItemId', 'imageItemId') || itemId;
-        var poster = Core.el('div', 'fullCrewAudioPoster');
-        var img = document.createElement('img');
-        img.alt = '';
-        img.loading = 'lazy';
-        img.src = audioImageUrl(imageId);
-        img.onerror = function () {
-            poster.classList.add('is-fallback');
-            if (img.parentNode) {
-                img.parentNode.removeChild(img);
-            }
-        };
-        poster.appendChild(img);
-        card.appendChild(poster);
-
-        var body = Core.el('div', 'fullCrewAudioCardBody');
-        body.appendChild(Core.el('div', 'fullCrewAudioCardKicker', audioItemHeading(item)));
-        var series = Core.prop(item, 'SeriesName', 'seriesName');
-        body.appendChild(Core.el('div', 'fullCrewAudioCardName', series ? (Core.prop(item, 'Name', 'name') || '') : (Core.prop(item, 'MediaType', 'mediaType') || '')));
-        var tracks = Core.prop(item, 'Tracks', 'tracks') || [];
-        tracks.slice(0, 3).forEach(function (track) {
-            body.appendChild(Core.el(
-                'div',
-                'fullCrewAudioCardTrack',
-                Core.prop(track, 'DisplayTitle', 'displayTitle') || Core.prop(track, 'Title', 'title') || ''
-            ));
-        });
-        card.appendChild(body);
-        return card;
-    }
-
-    function audioEmptyMessage() {
-        if (audioState.search || audioState.language) {
-            return 'No titles match those filters.';
-        }
-        if (audioState.isIndexing) {
-            return 'Still indexing the library. Try refresh in a moment.';
-        }
-        if (audioState.typeId === 'commentary') {
-            return 'No commentary tracks yet. Jellyfin only sees names stored on the audio stream (MKV/MP4 titles like “Commentary”). Scan the library, then refresh the index.';
-        }
-        return 'No tracks of this type yet. Titles come from the audio stream name in the file.';
-    }
-
-    function loadAudioItems(reset) {
-        if (!isAudioRoute()) {
-            return;
-        }
-        var page = document.getElementById(AUDIO_PAGE_ID);
-        if (!page) {
-            return;
-        }
-        if (reset) {
-            audioState.items = [];
-        }
-        var params = [
-            'type=' + encodeURIComponent(audioState.typeId || 'all'),
-            'startIndex=' + (reset ? 0 : audioState.items.length),
-            'limit=' + AUDIO_PAGE_SIZE
-        ];
-        if (audioState.search) {
-            params.push('search=' + encodeURIComponent(audioState.search));
-        }
-        if (audioState.language) {
-            params.push('language=' + encodeURIComponent(audioState.language));
-        }
-        if (audioState.sort) {
-            params.push('sort=' + encodeURIComponent(audioState.sort));
-        }
-        var status = page.querySelector('.fullCrewAudioStatus');
-        var grid = page.querySelector('.fullCrewAudioGrid');
-        var more = page.querySelector('.fullCrewAudioMore');
-        if (status && reset) {
-            status.textContent = 'Loading…';
-        }
-        audioState.loading = true;
-        Core.getJson('FullCrew/audio/items?' + params.join('&')).then(function (data) {
-            audioState.loading = false;
-            audioState.total = Core.prop(data, 'TotalCount', 'totalCount') || 0;
-            audioState.isIndexing = !!Core.prop(data, 'IsIndexing', 'isIndexing');
-            var incoming = Core.prop(data, 'Items', 'items') || [];
-            var langs = Core.prop(data, 'Languages', 'languages') || [];
-            if (langs.length) {
-                audioState.languages = langs;
-            }
-            if (reset && grid) {
-                grid.innerHTML = '';
-                audioState.items = incoming;
-            } else {
-                audioState.items = audioState.items.concat(incoming);
-            }
-            incoming.forEach(function (item) {
-                if (grid) {
-                    grid.appendChild(renderAudioCard(item));
-                }
-            });
-            if (status) {
-                status.textContent = audioState.items.length ? (audioState.total + (audioState.total === 1 ? ' title' : ' titles')) : audioEmptyMessage();
-            }
-            if (more) {
-                more.innerHTML = '';
-                if (audioState.items.length < audioState.total) {
-                    var btn = Core.el('button', 'fullCrewAudioButton', 'Load more');
-                    btn.type = 'button';
-                    btn.addEventListener('click', function () {
-                        loadAudioItems(false);
-                    });
-                    more.appendChild(btn);
-                }
-            }
-            refreshAudioLanguageSelect();
-        }).catch(function (err) {
-            audioState.loading = false;
-            console.warn('[FullCrew] audio items failed', err);
-            if (status) {
-                status.textContent = 'Could not load matching titles.';
+    function removeLegacyAudioChrome() {
+        ['fullCrewAudioPage', 'fullCrewAudioTab'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el && el.parentNode) {
+                el.parentNode.removeChild(el);
             }
         });
-    }
-
-    function refreshAudioLanguageSelect() {
-        var page = document.getElementById(AUDIO_PAGE_ID);
-        if (!page) {
-            return;
-        }
-        var lang = page.querySelector('.fullCrewAudioSelect--lang');
-        if (!lang) {
-            return;
-        }
-        var current = audioState.language;
-        lang.innerHTML = '';
-        lang.appendChild(new Option('All languages', ''));
-        audioState.languages.forEach(function (name) {
-            lang.appendChild(new Option(name, name));
-        });
-        lang.value = current;
-    }
-
-    function paintAudioPage() {
-        var mount = Core.findMount();
-        var page = document.getElementById(AUDIO_PAGE_ID);
-        if (!page) {
-            page = Core.el('div', 'fullCrewPage fullCrewAudioPage');
-            page.id = AUDIO_PAGE_ID;
-            mount.appendChild(page);
-        }
-        page.innerHTML = '';
-
-        var wrap = Core.el('div', 'fullCrewAudioWrap');
-        var header = Core.el('div', 'fullCrewAudioHeader');
-        var titles = Core.el('div');
-        titles.appendChild(Core.el('h1', 'fullCrewAudioTitle', 'Audio Tracks'));
-        titles.appendChild(Core.el(
-            'p',
-            'fullCrewAudioLead',
-            'Browse by the kind of audio in the file — commentary, descriptions, dubs, isolated scores — without picking a show first.'
-        ));
-        header.appendChild(titles);
-        var refresh = Core.el('button', 'fullCrewAudioButton', audioState.isIndexing ? 'Indexing…' : 'Refresh index');
-        refresh.type = 'button';
-        refresh.disabled = audioState.isIndexing;
-        refresh.addEventListener('click', function () {
-            refresh.disabled = true;
-            refresh.textContent = 'Indexing…';
-            Core.postJson('FullCrew/audio/refresh', {}).then(function () {
-                window.setTimeout(function () {
-                    syncAudioUi();
-                }, 600);
-            }).catch(function () {
-                refresh.disabled = false;
-                refresh.textContent = 'Refresh index';
-            });
-        });
-        header.appendChild(refresh);
-        wrap.appendChild(header);
-
-        var chips = Core.el('div', 'fullCrewAudioChips');
-        function addChip(id, name, count) {
-            var chip = Core.el('button', 'fullCrewAudioChip' + (audioState.typeId === id ? ' is-active' : ''));
-            chip.type = 'button';
-            chip.appendChild(Core.el('span', 'fullCrewAudioChipName', name));
-            chip.appendChild(Core.el('span', 'fullCrewAudioChipCount', String(count || 0)));
-            chip.addEventListener('click', function () {
-                audioState.typeId = id;
-                writeAudioHash();
-                paintAudioPage();
-                loadAudioItems(true);
-            });
-            chips.appendChild(chip);
-        }
-        var allCount = audioState.types.reduce(function (sum, t) {
-            return sum + (Core.prop(t, 'ItemCount', 'itemCount') || 0);
-        }, 0);
-        addChip('all', 'All special audio', allCount);
-        audioState.types.forEach(function (type) {
-            addChip(Core.prop(type, 'Id', 'id'), Core.prop(type, 'Name', 'name'), Core.prop(type, 'ItemCount', 'itemCount'));
-        });
-        wrap.appendChild(chips);
-
-        var meta = null;
-        audioState.types.forEach(function (type) {
-            if (Core.prop(type, 'Id', 'id') === audioState.typeId) {
-                meta = type;
-            }
-        });
-        wrap.appendChild(Core.el(
-            'p',
-            'fullCrewAudioTypeDesc',
-            meta
-                ? (Core.prop(meta, 'Description', 'description') || '')
-                : (audioState.typeId === 'commentary'
-                    ? 'Director, cast, and crew commentary — across every show and movie.'
-                    : 'Every movie and episode that carries a labeled extra audio track.')
-        ));
-
-        var toolbar = Core.el('div', 'fullCrewAudioToolbar');
-        var search = document.createElement('input');
-        search.type = 'search';
-        search.className = 'fullCrewAudioSearch';
-        search.placeholder = 'Search title, show, or track name';
-        search.value = audioState.search;
-        search.addEventListener('change', function () {
-            audioState.search = search.value.trim();
-            writeAudioHash();
-            loadAudioItems(true);
-        });
-        search.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter') {
-                audioState.search = search.value.trim();
-                writeAudioHash();
-                loadAudioItems(true);
-            }
-        });
-        toolbar.appendChild(search);
-
-        var lang = document.createElement('select');
-        lang.className = 'fullCrewAudioSelect fullCrewAudioSelect--lang';
-        lang.appendChild(new Option('All languages', ''));
-        audioState.languages.forEach(function (name) {
-            lang.appendChild(new Option(name, name));
-        });
-        lang.value = audioState.language;
-        lang.addEventListener('change', function () {
-            audioState.language = lang.value;
-            writeAudioHash();
-            loadAudioItems(true);
-        });
-        toolbar.appendChild(lang);
-
-        var sort = document.createElement('select');
-        sort.className = 'fullCrewAudioSelect';
-        [['name', 'Name'], ['series', 'Show'], ['year', 'Year'], ['date', 'Premiere'], ['added', 'Date added']].forEach(function (pair) {
-            sort.appendChild(new Option(pair[1], pair[0]));
-        });
-        sort.value = audioState.sort;
-        sort.addEventListener('change', function () {
-            audioState.sort = sort.value;
-            writeAudioHash();
-            loadAudioItems(true);
-        });
-        toolbar.appendChild(sort);
-        wrap.appendChild(toolbar);
-
-        wrap.appendChild(Core.el('div', 'fullCrewAudioStatus', ''));
-        wrap.appendChild(Core.el('div', 'fullCrewAudioGrid'));
-        wrap.appendChild(Core.el('div', 'fullCrewAudioMore'));
-        page.appendChild(wrap);
-        page.setAttribute('data-loaded', '1');
     }
 
     function renderAudioDetailChips() {
-        if (isAudioRoute()) {
+        if (peekFullCrewRoute()) {
             return;
         }
         var views = document.querySelectorAll('.itemDetailPage, .view:not(.hide), .mainAnimatedPage:not(.hide)');
@@ -5612,7 +5369,7 @@
                     }
                     seen[typeId] = true;
                     var chip = Core.el('a', 'fullCrewAudioChip fullCrewAudioChip--link', Core.prop(track, 'TypeName', 'typeName') || typeId);
-                    chip.href = AUDIO_HASH + '?type=' + encodeURIComponent(typeId);
+                    chip.href = statsBucketItemsHash(AUDIO_TRACKS_CATEGORY, typeId);
                     bar.appendChild(chip);
                 });
                 tracks.slice(0, 3).forEach(function (track) {
@@ -5630,61 +5387,56 @@
         });
     }
 
-    function syncAudioUi() {
-        injectAudioTab();
-        if (!isAudioRoute()) {
-            tearDownAudioPage();
-            renderAudioDetailChips();
-            return;
+    function ensureAudioTypes(force) {
+        if (!force && audioTypesFetched) {
+            return Promise.resolve(audioState.types);
         }
-
-        var parsed = parseAudioQuery();
-        audioState.typeId = parsed.type;
-        audioState.search = parsed.search;
-        audioState.language = parsed.language;
-        audioState.sort = parsed.sort;
-
-        applyRouteChrome(peekFullCrewRoute(), { pending: false, setTitle: false });
-        Core.PageTitle.claim('Audio Tracks');
-        injectAudioTab();
-
-        Core.getJson('FullCrew/audio/types').then(function (data) {
+        if (audioTypesPromise) {
+            return audioTypesPromise;
+        }
+        audioTypesPromise = Core.getJson('FullCrew/audio/types').then(function (data) {
             audioEnabled = Core.prop(data, 'Enabled', 'enabled') !== false;
             audioState.isIndexing = !!Core.prop(data, 'IsIndexing', 'isIndexing');
             audioState.types = Core.prop(data, 'Types', 'types') || [];
-            if (!audioEnabled) {
-                tearDownAudioPage();
-                return;
-            }
-            if (!isAudioRoute()) {
-                return;
-            }
-            paintAudioPage();
-            loadAudioItems(true);
+            audioTypesFetched = true;
+            audioTypesPromise = null;
+            return audioState.types;
         }).catch(function (err) {
-            console.warn('[FullCrew] audio types failed', err);
-            paintAudioPage();
-            var status = document.querySelector('.fullCrewAudioStatus');
-            if (status) {
-                status.textContent = 'Could not load audio types.';
-            }
+            audioTypesPromise = null;
+            throw err;
         });
+        return audioTypesPromise;
     }
 
     function scanAll() {
-        scan();
+        redirectLegacyAudioHash();
+        removeLegacyAudioChrome();
+        var route = peekFullCrewRoute();
+        if (!route) {
+            scan();
+            renderAudioDetailChips();
+        }
         syncStatsUi();
-        syncAudioUi();
-        syncSceneIdentifyButton();
-        if (peekFullCrewRoute()) {
-            Core.PageTitle.tick();
+        if (!route) {
+            syncSceneIdentifyButton();
+        }
+        if (route) {
+            claimRouteTitle(route);
         } else if (Core.PageTitle.isOwned()) {
             Core.PageTitle.release();
         }
     }
 
+    function ensurePluginTabsPresent() {
+        if (!document.getElementById(STATS_TAB_ID)) {
+            injectStatsTab();
+        }
+    }
+
     function start() {
         ensureStyles();
+        redirectLegacyAudioHash();
+        removeLegacyAudioChrome();
 
         // Immediate route sync — don't wait on config for hash chrome.
         var early = peekFullCrewRoute();
@@ -5703,10 +5455,18 @@
 
         var observer = new MutationObserver(function (mutations) {
             if (mutationTouchesFullCrewOnly(mutations)) {
-                if (Core.PageTitle.isOwned()) {
-                    Core.PageTitle.tick();
-                }
                 return;
+            }
+            var route = peekFullCrewRoute();
+            if (route) {
+                var overlay = document.getElementById(STATS_PAGE_ID)
+                    || document.getElementById(STUDIO_PAGE_ID);
+                if (overlay && (overlay.getAttribute('data-loaded') === '1'
+                    || overlay.getAttribute('data-shell') === '1'
+                    || overlay.getAttribute('data-loading') === '1')) {
+                    ensurePluginTabsPresent();
+                    return;
+                }
             }
             window.clearTimeout(start._timer);
             start._timer = window.setTimeout(scanAll, 180);
@@ -5721,9 +5481,10 @@
 
         window.addEventListener('hashchange', function () {
             syncCreditsNavState();
+            redirectLegacyAudioHash();
             var route = peekFullCrewRoute();
             if (route) {
-                applyRouteChrome(route, { pending: true, setTitle: true });
+                applyRouteChrome(route, { pending: !routePageMounted(route), setTitle: false });
                 claimRouteTitle(route);
                 scanAll();
             } else {
@@ -5742,7 +5503,7 @@
                         mount(view);
                     }
                     syncStatsUi();
-                    Core.PageTitle.tick();
+                    claimRouteTitle(peekFullCrewRoute());
                 }, 30);
                 return;
             }

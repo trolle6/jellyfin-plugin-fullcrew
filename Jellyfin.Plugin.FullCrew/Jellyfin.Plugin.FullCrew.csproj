@@ -8,9 +8,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <Version>1.8.5.0</Version>
-    <FileVersion>1.8.5.0</FileVersion>
-    <AssemblyVersion>1.8.5.0</AssemblyVersion>
+    <Version>1.8.9.0</Version>
+    <FileVersion>1.8.9.0</FileVersion>
+    <AssemblyVersion>1.8.9.0</AssemblyVersion>
   </PropertyGroup>
 
   <ItemGroup>

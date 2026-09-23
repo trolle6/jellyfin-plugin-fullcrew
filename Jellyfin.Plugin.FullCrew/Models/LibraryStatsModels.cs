@@ -14,6 +14,12 @@ public class LibraryStatsResponse
     public DateTime GeneratedAt { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the server is still building the cache.
+    /// The client should poll instead of treating this as a finished overview.
+    /// </summary>
+    public bool IsBuilding { get; set; }
+
+    /// <summary>
     /// Gets or sets the number of movies counted.
     /// </summary>
     public int MovieCount { get; set; }
@@ -252,6 +258,11 @@ public class LibraryStatsCategoryResponse
     public DateTime GeneratedAt { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the server is still building the cache.
+    /// </summary>
+    public bool IsBuilding { get; set; }
+
+    /// <summary>
     /// Gets or sets whether the list was capped (see <see cref="TotalBuckets"/>).
     /// </summary>
     public bool Truncated { get; set; }
@@ -280,11 +291,17 @@ public class LibraryStatsBucketItemsResponse
     public string Bucket { get; set; } = string.Empty;
     /// <summary>When generated (UTC).</summary>
     public DateTime GeneratedAt { get; set; }
-    /// <summary>Matches before safety cap.</summary>
+    /// <summary>Gets or sets a value indicating whether the server is still building the cache.</summary>
+    public bool IsBuilding { get; set; }
+    /// <summary>Page offset.</summary>
+    public int StartIndex { get; set; }
+    /// <summary>Matches before this page.</summary>
     public int TotalCount { get; set; }
-    /// <summary>Whether capped.</summary>
+    /// <summary>Whether more titles exist after this page.</summary>
+    public bool HasMore { get; set; }
+    /// <summary>Whether the hard safety cap was hit.</summary>
     public bool Truncated { get; set; }
-    /// <summary>Contributing titles.</summary>
+    /// <summary>Contributing titles for this page.</summary>
     public IReadOnlyList<LibraryStatsBucketItem> Items { get; set; } = [];
 }
 

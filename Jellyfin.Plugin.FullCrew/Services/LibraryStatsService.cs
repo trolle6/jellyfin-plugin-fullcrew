@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
+using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Database.Implementations.Enums;
@@ -29,6 +31,10 @@ public class LibraryStatsService
     private const int MaxCategoryBuckets = 2000;
     /// <summary>Safety cap for bucket item lists.</summary>
     private const int MaxBucketItems = 20000;
+    /// <summary>Overview only — full year list lives on the detail page.</summary>
+    private const int OverviewYearLimit = 16;
+    private const int DefaultBucketPageSize = 80;
+    private const int MaxBucketPageSize = 200;
     private const int SeriesEpisodeSampleLimit = 12;
     /// <summary>Episodes sampled to fill series cast (always merged, still once per series).</summary>
     private const int SeriesPeopleEpisodeSampleLimit = 24;
@@ -92,6 +98,8 @@ public class LibraryStatsService
     private readonly ILibraryManager _libraryManager;
     private readonly IMemoryCache _memoryCache;
     private readonly ILogger<LibraryStatsService> _logger;
+    private readonly object _buildSync = new();
+    private readonly HashSet<string> _buildsInFlight = [];
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LibraryStatsService"/> class.
@@ -119,7 +127,16 @@ public class LibraryStatsService
             return EmptyResponse();
         }
 
-        var aggregate = GetOrBuildAggregate(user);
+        if (!TryGetCached(user, out var aggregate))
+        {
+            StartBackgroundBuild(user);
+            return new LibraryStatsResponse
+            {
+                IsBuilding = true,
+                GeneratedAt = DateTime.UtcNow
+            };
+        }
+
         return ProjectOverview(aggregate, ResolveYearSort(config?.LibraryStatsYearSort));
     }
 
@@ -142,14 +159,30 @@ public class LibraryStatsService
             return null;
         }
 
-        var aggregate = GetOrBuildAggregate(user);
+        if (!TryGetCached(user, out var aggregate))
+        {
+            StartBackgroundBuild(user);
+            return new LibraryStatsCategoryResponse
+            {
+                Category = NormalizeCategoryKey(category) ?? category,
+                Title = "Library Stats",
+                IsBuilding = true,
+                GeneratedAt = DateTime.UtcNow
+            };
+        }
+
         return ProjectCategory(aggregate, category);
     }
 
     /// <summary>
     /// Gets every Movie/Series title that contributes to one stats bucket.
     /// </summary>
-    public LibraryStatsBucketItemsResponse? GetBucketItems(User? user, string category, string? bucket)
+    public LibraryStatsBucketItemsResponse? GetBucketItems(
+        User? user,
+        string category,
+        string? bucket,
+        int startIndex = 0,
+        int limit = DefaultBucketPageSize)
     {
         var config = Plugin.Instance?.Configuration;
         if (config is { EnableLibraryStats: false })
@@ -162,14 +195,24 @@ public class LibraryStatsService
             return null;
         }
 
-        var aggregate = GetOrBuildAggregate(user);
-        var catInfo = ProjectCategory(aggregate, category);
-        if (catInfo is null)
+        if (!TryGetCached(user, out var aggregate))
+        {
+            StartBackgroundBuild(user);
+            return new LibraryStatsBucketItemsResponse
+            {
+                Category = category,
+                Bucket = bucket.Trim(),
+                IsBuilding = true,
+                GeneratedAt = DateTime.UtcNow
+            };
+        }
+
+        if (!LibraryStatsCategories.TryResolve(category, out var canonical, out var title))
         {
             return null;
         }
 
-        var catKey = NormalizeCategoryKey(catInfo.Category);
+        var catKey = NormalizeCategoryKey(canonical);
         if (string.IsNullOrEmpty(catKey))
         {
             catKey = NormalizeCategoryKey(category);
@@ -203,35 +246,75 @@ public class LibraryStatsService
             .ToList();
 
         var totalCount = ordered.Count;
-        var truncated = totalCount > MaxBucketItems;
-        if (truncated)
-        {
-            ordered = ordered.Take(MaxBucketItems).ToList();
-        }
+        var capped = ordered.Count > MaxBucketItems
+            ? ordered.Take(MaxBucketItems).ToList()
+            : ordered;
+        startIndex = Math.Max(0, startIndex);
+        limit = Math.Clamp(limit <= 0 ? DefaultBucketPageSize : limit, 1, MaxBucketPageSize);
+        var page = capped.Skip(startIndex).Take(limit).ToList();
+        var hasMore = startIndex + page.Count < capped.Count;
 
         return new LibraryStatsBucketItemsResponse
         {
-            Category = catInfo.Category,
-            CategoryTitle = catInfo.Title,
+            Category = canonical,
+            CategoryTitle = title,
             Bucket = bucket.Trim(),
             GeneratedAt = aggregate.GeneratedAt,
+            StartIndex = startIndex,
             TotalCount = totalCount,
-            Truncated = truncated,
-            Items = ordered.Select(ToBucketItemDto).ToList()
+            HasMore = hasMore,
+            Truncated = totalCount > MaxBucketItems,
+            Items = page.Select(ToBucketItemDto).ToList()
         };
     }
 
-    private LibraryStatsAggregate GetOrBuildAggregate(User? user)
+    private string CacheKeyFor(User? user)
     {
-        var cacheKey = CacheKeyPrefix + (user?.Id.ToString("N", CultureInfo.InvariantCulture) ?? "all");
-        if (_memoryCache.TryGetValue(cacheKey, out LibraryStatsAggregate? cached) && cached is not null)
+        return CacheKeyPrefix + (user?.Id.ToString("N", CultureInfo.InvariantCulture) ?? "all");
+    }
+
+    private bool TryGetCached(User? user, [NotNullWhen(true)] out LibraryStatsAggregate? aggregate)
+    {
+        if (_memoryCache.TryGetValue(CacheKeyFor(user), out LibraryStatsAggregate? cached) && cached is not null)
         {
-            return cached;
+            aggregate = cached;
+            return true;
         }
 
-        var aggregate = BuildAggregate(user);
-        _memoryCache.Set(cacheKey, aggregate, TimeSpan.FromMinutes(CacheMinutes));
-        return aggregate;
+        aggregate = null;
+        return false;
+    }
+
+    private void StartBackgroundBuild(User? user)
+    {
+        var cacheKey = CacheKeyFor(user);
+        lock (_buildSync)
+        {
+            if (!_buildsInFlight.Add(cacheKey))
+            {
+                return;
+            }
+        }
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var aggregate = BuildAggregate(user);
+                _memoryCache.Set(cacheKey, aggregate, TimeSpan.FromMinutes(CacheMinutes));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Background library stats build failed.");
+            }
+            finally
+            {
+                lock (_buildSync)
+                {
+                    _buildsInFlight.Remove(cacheKey);
+                }
+            }
+        });
     }
 
     private LibraryStatsAggregate BuildAggregate(User? user)
@@ -523,7 +606,7 @@ public class LibraryStatsService
         var ratings = ToTopBuckets(agg.RatingCounts, total, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
         var decades = ToDecadeBuckets(agg.DecadeCounts, total);
         // Years: every year with titles (no Top-N / Other), chronological by default.
-        var years = ToYearBuckets(agg.YearCounts, total, yearSort);
+        var years = ToYearBuckets(agg.YearCounts, total, yearSort, OverviewYearLimit);
         var communityRatings = ToOrderedBuckets(agg.CommunityCounts, total, CommunityRatingBucketOrder);
         var languages = ToTopBuckets(agg.LanguageCounts, total, TopBucketLimit, foldUnknown: false, omitDominantOther: true);
         var collections = ToTopBuckets(agg.CollectionCounts, SumCounts(agg.CollectionCounts), TopBucketLimit, foldUnknown: false, omitDominantOther: true, itemIds: agg.CollectionItemIds, itemType: "BoxSet");
@@ -1872,7 +1955,8 @@ public class LibraryStatsService
     internal static IReadOnlyList<LibraryStatsBucket> ToYearBuckets(
         IReadOnlyDictionary<string, int> counts,
         int total,
-        string sortMode = "OldestFirst")
+        string sortMode = "OldestFirst",
+        int? maxCount = null)
     {
         if (counts.Count == 0 || total <= 0)
         {
@@ -1891,7 +1975,7 @@ public class LibraryStatsService
                 .OrderBy(kv => YearSortKey(kv.Key, unknownLast: true))
         };
 
-        return ordered
+        var list = ordered
             .Select(kv => new LibraryStatsBucket
             {
                 Name = kv.Key,
@@ -1899,6 +1983,13 @@ public class LibraryStatsService
                 Percent = Percent(kv.Value, total)
             })
             .ToList();
+
+        if (maxCount is > 0 && list.Count > maxCount.Value)
+        {
+            return list.Take(maxCount.Value).ToList();
+        }
+
+        return list;
     }
 
     /// <summary>
