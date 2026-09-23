@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.8.6.0';
+    var PLUGIN_VERSION = '1.8.7.0';
     var ROLE_PREVIEW_MAX = 2;
     var CREW_JOB_TITLES = {
         'creator': 1,
@@ -896,12 +896,13 @@
                     }
                 });
                 var poster = el('div', 'fullCrewStudioPoster');
-                var imgUrl = primaryImageUrl(id);
+                var imgUrl = primaryImageUrl(id, 240);
                 if (imgUrl && opts.imageTag) {
                     var img = el('img', 'fullCrewStudioPosterImg');
                     img.src = imgUrl;
                     img.alt = opts.name || '';
                     img.loading = 'lazy';
+                    img.decoding = 'async';
                     img.onerror = function () {
                         var fallback = el('div', 'fullCrewStudioPosterFallback', (opts.type || 'Title').charAt(0));
                         if (img.parentNode) {
@@ -2893,7 +2894,9 @@
 
         statsFetchInFlight = pollUntilReady('FullCrew/stats', 0)
             .then(function (data) {
-                statsCachedData = data;
+                if (!prop(data, 'IsBuilding', 'isBuilding')) {
+                    statsCachedData = data;
+                }
                 statsFetchInFlight = null;
                 return data;
             })
@@ -2916,7 +2919,9 @@
 
         statsCategoryFetchInFlight[key] = pollUntilReady('FullCrew/stats/' + encodeURIComponent(key), 0)
             .then(function (data) {
-                statsCategoryCache[key] = data;
+                if (!prop(data, 'IsBuilding', 'isBuilding')) {
+                    statsCategoryCache[key] = data;
+                }
                 delete statsCategoryFetchInFlight[key];
                 return data;
             })
@@ -3581,6 +3586,42 @@
         maybeOpenFavoritesFromFlag();
     }
 
+    function scheduleIdle(fn) {
+        if (typeof window.requestAnimationFrame === 'function') {
+            return window.requestAnimationFrame(fn);
+        }
+        return window.setTimeout(fn, 16);
+    }
+
+    function paintStatsChartsIdle(page, pending, mode) {
+        function paintBatch() {
+            if (!page || !document.body.contains(page) || !pending.length) {
+                return;
+            }
+            var n = Math.min(2, pending.length);
+            var i;
+            for (i = 0; i < n; i++) {
+                var job = pending.shift();
+                if (!job || !job.host) {
+                    continue;
+                }
+                renderChartInto(
+                    job.host,
+                    applyYearSortIfNeeded(job.buckets, job.categoryKey),
+                    mode,
+                    true,
+                    job.categoryKey
+                );
+            }
+            if (pending.length) {
+                scheduleIdle(paintBatch);
+            }
+        }
+        if (pending.length) {
+            scheduleIdle(paintBatch);
+        }
+    }
+
     function formatPercent(value) {
         var n = Number(value);
         if (!isFinite(n)) {
@@ -3910,6 +3951,7 @@
 
         var sections = collectStatsSections(data);
         var grid = createElement('div', 'fullCrewStatsGrid');
+        var pendingCharts = [];
         sections.forEach(function (section) {
             var buckets = section.buckets || normalizeBuckets(prop(data, section.keyPascal, section.keyCamel));
             if (!buckets.length) {
@@ -3947,18 +3989,17 @@
             if (section.categoryKey) {
                 chartHost.setAttribute('data-category', section.categoryKey);
             }
-            renderChartInto(
-                chartHost,
-                applyYearSortIfNeeded(buckets, section.categoryKey || null),
-                mode,
-                true,
-                section.categoryKey || null
-            );
             card.appendChild(chartHost);
             card._buckets = buckets;
             grid.appendChild(card);
+            pendingCharts.push({
+                host: chartHost,
+                buckets: buckets,
+                categoryKey: section.categoryKey || null
+            });
         });
         body.appendChild(grid);
+        paintStatsChartsIdle(page, pendingCharts, mode);
 
         var generatedAt = prop(data, 'GeneratedAt', 'generatedAt');
         if (generatedAt) {
@@ -5371,9 +5412,9 @@
     function audioImageUrl(itemId) {
         var client = Core.apiClient();
         if (client && typeof client.getImageUrl === 'function') {
-            return client.getImageUrl(itemId, { type: 'Primary', maxHeight: 360, quality: 80 });
+            return client.getImageUrl(itemId, { type: 'Primary', maxHeight: 220, quality: 72 });
         }
-        return '/Items/' + itemId + '/Images/Primary?maxHeight=360&quality=80';
+        return '/Items/' + itemId + '/Images/Primary?maxHeight=220&quality=72';
     }
 
     function pad2(n) {
@@ -5396,7 +5437,7 @@
     }
 
     function renderAudioCard(item) {
-        var card = Core.el('a', 'fullCrewAudioCard');
+        var card = Core.el('a', 'card overflowBackdropCard fullCrewAudioCard');
         var itemId = Core.prop(item, 'ItemId', 'itemId');
         card.href = Core.detailsHashForItem(itemId);
         card.addEventListener('click', function (e) {
@@ -5405,10 +5446,12 @@
         });
 
         var imageId = Core.prop(item, 'ImageItemId', 'imageItemId') || itemId;
-        var poster = Core.el('div', 'fullCrewAudioPoster');
+        var poster = Core.el('div', 'cardImageContainer coveredImage fullCrewAudioPoster');
         var img = document.createElement('img');
         img.alt = '';
+        img.className = 'cardImage';
         img.loading = 'lazy';
+        img.decoding = 'async';
         img.src = audioImageUrl(imageId);
         img.onerror = function () {
             poster.classList.add('is-fallback');
@@ -5419,7 +5462,7 @@
         poster.appendChild(img);
         card.appendChild(poster);
 
-        var body = Core.el('div', 'fullCrewAudioCardBody');
+        var body = Core.el('div', 'cardFooter fullCrewAudioCardBody');
         body.appendChild(Core.el('div', 'fullCrewAudioCardKicker', audioItemHeading(item)));
         var series = Core.prop(item, 'SeriesName', 'seriesName');
         body.appendChild(Core.el('div', 'fullCrewAudioCardName', series ? (Core.prop(item, 'Name', 'name') || '') : (Core.prop(item, 'MediaType', 'mediaType') || '')));
@@ -5498,11 +5541,13 @@
             } else {
                 audioState.items = audioState.items.concat(incoming);
             }
-            incoming.forEach(function (item) {
-                if (grid) {
-                    grid.appendChild(renderAudioCard(item));
-                }
-            });
+            if (grid && incoming.length) {
+                var frag = document.createDocumentFragment();
+                incoming.forEach(function (item) {
+                    frag.appendChild(renderAudioCard(item));
+                });
+                grid.appendChild(frag);
+            }
             if (status) {
                 status.textContent = audioState.items.length ? (audioState.total + (audioState.total === 1 ? ' title' : ' titles')) : audioEmptyMessage();
             }
@@ -5860,11 +5905,16 @@
     }
 
     function scanAll() {
-        scan();
+        var route = peekFullCrewRoute();
+        if (!route) {
+            scan();
+        }
         syncStatsUi();
         syncAudioUi();
-        syncSceneIdentifyButton();
-        if (peekFullCrewRoute()) {
+        if (!route) {
+            syncSceneIdentifyButton();
+        }
+        if (route) {
             Core.PageTitle.tick();
         } else if (Core.PageTitle.isOwned()) {
             Core.PageTitle.release();
@@ -5895,6 +5945,22 @@
                     Core.PageTitle.tick();
                 }
                 return;
+            }
+            var route = peekFullCrewRoute();
+            if (route) {
+                var overlay = document.getElementById(STATS_PAGE_ID)
+                    || document.getElementById(STUDIO_PAGE_ID)
+                    || document.getElementById(AUDIO_PAGE_ID);
+                if (overlay && (overlay.getAttribute('data-loaded') === '1'
+                    || overlay.getAttribute('data-shell') === '1'
+                    || overlay.getAttribute('data-loading') === '1')) {
+                    injectStatsTab();
+                    injectAudioTab();
+                    if (Core.PageTitle.isOwned()) {
+                        Core.PageTitle.tick();
+                    }
+                    return;
+                }
             }
             window.clearTimeout(start._timer);
             start._timer = window.setTimeout(scanAll, 180);

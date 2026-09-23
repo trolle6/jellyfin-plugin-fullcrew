@@ -20,10 +20,13 @@ namespace Jellyfin.Plugin.FullCrew.Services;
 /// </summary>
 public sealed class AudioTrackIndexService : IDisposable
 {
+    private const int VisibleCacheSeconds = 90;
+
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger<AudioTrackIndexService> _logger;
     private readonly object _sync = new();
     private readonly List<IndexedTrack> _tracks = [];
+    private readonly Dictionary<Guid, (HashSet<Guid> Ids, DateTime Expires)> _visibleCache = [];
 
     private DateTime? _indexedAt;
     private bool _isIndexing;
@@ -343,6 +346,7 @@ public sealed class AudioTrackIndexService : IDisposable
             _tracks.AddRange(next);
             _indexedAt = DateTime.UtcNow;
             _isIndexing = false;
+            _visibleCache.Clear();
         }
 
         _logger.LogInformation(
@@ -370,6 +374,7 @@ public sealed class AudioTrackIndexService : IDisposable
         {
             _tracks.RemoveAll(t => t.ItemId == item.Id);
             _tracks.AddRange(extracted);
+            _visibleCache.Clear();
         }
     }
 
@@ -386,34 +391,78 @@ public sealed class AudioTrackIndexService : IDisposable
         lock (_sync)
         {
             _tracks.RemoveAll(t => t.ItemId == itemId);
+            _visibleCache.Clear();
         }
+    }
+
+    /// <summary>
+    /// Keeps tracks whose item id is in the user's visible set. Used by tests.
+    /// </summary>
+    internal static List<T> FilterByVisibleItemIds<T>(
+        IReadOnlyList<T> items,
+        Func<T, Guid> itemId,
+        IReadOnlySet<Guid>? visibleIds)
+    {
+        if (visibleIds is null)
+        {
+            return items.ToList();
+        }
+
+        var result = new List<T>(Math.Min(items.Count, visibleIds.Count));
+        foreach (var item in items)
+        {
+            if (visibleIds.Contains(itemId(item)))
+            {
+                result.Add(item);
+            }
+        }
+
+        return result;
     }
 
     private List<IndexedTrack> FilterVisible(IReadOnlyList<IndexedTrack> snapshot, User? user)
     {
         if (user is null)
         {
-            return snapshot.ToList();
+            return snapshot as List<IndexedTrack> ?? snapshot.ToList();
         }
 
-        var visibility = new Dictionary<Guid, bool>();
-        var result = new List<IndexedTrack>(snapshot.Count);
-        foreach (var track in snapshot)
+        return FilterByVisibleItemIds(snapshot, static t => t.ItemId, GetVisibleItemIds(user));
+    }
+
+    private HashSet<Guid> GetVisibleItemIds(User user)
+    {
+        lock (_sync)
         {
-            if (!visibility.TryGetValue(track.ItemId, out var visible))
+            if (_visibleCache.TryGetValue(user.Id, out var cached) && cached.Expires > DateTime.UtcNow)
             {
-                var item = _libraryManager.GetItemById(track.ItemId);
-                visible = item is not null && item.IsVisibleStandalone(user);
-                visibility[track.ItemId] = visible;
-            }
-
-            if (visible)
-            {
-                result.Add(track);
+                return cached.Ids;
             }
         }
 
-        return result;
+        var ids = QueryVisibleItemIds(user);
+        lock (_sync)
+        {
+            _visibleCache[user.Id] = (ids, DateTime.UtcNow.AddSeconds(VisibleCacheSeconds));
+        }
+
+        return ids;
+    }
+
+    /// <summary>
+    /// One Jellyfin query for ids the user can see — not a GetItemById per title.
+    /// </summary>
+    private HashSet<Guid> QueryVisibleItemIds(User user)
+    {
+        var query = new InternalItemsQuery(user)
+        {
+            Recursive = true,
+            IsVirtualItem = false,
+            IncludeItemTypes = ResolveItemKinds(Plugin.Instance?.Configuration)
+        };
+
+        var raw = _libraryManager.GetItemIds(query);
+        return raw as HashSet<Guid> ?? [.. raw];
     }
 
     private List<IndexedTrack> Extract(BaseItem item)

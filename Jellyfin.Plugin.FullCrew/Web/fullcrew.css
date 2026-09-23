@@ -798,6 +798,13 @@ a.fullCrewStatsItemLink:focus,
 .fullCrewStatsItemGrid .fullCrewStudioCard {
     flex: none;
     width: auto;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 14rem;
+}
+
+.fullCrewStatsChartSection {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 22rem;
 }
 
 .fullCrewStatsMore {
@@ -1617,6 +1624,11 @@ a.fullCrewStatsItemLink:focus,
     gap: 1em;
 }
 
+.fullCrewAudioGrid > .card.fullCrewAudioCard {
+    width: auto;
+    margin: 0;
+}
+
 .fullCrewAudioCard {
     display: flex;
     flex-direction: column;
@@ -1627,6 +1639,8 @@ a.fullCrewStatsItemLink:focus,
     overflow: hidden;
     background: var(--fc-surface);
     border: 1px solid rgba(255, 255, 255, 0.06);
+    content-visibility: auto;
+    contain-intrinsic-size: auto 16rem;
 }
 
 .fullCrewAudioCard:hover,

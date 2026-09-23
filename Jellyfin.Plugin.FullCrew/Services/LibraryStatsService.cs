@@ -207,13 +207,12 @@ public class LibraryStatsService
             };
         }
 
-        var catInfo = ProjectCategory(aggregate, category);
-        if (catInfo is null)
+        if (!LibraryStatsCategories.TryResolve(category, out var canonical, out var title))
         {
             return null;
         }
 
-        var catKey = NormalizeCategoryKey(catInfo.Category);
+        var catKey = NormalizeCategoryKey(canonical);
         if (string.IsNullOrEmpty(catKey))
         {
             catKey = NormalizeCategoryKey(category);
@@ -257,8 +256,8 @@ public class LibraryStatsService
 
         return new LibraryStatsBucketItemsResponse
         {
-            Category = catInfo.Category,
-            CategoryTitle = catInfo.Title,
+            Category = canonical,
+            CategoryTitle = title,
             Bucket = bucket.Trim(),
             GeneratedAt = aggregate.GeneratedAt,
             StartIndex = startIndex,
