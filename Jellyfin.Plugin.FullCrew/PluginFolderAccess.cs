@@ -25,7 +25,7 @@ internal static class PluginFolderAccess
     /// </summary>
     internal static Version StartupSafeVersion(Version? assemblyVersion)
     {
-        var version = assemblyVersion ?? new Version(1, 8, 7, 0);
+        var version = assemblyVersion ?? new Version(1, 8, 8, 0);
         var build = version.Build < 0 ? 0 : version.Build;
         return new Version(version.Major, version.Minor, build);
     }

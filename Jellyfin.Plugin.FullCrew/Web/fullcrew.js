@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.8.7.0';
+    var PLUGIN_VERSION = '1.8.8.0';
     var ROLE_PREVIEW_MAX = 2;
     var CREW_JOB_TITLES = {
         'creator': 1,
@@ -121,8 +121,13 @@
      */
     var TitleLock = (function () {
         var existing = window.__fullCrewTitleLock;
-        if (existing && existing.__fullCrewTitleLockV2) {
+        if (existing && existing.__fullCrewTitleLockV3) {
             return existing;
+        }
+        if (existing && typeof existing.release === 'function') {
+            try {
+                existing.release();
+            } catch (e) { /* replace older lock */ }
         }
 
         var desired = (existing && typeof existing.desired === 'function')
@@ -131,7 +136,6 @@
         var hooked = !!(window.__fcTitleHooked || (existing && existing.isHooked && existing.isHooked()));
         var nativeGet = window.__fcTitleNativeGet || null;
         var nativeSet = window.__fcTitleNativeSet || null;
-        var rafId = 0;
 
         function resolveNative() {
             if (typeof nativeGet === 'function' && typeof nativeSet === 'function') {
@@ -197,62 +201,39 @@
             }
         }
 
-        function stopRaf() {
-            if (rafId) {
-                try {
-                    window.cancelAnimationFrame(rafId);
-                } catch (e) { /* ignore */ }
-                rafId = 0;
+        function currentTitle() {
+            try {
+                return resolveNative() ? nativeGet.call(document) : (document.title || '');
+            } catch (e) {
+                return document.title || '';
             }
-        }
-
-        function startRaf() {
-            if (rafId || typeof window.requestAnimationFrame !== 'function') {
-                return;
-            }
-            function tick() {
-                rafId = 0;
-                if (desired == null) {
-                    return;
-                }
-                if (!peekFullCrewRoute()) {
-                    // Route left without release — drop lock so Home can own the title.
-                    desired = null;
-                    window.__fcTitleDesired = null;
-                    return;
-                }
-                try {
-                    var cur = resolveNative() ? nativeGet.call(document) : (document.title || '');
-                    if (cur !== desired) {
-                        writeNative(desired);
-                    }
-                } catch (e) { /* ignore */ }
-                rafId = window.requestAnimationFrame(tick);
-            }
-            rafId = window.requestAnimationFrame(tick);
         }
 
         function hold(title) {
-            desired = title || 'Full Crew';
+            var next = title || 'Full Crew';
+            if (desired === next && currentTitle() === next) {
+                ensureHook();
+                return;
+            }
+            desired = next;
             window.__fcTitleDesired = desired;
             ensureHook();
             writeNative(desired);
-            startRaf();
         }
 
         function release() {
             desired = null;
             window.__fcTitleDesired = null;
-            stopRaf();
         }
 
         var api = {
-            __fullCrewTitleLockV2: true,
+            __fullCrewTitleLockV3: true,
             hold: hold,
             release: release,
             desired: function () {
                 return desired;
             },
+            current: currentTitle,
             isHooked: function () {
                 return hooked;
             }
@@ -279,12 +260,19 @@
             'body.' + STATS_BODY_CLASS + ' .mainAnimatedPages .emptyMessage,' +
             'body.' + STUDIO_BODY_CLASS + ' .mainAnimatedPages .emptyMessage' +
             '{visibility:hidden!important;pointer-events:none!important;opacity:0!important}' +
-            /* Avoid "Page not found" flashing in the skin header while pending */
+            /* Hide Jellyfin's header title for the whole route — writing it
+             * ourselves fights the skin and blinks names in the tab/header. */
             'html.' + ROUTE_PENDING_CLASS + ' .skinHeader .pageTitle,' +
             'html.' + ROUTE_PENDING_CLASS + ' .skinHeader .headerTitle,' +
             'html.' + ROUTE_PENDING_CLASS + ' .headerTop .pageTitle,' +
-            'html.' + STATS_BODY_CLASS + '.' + ROUTE_PENDING_CLASS + ' .skinHeader .pageTitle,' +
-            'html.' + STUDIO_BODY_CLASS + '.' + ROUTE_PENDING_CLASS + ' .skinHeader .pageTitle' +
+            'html.' + STATS_BODY_CLASS + ' .skinHeader .pageTitle,' +
+            'html.' + STATS_BODY_CLASS + ' .skinHeader .headerTitle,' +
+            'html.' + STATS_BODY_CLASS + ' .headerTop .pageTitle,' +
+            'html.' + STUDIO_BODY_CLASS + ' .skinHeader .pageTitle,' +
+            'html.' + STUDIO_BODY_CLASS + ' .skinHeader .headerTitle,' +
+            'html.' + STUDIO_BODY_CLASS + ' .headerTop .pageTitle,' +
+            'body.' + STATS_BODY_CLASS + ' .skinHeader .pageTitle,' +
+            'body.' + STUDIO_BODY_CLASS + ' .skinHeader .pageTitle' +
             '{visibility:hidden!important}' +
             /* Full-viewport host under header (avoid ~30% Jellyfin bleed from 70vh) */
             'body.' + STATS_BODY_CLASS + ' .mainAnimatedPages,' +
@@ -615,129 +603,43 @@
         }
 
         /**
-         * First-class document + skinHeader pageTitle ownership.
-         * Only while on #/fullcrew/* — never rewrite Home brand/"Jellyfin" chrome.
-         * claim()/release() set intent; TitleLock intercepts document.title writes
-         * synchronously (MutationObserver alone still allows one tab-title frame of
-         * "Page not found"). Header text is re-applied via MutationObserver.
+         * Browser-tab ownership for #/fullcrew/* only.
+         * TitleLock intercepts document.title. We do not write the skin header —
+         * CSS hides Jellyfin's "Page not found" / item name so the tab cannot blink.
          */
         var PageTitle = (function () {
             var owned = false;
             var label = '';
-            var applying = false;
             var titleObserver = null;
             var PREV_DOC = 'data-fullcrew-prev-title';
-            var OWNED = 'data-fullcrew-owned-title';
-            var PREV_HDR = 'data-fullcrew-prev-header';
-            /* Narrow: real page titles only — never bare .headerTitle / h1 / sectionTitle
-             * (those match brand chips and home section headers → "Stats"/"Jellyfin" stickers). */
-            var HEADER_SEL =
-                '.skinHeader .headerLeft .pageTitle, .skinHeader .pageTitle, .headerTop .pageTitle';
-
-            function headerNodes() {
-                return document.querySelectorAll(HEADER_SEL);
-            }
-
-            function ownedNodesEverywhere() {
-                return document.querySelectorAll('[' + OWNED + '="1"]');
-            }
-
-            function isOurTab(node) {
-                return !!(node && (node.id === 'fullCrewStatsTab' || (node.closest && node.closest('#fullCrewStatsTab'))));
-            }
 
             function onFullCrewRoute() {
                 return !!peekFullCrewRoute();
             }
 
-            /** Single visible pageTitle — owning several leaves overlapping stickers. */
-            function primaryHeaderNode() {
-                var nodes = headerNodes();
-                for (var i = 0; i < nodes.length; i++) {
-                    var node = nodes[i];
-                    if (!node || isOurTab(node)) {
-                        continue;
-                    }
-                    if (node.offsetParent === null && node.getClientRects && !node.getClientRects().length) {
-                        continue;
-                    }
-                    return node;
-                }
-                return nodes.length ? nodes[0] : null;
-            }
-
-            function scrubNode(node) {
-                if (!node) {
+            function rememberRestoreTitle() {
+                if (document.documentElement.getAttribute(PREV_DOC)) {
                     return;
                 }
-                if (node.getAttribute(OWNED) !== '1' && node.getAttribute(PREV_HDR) == null) {
-                    return;
+                var cur = TitleLock.current ? TitleLock.current() : (document.title || '');
+                if (!/page not found/i.test(cur) && cur !== label && cur) {
+                    document.documentElement.setAttribute(PREV_DOC, cur);
+                } else {
+                    document.documentElement.setAttribute(PREV_DOC, 'Jellyfin');
                 }
-                var prevHdr = node.getAttribute(PREV_HDR);
-                // Always restore prior text (including '') so we never leave "Stats" behind.
-                if (prevHdr != null) {
-                    node.textContent = prevHdr;
-                }
-                node.removeAttribute(PREV_HDR);
-                node.removeAttribute(OWNED);
-            }
-
-            function dropOwnership() {
-                owned = false;
-                label = '';
-                TitleLock.release();
             }
 
             function apply() {
-                if (!owned || applying) {
+                if (!owned) {
                     return;
                 }
-                // Never keep title ownership off Full Crew routes (Home/Favourites/etc.).
                 if (!onFullCrewRoute()) {
                     dropOwnership();
                     restore();
                     return;
                 }
-                applying = true;
-                try {
-                    if (!document.documentElement.getAttribute(PREV_DOC)) {
-                        var cur = document.title || '';
-                        // Don't stash "Page not found" / our own label as the restore target.
-                        if (!/page not found/i.test(cur) && cur !== label) {
-                            document.documentElement.setAttribute(PREV_DOC, cur);
-                        } else if (!document.documentElement.getAttribute(PREV_DOC)) {
-                            document.documentElement.setAttribute(PREV_DOC, 'Jellyfin');
-                        }
-                    }
-                    TitleLock.hold(label);
-
-                    var primary = primaryHeaderNode();
-                    // Drop ownership on any stale/extra nodes so Home never shows dual stickers.
-                    Array.prototype.forEach.call(ownedNodesEverywhere(), function (node) {
-                        if (node !== primary) {
-                            scrubNode(node);
-                        }
-                    });
-
-                    if (!primary) {
-                        applying = false;
-                        return;
-                    }
-
-                    var text = (primary.textContent || '').replace(/\s+/g, ' ').trim();
-                    if (!primary.getAttribute(PREV_HDR)) {
-                        if (text && !/page not found/i.test(text) && text !== label) {
-                            primary.setAttribute(PREV_HDR, text);
-                        } else {
-                            primary.setAttribute(PREV_HDR, '');
-                        }
-                    }
-                    primary.setAttribute(OWNED, '1');
-                    if (primary.textContent !== label) {
-                        primary.textContent = label;
-                    }
-                } catch (e) { /* ignore */ }
-                applying = false;
+                rememberRestoreTitle();
+                TitleLock.hold(label);
             }
 
             function restore() {
@@ -745,18 +647,16 @@
                 try {
                     var prev = document.documentElement.getAttribute(PREV_DOC);
                     if (prev != null) {
-                        // TitleLock must already be released so this write sticks.
                         document.title = prev;
                         document.documentElement.removeAttribute(PREV_DOC);
                     }
                 } catch (e) { /* ignore */ }
-                Array.prototype.forEach.call(ownedNodesEverywhere(), scrubNode);
-                // Also clear any nodes matching the header selector that still carry attrs.
-                Array.prototype.forEach.call(headerNodes(), function (node) {
-                    if (node && (node.getAttribute(OWNED) === '1' || node.getAttribute(PREV_HDR) != null)) {
-                        scrubNode(node);
-                    }
-                });
+            }
+
+            function dropOwnership() {
+                owned = false;
+                label = '';
+                TitleLock.release();
             }
 
             function stopObserver() {
@@ -770,8 +670,12 @@
                 if (titleObserver || typeof MutationObserver === 'undefined') {
                     return;
                 }
+                var head = document.head;
+                if (!head) {
+                    return;
+                }
                 titleObserver = new MutationObserver(function () {
-                    if (!owned || applying) {
+                    if (!owned) {
                         return;
                     }
                     if (!onFullCrewRoute()) {
@@ -779,30 +683,15 @@
                         restore();
                         return;
                     }
-                    var primary = primaryHeaderNode();
-                    var titleWrong = (document.title || '') !== label ||
-                        /page not found/i.test(document.title || '');
-                    if (titleWrong || !primary || primary.getAttribute(OWNED) !== '1' ||
-                        primary.textContent !== label) {
-                        apply();
+                    if (TitleLock.current() !== label) {
+                        TitleLock.hold(label);
                     }
                 });
-                titleObserver.observe(document.documentElement, {
+                titleObserver.observe(head, {
                     subtree: true,
                     childList: true,
                     characterData: true
                 });
-                // Also watch <title> directly when present (some skins replace the node).
-                try {
-                    var titleEl = document.querySelector('head > title') || document.querySelector('title');
-                    if (titleEl) {
-                        titleObserver.observe(titleEl, {
-                            characterData: true,
-                            childList: true,
-                            subtree: true
-                        });
-                    }
-                } catch (e) { /* ignore */ }
             }
 
             return {
@@ -811,13 +700,21 @@
                         this.release();
                         return;
                     }
+                    var next = titleText || 'Full Crew';
+                    if (owned && label === next && TitleLock.desired() === next &&
+                        TitleLock.current() === next) {
+                        startObserver();
+                        return;
+                    }
                     owned = true;
-                    label = titleText || 'Full Crew';
-                    TitleLock.hold(label);
+                    label = next;
                     apply();
                     startObserver();
                 },
                 release: function () {
+                    if (!owned && TitleLock.desired() == null) {
+                        return;
+                    }
                     dropOwnership();
                     restore();
                 },
@@ -829,7 +726,9 @@
                         this.release();
                         return;
                     }
-                    apply();
+                    if (TitleLock.current() !== label) {
+                        TitleLock.hold(label);
+                    }
                 },
                 isOwned: function () {
                     return owned;
@@ -3274,17 +3173,12 @@
                 styleStatsTabLikeNative(existing, findFavouritesTab(slider) || findHomeTab(slider), true);
             }
             setStatsTabSelected(true);
-            setStatsDocumentTitle(true);
             return;
         }
 
         if (existing && document.body.contains(existing)) {
             styleStatsTabLikeNative(existing, findFavouritesTab() || findHomeTab(), false);
             setStatsTabSelected(false);
-            // Do not touch document title on normal Home/Favourites — avoids Stats blink.
-            if (Core.PageTitle.isOwned() && !isStudioRoute()) {
-                setStatsDocumentTitle(false);
-            }
             wireNativeTabExit(findHomeTab());
             wireNativeTabExit(findFavouritesTab());
             return;
@@ -3313,7 +3207,9 @@
         if (tab && tab.parentNode) {
             tab.parentNode.removeChild(tab);
         }
-        setStatsDocumentTitle(false);
+        if (!peekFullCrewRoute()) {
+            setStatsDocumentTitle(false);
+        }
     }
 
     function setStatsTabSelected(selected) {
@@ -3354,9 +3250,6 @@
         }
         statsDetailBuckets = null;
         setStatsTabSelected(false);
-        if (!isStudioRoute()) {
-            setStatsDocumentTitle(false);
-        }
     }
 
     function mountStatsPage() {
@@ -5915,9 +5808,18 @@
             syncSceneIdentifyButton();
         }
         if (route) {
-            Core.PageTitle.tick();
+            claimRouteTitle(route);
         } else if (Core.PageTitle.isOwned()) {
             Core.PageTitle.release();
+        }
+    }
+
+    function ensurePluginTabsPresent() {
+        if (!document.getElementById(STATS_TAB_ID)) {
+            injectStatsTab();
+        }
+        if (!document.getElementById(AUDIO_TAB_ID)) {
+            injectAudioTab();
         }
     }
 
@@ -5941,9 +5843,6 @@
 
         var observer = new MutationObserver(function (mutations) {
             if (mutationTouchesFullCrewOnly(mutations)) {
-                if (Core.PageTitle.isOwned()) {
-                    Core.PageTitle.tick();
-                }
                 return;
             }
             var route = peekFullCrewRoute();
@@ -5954,11 +5853,7 @@
                 if (overlay && (overlay.getAttribute('data-loaded') === '1'
                     || overlay.getAttribute('data-shell') === '1'
                     || overlay.getAttribute('data-loading') === '1')) {
-                    injectStatsTab();
-                    injectAudioTab();
-                    if (Core.PageTitle.isOwned()) {
-                        Core.PageTitle.tick();
-                    }
+                    ensurePluginTabsPresent();
                     return;
                 }
             }
@@ -5996,7 +5891,7 @@
                         mount(view);
                     }
                     syncStatsUi();
-                    Core.PageTitle.tick();
+                    claimRouteTitle(peekFullCrewRoute());
                 }, 30);
                 return;
             }
