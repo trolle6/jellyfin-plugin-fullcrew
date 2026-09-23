@@ -105,7 +105,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public string[] EnabledDepartments { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the library-wide audio type browser is enabled.
+    /// Gets or sets a value indicating whether special audio is included in Library Stats.
     /// </summary>
     public bool EnableAudioBrowser { get; set; }
 

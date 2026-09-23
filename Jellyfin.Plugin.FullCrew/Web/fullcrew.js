@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.8.8.0';
+    var PLUGIN_VERSION = '1.8.9.0';
     var ROLE_PREVIEW_MAX = 2;
     var CREW_JOB_TITLES = {
         'creator': 1,
@@ -101,7 +101,8 @@
             return { kind: 'stats', title: 'Stats', bodyClass: STATS_BODY_CLASS };
         }
         if (raw === '#/fullcrew/audio' || raw.indexOf('#/fullcrew/audio/') === 0) {
-            return { kind: 'audio', title: 'Audio Tracks', bodyClass: STATS_BODY_CLASS };
+            // Legacy hash — treat as Stats until redirectLegacyAudioHash() rewrites it.
+            return { kind: 'stats', title: 'Stats', bodyClass: STATS_BODY_CLASS };
         }
         if (raw.indexOf('#/fullcrew/studio/') === 0) {
             var enc = raw.slice('#/fullcrew/studio/'.length);
@@ -185,10 +186,13 @@
                         if (desired != null && peekFullCrewRoute()) {
                             var next = value == null ? '' : String(value);
                             if (next !== desired) {
-                                // Swallow Jellyfin "Page not found" (and any other overwrite).
-                                writeNative(desired);
+                                // Swallow without writing when the tab already shows our label.
+                                if (currentTitle() !== desired) {
+                                    writeNative(desired);
+                                }
                                 return;
                             }
+                            return;
                         }
                         writeNative(value);
                     }
@@ -795,8 +799,8 @@
                     }
                 });
                 var poster = el('div', 'fullCrewStudioPoster');
-                var imgUrl = primaryImageUrl(id, 240);
-                if (imgUrl && opts.imageTag) {
+                var imgUrl = primaryImageUrl(opts.imageId || id, 240);
+                if (imgUrl && (opts.imageTag || opts.imageId || opts.forceImage)) {
                     var img = el('img', 'fullCrewStudioPosterImg');
                     img.src = imgUrl;
                     img.alt = opts.name || '';
@@ -2215,6 +2219,7 @@
     var STATS_PAGE_ID = 'fullCrewStatsPage';
     var STUDIO_PAGE_ID = 'fullCrewStudioPage';
     var STATS_HASH = '#/fullcrew/stats';
+    var AUDIO_TRACKS_CATEGORY = 'audioTracks';
     var STATS_VIEW_KEY = 'fullCrew.statsViewMode';
     var STATS_DETAIL_VIEW_KEY = 'fullCrew.statsDetailViewMode';
     var PLUGIN_UNIQUE_ID = PLUGIN_GUID;
@@ -2262,7 +2267,8 @@
 
     var BUCKET_ITEMS_CATEGORY_KEYS = {
         types: 1, resolutions: 1, hdr: 1, videoCodecs: 1, audioChannels: 1, audioCodecs: 1,
-        genres: 1, studios: 1, collections: 1, decades: 1, years: 1, ratings: 1, community: 1, tags: 1, languages: 1
+        genres: 1, studios: 1, collections: 1, decades: 1, years: 1, ratings: 1, community: 1, tags: 1, languages: 1,
+        audioTracks: 1
     };
 
     var YEAR_SORT_STORAGE_KEY = 'fullCrewYearSort';
@@ -2432,8 +2438,14 @@
         return STATS_HASH + '/' + encodeURIComponent(categoryKey) + '/items/' + encodeURIComponent(String(bucketName || ''));
     }
 
+    function isAudioTracksCategory(categoryKey) {
+        var key = String(categoryKey || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+        return key === 'audiotracks' || key === 'specialaudio' || key === 'specialaudiotracks';
+    }
+
     function categorySupportsBucketItems(categoryKey) {
         if (!categoryKey) { return false; }
+        if (isAudioTracksCategory(categoryKey)) { return true; }
         if (BUCKET_ITEMS_CATEGORY_KEYS[categoryKey]) { return true; }
         var values = Object.keys(PEOPLE_CATEGORY_KEYS).map(function (k) { return PEOPLE_CATEGORY_KEYS[k]; });
         return values.indexOf(categoryKey) !== -1;
@@ -2597,7 +2609,8 @@
         }
 
         if (categoryKey && categorySupportsBucketItems(categoryKey) && bucket.name) {
-            var itemsHash = statsBucketItemsHash(categoryKey, bucket.name);
+            var slug = (isAudioTracksCategory(categoryKey) && (bucket.id || bucket.Id)) || bucket.name;
+            var itemsHash = statsBucketItemsHash(categoryKey, slug);
             el = createElement('a', className + ' fullCrewStatsItemLink', label);
             el.href = itemsHash;
             el.setAttribute('title', bucket.name + ' — list titles in this bucket');
@@ -2797,7 +2810,7 @@
                     statsCachedData = data;
                 }
                 statsFetchInFlight = null;
-                return data;
+                return attachSpecialAudioSection(data);
             })
             .catch(function (err) {
                 statsFetchInFlight = null;
@@ -2809,6 +2822,9 @@
 
     function fetchStatsCategory(category) {
         var key = String(category || '');
+        if (isAudioTracksCategory(key)) {
+            return fetchAudioTracksCategory();
+        }
         if (statsCategoryCache[key]) {
             return Promise.resolve(statsCategoryCache[key]);
         }
@@ -2834,10 +2850,107 @@
 
     var STATS_BUCKET_PAGE_SIZE = 80;
 
+    function audioTypesToBuckets(types) {
+        var list = types || [];
+        var total = 0;
+        list.forEach(function (t) {
+            total += Number(prop(t, 'ItemCount', 'itemCount')) || 0;
+        });
+        if (!total) {
+            total = 1;
+        }
+        return list.map(function (t) {
+            var count = Number(prop(t, 'ItemCount', 'itemCount')) || 0;
+            return {
+                name: prop(t, 'Name', 'name') || prop(t, 'Id', 'id'),
+                id: prop(t, 'Id', 'id'),
+                count: count,
+                percent: (count / total) * 100
+            };
+        });
+    }
+
+    function attachSpecialAudioSection(data) {
+        if (!data) {
+            return Promise.resolve(data);
+        }
+        return ensureAudioTypes().then(function (types) {
+            if (audioEnabled && types && types.length) {
+                data.SpecialAudio = audioTypesToBuckets(types);
+            }
+            return data;
+        }).catch(function () {
+            return data;
+        });
+    }
+
+    function fetchAudioTracksCategory() {
+        if (statsCategoryCache[AUDIO_TRACKS_CATEGORY]) {
+            return Promise.resolve(statsCategoryCache[AUDIO_TRACKS_CATEGORY]);
+        }
+        return ensureAudioTypes().then(function (types) {
+            var buckets = audioTypesToBuckets(types);
+            var payload = {
+                Category: AUDIO_TRACKS_CATEGORY,
+                Title: 'Special audio',
+                DenominatorHint: 'Share of titles that have a labeled special-audio track',
+                Buckets: buckets,
+                TotalBuckets: buckets.length,
+                GeneratedAt: new Date().toISOString()
+            };
+            statsCategoryCache[AUDIO_TRACKS_CATEGORY] = payload;
+            return payload;
+        });
+    }
+
+    function audioItemToBucketCard(item) {
+        var series = prop(item, 'SeriesName', 'seriesName');
+        var name = prop(item, 'Name', 'name') || 'Untitled';
+        var season = prop(item, 'SeasonNumber', 'seasonNumber');
+        var episode = prop(item, 'EpisodeNumber', 'episodeNumber');
+        if (series && (season != null || episode != null)) {
+            name = series + ' · S' + (season || 0) + 'E' + (episode || 0);
+        } else if (series) {
+            name = series;
+        }
+        return {
+            Id: prop(item, 'ItemId', 'itemId'),
+            Name: name,
+            Type: prop(item, 'MediaType', 'mediaType') || '',
+            ProductionYear: prop(item, 'ProductionYear', 'productionYear'),
+            ImageTag: '1',
+            imageId: prop(item, 'ImageItemId', 'imageItemId')
+        };
+    }
+
+    function fetchAudioTrackBucketItems(typeId, startIndex) {
+        var start = startIndex || 0;
+        var path = 'FullCrew/audio/items?type=' + encodeURIComponent(typeId || 'all')
+            + '&startIndex=' + start + '&limit=' + STATS_BUCKET_PAGE_SIZE + '&sort=name';
+        return Core.getJson(path).then(function (data) {
+            var incoming = prop(data, 'Items', 'items') || [];
+            var total = Number(prop(data, 'TotalCount', 'totalCount')) || incoming.length;
+            var typeName = prop(data, 'TypeName', 'typeName') || typeId;
+            return {
+                Category: AUDIO_TRACKS_CATEGORY,
+                CategoryTitle: 'Special audio',
+                Bucket: typeName,
+                BucketId: prop(data, 'TypeId', 'typeId') || typeId,
+                StartIndex: start,
+                TotalCount: total,
+                HasMore: start + incoming.length < total,
+                Items: incoming.map(audioItemToBucketCard)
+            };
+        });
+    }
+
     function fetchStatsBucketItems(category, bucket, startIndex) {
         var cat = String(category || '');
         var name = String(bucket || '');
         var start = startIndex || 0;
+        if (isAudioTracksCategory(cat)) {
+            return fetchAudioTrackBucketItems(name, start);
+        }
         var cacheKey = cat + '\0' + name + '\0' + start;
         if (start === 0 && statsBucketItemsCache[cacheKey]) {
             return Promise.resolve(statsBucketItemsCache[cacheKey]);
@@ -3429,7 +3542,7 @@
             // Pending until *this* route's page exists — not "any" Full Crew page.
             // Otherwise Stats→Studio clears pending while Stats is still mounted, then
             // tearDownStats leaves a frame of Jellyfin 404 chrome (the studio blink).
-            applyRouteChrome(early, { pending: !routePageMounted(early), setTitle: true });
+            applyRouteChrome(early, { pending: !routePageMounted(early), setTitle: false });
             claimRouteTitle(early);
         } else {
             applyRouteChrome(null);
@@ -3553,6 +3666,7 @@
             { title: 'Video codecs', categoryKey: 'videoCodecs', keyPascal: 'VideoCodecs', keyCamel: 'videoCodecs' },
             { title: 'Audio channels', categoryKey: 'audioChannels', keyPascal: 'AudioChannels', keyCamel: 'audioChannels' },
             { title: 'Audio codecs', categoryKey: 'audioCodecs', keyPascal: 'AudioCodecs', keyCamel: 'audioCodecs' },
+            { title: 'Special audio', categoryKey: AUDIO_TRACKS_CATEGORY, keyPascal: 'SpecialAudio', keyCamel: 'specialAudio', hint: 'Commentary, descriptions, dubs, and other labeled tracks' },
             { title: 'Genres', categoryKey: 'genres', keyPascal: 'Genres', keyCamel: 'genres', hint: 'Share of genre tags · top names (full list via title)' },
             { title: 'Studios', categoryKey: 'studios', keyPascal: 'Studios', keyCamel: 'studios', hint: 'Share of studio credits · top names (full list via title)' },
             { title: 'Collections', categoryKey: 'collections', keyPascal: 'Collections', keyCamel: 'collections', hint: 'Share of collection memberships' },
@@ -4183,10 +4297,12 @@
     function statsBucketCard(t) {
         return Core.Ui.posterCard({
             id: prop(t, 'Id', 'id'),
+            imageId: prop(t, 'imageId', 'ImageItemId') || prop(t, 'ImageItemId', 'imageItemId'),
             name: prop(t, 'Name', 'name'),
             type: String(prop(t, 'Type', 'type') || ''),
             year: prop(t, 'ProductionYear', 'productionYear'),
-            imageTag: prop(t, 'ImageTag', 'imageTag')
+            imageTag: prop(t, 'ImageTag', 'imageTag'),
+            forceImage: true
         });
     }
 
@@ -4246,7 +4362,7 @@
             btn.addEventListener('click', function () {
                 btn.disabled = true;
                 btn.textContent = 'Loading…';
-                fetchStatsBucketItems(categoryKey, bucketName, loaded).then(function (next) {
+                fetchStatsBucketItems(categoryKey, prop(data, 'BucketId', 'bucketId') || bucketName, loaded).then(function (next) {
                     var extra = prop(next, 'Items', 'items') || [];
                     extra.forEach(function (t) {
                         grid.appendChild(statsBucketCard(t));
@@ -4672,16 +4788,15 @@
                     return false;
                 }
                 if (n.id === STATS_PAGE_ID || n.id === STUDIO_PAGE_ID || n.id === STATS_TAB_ID ||
-                    n.id === AUDIO_PAGE_ID || n.id === AUDIO_TAB_ID || n.id === AUDIO_CHIP_ID ||
+                    n.id === AUDIO_CHIP_ID ||
                     n.id === CRITICAL_STYLE_ID || n.id === STYLE_ID || n.id === SECTION_ID) {
                     continue;
                 }
                 if (n.classList && (n.classList.contains('fullCrewPage') || n.classList.contains('fullCrewStatsPage') ||
-                    n.classList.contains('fullCrewAudioPage') || n.classList.contains('fullCrewSection'))) {
+                    n.classList.contains('fullCrewSection'))) {
                     continue;
                 }
                 if (n.closest && (n.closest('#' + STATS_PAGE_ID) || n.closest('#' + STUDIO_PAGE_ID) ||
-                    n.closest('#' + AUDIO_PAGE_ID) || n.closest('#' + AUDIO_TAB_ID) ||
                     n.closest('#' + STATS_TAB_ID) || n.closest('#' + SECTION_ID))) {
                     continue;
                 }
@@ -5162,74 +5277,30 @@
     }
 
     /* ================================================================== */
-    /* Feature: Audio Tracks                                              */
+    /* Feature: Special audio (Stats category + item-page chips)          */
     /* ================================================================== */
 
-    var AUDIO_PAGE_ID = 'fullCrewAudioPage';
-    var AUDIO_TAB_ID = 'fullCrewAudioTab';
     var AUDIO_CHIP_ID = 'fullCrewAudioChips';
-    var AUDIO_HASH = '#/fullcrew/audio';
-    var AUDIO_PAGE_SIZE = 50;
     var audioEnabled = true;
     var audioTypesFetched = false;
     var audioTypesPromise = null;
-    var audioState = {
-        types: [],
-        isIndexing: false,
-        typeId: 'commentary',
-        search: '',
-        language: '',
-        sort: 'name',
-        items: [],
-        total: 0,
-        languages: [],
-        loading: false
-    };
+    var audioState = { types: [], isIndexing: false };
 
-    function audioQueryKey(state) {
-        state = state || audioState;
-        return [
-            state.typeId || state.type || 'commentary',
-            state.search || state.q || '',
-            state.language || state.lang || '',
-            state.sort || 'name'
-        ].join('\0');
-    }
-
-    function isAudioRoute() {
-        var route = peekFullCrewRoute();
-        return !!(route && route.kind === 'audio');
-    }
-
-    function parseAudioQuery() {
+    function redirectLegacyAudioHash() {
         var hash = window.location.hash || '';
+        var raw = hash.split('?')[0];
+        if (raw.indexOf('#!/') === 0) {
+            raw = '#' + raw.slice(2);
+        }
+        if (raw !== '#/fullcrew/audio' && raw.indexOf('#/fullcrew/audio/') !== 0) {
+            return false;
+        }
         var qIndex = hash.indexOf('?');
         var params = Core.parseQuery(qIndex === -1 ? '' : hash.substring(qIndex + 1));
-        return {
-            type: params.type || 'commentary',
-            search: params.q || '',
-            language: params.lang || '',
-            sort: params.sort || 'name'
-        };
-    }
-
-    function writeAudioHash() {
-        var params = [];
-        if (audioState.typeId && audioState.typeId !== 'commentary') {
-            params.push('type=' + encodeURIComponent(audioState.typeId));
-        } else if (audioState.typeId === 'commentary') {
-            params.push('type=commentary');
-        }
-        if (audioState.search) {
-            params.push('q=' + encodeURIComponent(audioState.search));
-        }
-        if (audioState.language) {
-            params.push('lang=' + encodeURIComponent(audioState.language));
-        }
-        if (audioState.sort && audioState.sort !== 'name') {
-            params.push('sort=' + encodeURIComponent(audioState.sort));
-        }
-        var next = AUDIO_HASH + (params.length ? '?' + params.join('&') : '?type=commentary');
+        var type = params.type || '';
+        var next = type && type !== 'all'
+            ? statsBucketItemsHash(AUDIO_TRACKS_CATEGORY, type)
+            : statsDetailHash(AUDIO_TRACKS_CATEGORY);
         if ((window.location.hash || '') !== next) {
             if (window.history && window.history.replaceState) {
                 window.history.replaceState(null, '', next);
@@ -5237,430 +5308,20 @@
                 window.location.hash = next;
             }
         }
+        return true;
     }
 
-    function tearDownAudioPage() {
-        var page = document.getElementById(AUDIO_PAGE_ID);
-        if (page && page.parentNode) {
-            page.parentNode.removeChild(page);
-        }
-        var tab = document.getElementById(AUDIO_TAB_ID);
-        if (tab) {
-            tab.classList.remove('emby-tab-button-active');
-        }
-    }
-
-    function injectAudioTab() {
-        if (!audioEnabled) {
-            var existing = document.getElementById(AUDIO_TAB_ID);
-            if (existing && existing.parentNode) {
-                existing.parentNode.removeChild(existing);
-            }
-            return;
-        }
-
-        if (document.getElementById(AUDIO_TAB_ID)) {
-            var tab = document.getElementById(AUDIO_TAB_ID);
-            if (isAudioRoute()) {
-                tab.classList.add('emby-tab-button-active');
-            } else {
-                tab.classList.remove('emby-tab-button-active');
-            }
-            return;
-        }
-
-        var after = document.getElementById(STATS_TAB_ID) || findFavouritesTab();
-        if (!after || !after.parentNode) {
-            return;
-        }
-
-        var sample = after;
-        var node = document.createElement(sample.tagName === 'A' ? 'a' : 'button');
-        if (sample.tagName === 'A') {
-            node.href = AUDIO_HASH + '?type=commentary';
-        } else {
-            node.type = 'button';
-        }
-        node.id = AUDIO_TAB_ID;
-        node.className = String(sample.className || 'emby-tab-button emby-button')
-            .replace(/\bemby-tab-button-active\b/g, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-        node.setAttribute('title', 'Audio');
-        node.setAttribute('aria-label', 'Audio');
-        node.textContent = 'Audio';
-        node.addEventListener('click', function (e) {
-            e.preventDefault();
-            e.stopPropagation();
-            window.location.hash = AUDIO_HASH + '?type=commentary';
-        }, true);
-
-        if (after.nextSibling) {
-            after.parentNode.insertBefore(node, after.nextSibling);
-        } else {
-            after.parentNode.appendChild(node);
-        }
-    }
-
-    function audioImageUrl(itemId) {
-        var client = Core.apiClient();
-        if (client && typeof client.getImageUrl === 'function') {
-            return client.getImageUrl(itemId, { type: 'Primary', maxHeight: 220, quality: 72 });
-        }
-        return '/Items/' + itemId + '/Images/Primary?maxHeight=220&quality=72';
-    }
-
-    function pad2(n) {
-        return (n < 10 ? '0' : '') + n;
-    }
-
-    function audioItemHeading(item) {
-        var series = Core.prop(item, 'SeriesName', 'seriesName');
-        var name = Core.prop(item, 'Name', 'name') || '';
-        var season = Core.prop(item, 'SeasonNumber', 'seasonNumber');
-        var episode = Core.prop(item, 'EpisodeNumber', 'episodeNumber');
-        var year = Core.prop(item, 'ProductionYear', 'productionYear');
-        if (series) {
-            if (season != null || episode != null) {
-                return series + ' · S' + pad2(season || 0) + 'E' + pad2(episode || 0);
-            }
-            return series;
-        }
-        return year ? name + ' (' + year + ')' : name;
-    }
-
-    function renderAudioCard(item) {
-        var card = Core.el('a', 'card overflowBackdropCard fullCrewAudioCard');
-        var itemId = Core.prop(item, 'ItemId', 'itemId');
-        card.href = Core.detailsHashForItem(itemId);
-        card.addEventListener('click', function (e) {
-            e.preventDefault();
-            Core.navigateToItem(itemId);
-        });
-
-        var imageId = Core.prop(item, 'ImageItemId', 'imageItemId') || itemId;
-        var poster = Core.el('div', 'cardImageContainer coveredImage fullCrewAudioPoster');
-        var img = document.createElement('img');
-        img.alt = '';
-        img.className = 'cardImage';
-        img.loading = 'lazy';
-        img.decoding = 'async';
-        img.src = audioImageUrl(imageId);
-        img.onerror = function () {
-            poster.classList.add('is-fallback');
-            if (img.parentNode) {
-                img.parentNode.removeChild(img);
-            }
-        };
-        poster.appendChild(img);
-        card.appendChild(poster);
-
-        var body = Core.el('div', 'cardFooter fullCrewAudioCardBody');
-        body.appendChild(Core.el('div', 'fullCrewAudioCardKicker', audioItemHeading(item)));
-        var series = Core.prop(item, 'SeriesName', 'seriesName');
-        body.appendChild(Core.el('div', 'fullCrewAudioCardName', series ? (Core.prop(item, 'Name', 'name') || '') : (Core.prop(item, 'MediaType', 'mediaType') || '')));
-        var tracks = Core.prop(item, 'Tracks', 'tracks') || [];
-        tracks.slice(0, 3).forEach(function (track) {
-            body.appendChild(Core.el(
-                'div',
-                'fullCrewAudioCardTrack',
-                Core.prop(track, 'DisplayTitle', 'displayTitle') || Core.prop(track, 'Title', 'title') || ''
-            ));
-        });
-        card.appendChild(body);
-        return card;
-    }
-
-    function audioEmptyMessage() {
-        if (audioState.search || audioState.language) {
-            return 'No titles match those filters.';
-        }
-        if (audioState.isIndexing) {
-            return 'Still indexing the library. Try refresh in a moment.';
-        }
-        if (audioState.typeId === 'commentary') {
-            return 'No commentary tracks yet. Jellyfin only sees names stored on the audio stream (MKV/MP4 titles like “Commentary”). Scan the library, then refresh the index.';
-        }
-        return 'No tracks of this type yet. Titles come from the audio stream name in the file.';
-    }
-
-    function loadAudioItems(reset) {
-        if (!isAudioRoute()) {
-            return;
-        }
-        var page = document.getElementById(AUDIO_PAGE_ID);
-        if (!page) {
-            return;
-        }
-        if (audioState.loading && !reset) {
-            return;
-        }
-        if (reset) {
-            audioState.items = [];
-        }
-        var params = [
-            'type=' + encodeURIComponent(audioState.typeId || 'all'),
-            'startIndex=' + (reset ? 0 : audioState.items.length),
-            'limit=' + AUDIO_PAGE_SIZE
-        ];
-        if (audioState.search) {
-            params.push('search=' + encodeURIComponent(audioState.search));
-        }
-        if (audioState.language) {
-            params.push('language=' + encodeURIComponent(audioState.language));
-        }
-        if (audioState.sort) {
-            params.push('sort=' + encodeURIComponent(audioState.sort));
-        }
-        var status = page.querySelector('.fullCrewAudioStatus');
-        var grid = page.querySelector('.fullCrewAudioGrid');
-        var more = page.querySelector('.fullCrewAudioMore');
-        if (status && reset) {
-            status.textContent = 'Loading…';
-        }
-        audioState.loading = true;
-        Core.getJson('FullCrew/audio/items?' + params.join('&')).then(function (data) {
-            audioState.loading = false;
-            audioState.total = Core.prop(data, 'TotalCount', 'totalCount') || 0;
-            audioState.isIndexing = !!Core.prop(data, 'IsIndexing', 'isIndexing');
-            var incoming = Core.prop(data, 'Items', 'items') || [];
-            var langs = Core.prop(data, 'Languages', 'languages') || [];
-            if (langs.length) {
-                audioState.languages = langs;
-            }
-            if (reset && grid) {
-                grid.innerHTML = '';
-                audioState.items = incoming;
-            } else {
-                audioState.items = audioState.items.concat(incoming);
-            }
-            if (grid && incoming.length) {
-                var frag = document.createDocumentFragment();
-                incoming.forEach(function (item) {
-                    frag.appendChild(renderAudioCard(item));
-                });
-                grid.appendChild(frag);
-            }
-            if (status) {
-                status.textContent = audioState.items.length ? (audioState.total + (audioState.total === 1 ? ' title' : ' titles')) : audioEmptyMessage();
-            }
-            if (more) {
-                more.innerHTML = '';
-                if (audioState.items.length < audioState.total) {
-                    var btn = Core.el('button', 'fullCrewAudioButton', 'Load more');
-                    btn.type = 'button';
-                    btn.addEventListener('click', function () {
-                        loadAudioItems(false);
-                    });
-                    more.appendChild(btn);
-                }
-            }
-            page.setAttribute('data-items-query', audioQueryKey());
-            refreshAudioLanguageSelect();
-        }).catch(function (err) {
-            audioState.loading = false;
-            console.warn('[FullCrew] audio items failed', err);
-            if (status) {
-                status.textContent = 'Could not load matching titles.';
+    function removeLegacyAudioChrome() {
+        ['fullCrewAudioPage', 'fullCrewAudioTab'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el && el.parentNode) {
+                el.parentNode.removeChild(el);
             }
         });
-    }
-
-    function refreshAudioLanguageSelect() {
-        var page = document.getElementById(AUDIO_PAGE_ID);
-        if (!page) {
-            return;
-        }
-        var lang = page.querySelector('.fullCrewAudioSelect--lang');
-        if (!lang) {
-            return;
-        }
-        var current = audioState.language;
-        lang.innerHTML = '';
-        lang.appendChild(new Option('All languages', ''));
-        audioState.languages.forEach(function (name) {
-            lang.appendChild(new Option(name, name));
-        });
-        lang.value = current;
-    }
-
-    function updateAudioChips() {
-        var page = document.getElementById(AUDIO_PAGE_ID);
-        if (!page) {
-            return;
-        }
-        var chips = page.querySelectorAll('.fullCrewAudioChip');
-        Array.prototype.forEach.call(chips, function (chip, index) {
-            var id = index === 0 ? 'all' : (audioState.types[index - 1] && Core.prop(audioState.types[index - 1], 'Id', 'id'));
-            chip.classList.toggle('is-active', id === audioState.typeId);
-        });
-        var desc = page.querySelector('.fullCrewAudioTypeDesc');
-        if (desc) {
-            var meta = null;
-            audioState.types.forEach(function (type) {
-                if (Core.prop(type, 'Id', 'id') === audioState.typeId) {
-                    meta = type;
-                }
-            });
-            desc.textContent = meta
-                ? (Core.prop(meta, 'Description', 'description') || '')
-                : (audioState.typeId === 'commentary'
-                    ? 'Director, cast, and crew commentary — across every show and movie.'
-                    : 'Every movie and episode that carries a labeled extra audio track.');
-        }
-    }
-
-    function paintAudioPage() {
-        var mount = Core.findMount();
-        var page = document.getElementById(AUDIO_PAGE_ID);
-        if (page && page.getAttribute('data-shell') === '1') {
-            updateAudioChips();
-            return page;
-        }
-        if (!page) {
-            page = Core.el('div', 'fullCrewPage fullCrewAudioPage');
-            page.id = AUDIO_PAGE_ID;
-            mount.appendChild(page);
-        }
-        page.innerHTML = '';
-
-        var wrap = Core.el('div', 'fullCrewAudioWrap');
-        var header = Core.el('div', 'fullCrewAudioHeader');
-        var titles = Core.el('div');
-        titles.appendChild(Core.el('h1', 'fullCrewAudioTitle', 'Audio Tracks'));
-        titles.appendChild(Core.el(
-            'p',
-            'fullCrewAudioLead',
-            'Browse by the kind of audio in the file — commentary, descriptions, dubs, isolated scores — without picking a show first.'
-        ));
-        header.appendChild(titles);
-        var refresh = Core.el('button', 'fullCrewAudioButton', audioState.isIndexing ? 'Indexing…' : 'Refresh index');
-        refresh.type = 'button';
-        refresh.disabled = audioState.isIndexing;
-        refresh.addEventListener('click', function () {
-            refresh.disabled = true;
-            refresh.textContent = 'Indexing…';
-            Core.postJson('FullCrew/audio/refresh', {}).then(function () {
-                audioTypesFetched = false;
-                window.setTimeout(function () {
-                    ensureAudioTypes(true).then(function () {
-                        paintAudioPage();
-                        loadAudioItems(true);
-                    });
-                }, 600);
-            }).catch(function () {
-                refresh.disabled = false;
-                refresh.textContent = 'Refresh index';
-            });
-        });
-        header.appendChild(refresh);
-        wrap.appendChild(header);
-
-        var chips = Core.el('div', 'fullCrewAudioChips');
-        function addChip(id, name, count) {
-            var chip = Core.el('button', 'fullCrewAudioChip' + (audioState.typeId === id ? ' is-active' : ''));
-            chip.type = 'button';
-            chip.appendChild(Core.el('span', 'fullCrewAudioChipName', name));
-            chip.appendChild(Core.el('span', 'fullCrewAudioChipCount', String(count || 0)));
-            chip.addEventListener('click', function () {
-                audioState.typeId = id;
-                writeAudioHash();
-                updateAudioChips();
-                loadAudioItems(true);
-            });
-            chips.appendChild(chip);
-        }
-        var allCount = audioState.types.reduce(function (sum, t) {
-            return sum + (Core.prop(t, 'ItemCount', 'itemCount') || 0);
-        }, 0);
-        addChip('all', 'All special audio', allCount);
-        audioState.types.forEach(function (type) {
-            addChip(Core.prop(type, 'Id', 'id'), Core.prop(type, 'Name', 'name'), Core.prop(type, 'ItemCount', 'itemCount'));
-        });
-        wrap.appendChild(chips);
-
-        var meta = null;
-        audioState.types.forEach(function (type) {
-            if (Core.prop(type, 'Id', 'id') === audioState.typeId) {
-                meta = type;
-            }
-        });
-        wrap.appendChild(Core.el(
-            'p',
-            'fullCrewAudioTypeDesc',
-            meta
-                ? (Core.prop(meta, 'Description', 'description') || '')
-                : (audioState.typeId === 'commentary'
-                    ? 'Director, cast, and crew commentary — across every show and movie.'
-                    : 'Every movie and episode that carries a labeled extra audio track.')
-        ));
-
-        var toolbar = Core.el('div', 'fullCrewAudioToolbar');
-        var search = document.createElement('input');
-        search.type = 'search';
-        search.className = 'fullCrewAudioSearch';
-        search.placeholder = 'Search title, show, or track name';
-        search.value = audioState.search;
-        function applySearch() {
-            var next = search.value.trim();
-            if (next === audioState.search) {
-                return;
-            }
-            audioState.search = next;
-            writeAudioHash();
-            loadAudioItems(true);
-        }
-        search.addEventListener('input', function () {
-            window.clearTimeout(search._fcTimer);
-            search._fcTimer = window.setTimeout(applySearch, 280);
-        });
-        search.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter') {
-                window.clearTimeout(search._fcTimer);
-                applySearch();
-            }
-        });
-        toolbar.appendChild(search);
-
-        var lang = document.createElement('select');
-        lang.className = 'fullCrewAudioSelect fullCrewAudioSelect--lang';
-        lang.appendChild(new Option('All languages', ''));
-        audioState.languages.forEach(function (name) {
-            lang.appendChild(new Option(name, name));
-        });
-        lang.value = audioState.language;
-        lang.addEventListener('change', function () {
-            audioState.language = lang.value;
-            writeAudioHash();
-            loadAudioItems(true);
-        });
-        toolbar.appendChild(lang);
-
-        var sort = document.createElement('select');
-        sort.className = 'fullCrewAudioSelect';
-        [['name', 'Name'], ['series', 'Show'], ['year', 'Year'], ['date', 'Premiere'], ['added', 'Date added']].forEach(function (pair) {
-            sort.appendChild(new Option(pair[1], pair[0]));
-        });
-        sort.value = audioState.sort;
-        sort.addEventListener('change', function () {
-            audioState.sort = sort.value;
-            writeAudioHash();
-            loadAudioItems(true);
-        });
-        toolbar.appendChild(sort);
-        wrap.appendChild(toolbar);
-
-        wrap.appendChild(Core.el('div', 'fullCrewAudioStatus', ''));
-        wrap.appendChild(Core.el('div', 'fullCrewAudioGrid'));
-        wrap.appendChild(Core.el('div', 'fullCrewAudioMore'));
-        page.appendChild(wrap);
-        page.setAttribute('data-shell', '1');
-        page.setAttribute('data-loaded', '1');
-        return page;
     }
 
     function renderAudioDetailChips() {
-        if (isAudioRoute()) {
+        if (peekFullCrewRoute()) {
             return;
         }
         var views = document.querySelectorAll('.itemDetailPage, .view:not(.hide), .mainAnimatedPage:not(.hide)');
@@ -5708,7 +5369,7 @@
                     }
                     seen[typeId] = true;
                     var chip = Core.el('a', 'fullCrewAudioChip fullCrewAudioChip--link', Core.prop(track, 'TypeName', 'typeName') || typeId);
-                    chip.href = AUDIO_HASH + '?type=' + encodeURIComponent(typeId);
+                    chip.href = statsBucketItemsHash(AUDIO_TRACKS_CATEGORY, typeId);
                     bar.appendChild(chip);
                 });
                 tracks.slice(0, 3).forEach(function (track) {
@@ -5747,63 +5408,15 @@
         return audioTypesPromise;
     }
 
-    function syncAudioUi() {
-        injectAudioTab();
-        if (!isAudioRoute()) {
-            tearDownAudioPage();
-            renderAudioDetailChips();
-            return;
-        }
-
-        var parsed = parseAudioQuery();
-        var nextKey = audioQueryKey(parsed);
-        var page = document.getElementById(AUDIO_PAGE_ID);
-        applyRouteChrome(peekFullCrewRoute(), { pending: false, setTitle: false });
-        Core.PageTitle.claim('Audio Tracks');
-        injectAudioTab();
-
-        if (page && page.getAttribute('data-items-query') === nextKey && page.getAttribute('data-loaded') === '1') {
-            audioState.typeId = parsed.type;
-            audioState.search = parsed.search;
-            audioState.language = parsed.language;
-            audioState.sort = parsed.sort;
-            return;
-        }
-
-        audioState.typeId = parsed.type;
-        audioState.search = parsed.search;
-        audioState.language = parsed.language;
-        audioState.sort = parsed.sort;
-
-        ensureAudioTypes().then(function () {
-            if (!audioEnabled) {
-                tearDownAudioPage();
-                return;
-            }
-            if (!isAudioRoute()) {
-                return;
-            }
-            paintAudioPage();
-            if (document.getElementById(AUDIO_PAGE_ID).getAttribute('data-items-query') !== audioQueryKey()) {
-                loadAudioItems(true);
-            }
-        }).catch(function (err) {
-            console.warn('[FullCrew] audio types failed', err);
-            paintAudioPage();
-            var status = document.querySelector('.fullCrewAudioStatus');
-            if (status) {
-                status.textContent = 'Could not load audio types.';
-            }
-        });
-    }
-
     function scanAll() {
+        redirectLegacyAudioHash();
+        removeLegacyAudioChrome();
         var route = peekFullCrewRoute();
         if (!route) {
             scan();
+            renderAudioDetailChips();
         }
         syncStatsUi();
-        syncAudioUi();
         if (!route) {
             syncSceneIdentifyButton();
         }
@@ -5818,13 +5431,12 @@
         if (!document.getElementById(STATS_TAB_ID)) {
             injectStatsTab();
         }
-        if (!document.getElementById(AUDIO_TAB_ID)) {
-            injectAudioTab();
-        }
     }
 
     function start() {
         ensureStyles();
+        redirectLegacyAudioHash();
+        removeLegacyAudioChrome();
 
         // Immediate route sync — don't wait on config for hash chrome.
         var early = peekFullCrewRoute();
@@ -5848,8 +5460,7 @@
             var route = peekFullCrewRoute();
             if (route) {
                 var overlay = document.getElementById(STATS_PAGE_ID)
-                    || document.getElementById(STUDIO_PAGE_ID)
-                    || document.getElementById(AUDIO_PAGE_ID);
+                    || document.getElementById(STUDIO_PAGE_ID);
                 if (overlay && (overlay.getAttribute('data-loaded') === '1'
                     || overlay.getAttribute('data-shell') === '1'
                     || overlay.getAttribute('data-loading') === '1')) {
@@ -5870,9 +5481,10 @@
 
         window.addEventListener('hashchange', function () {
             syncCreditsNavState();
+            redirectLegacyAudioHash();
             var route = peekFullCrewRoute();
             if (route) {
-                applyRouteChrome(route, { pending: true, setTitle: true });
+                applyRouteChrome(route, { pending: !routePageMounted(route), setTitle: false });
                 claimRouteTitle(route);
                 scanAll();
             } else {

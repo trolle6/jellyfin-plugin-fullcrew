@@ -12,6 +12,8 @@ public class CategoryIdentityTests
     [InlineData("hdr", "hdr", "HDR / range")]
     [InlineData("years", "years", "Release years")]
     [InlineData("guestStars", "guestStars", "Top Guest Star")]
+    [InlineData("audioTracks", "audioTracks", "Special audio")]
+    [InlineData("specialAudio", "audioTracks", "Special audio")]
     public void TryResolveCategoryIdentity_MapsKnownKeys(string input, string canonical, string title)
     {
         Assert.True(LibraryStatsCategories.TryResolve(input, out var resolved, out var resolvedTitle));

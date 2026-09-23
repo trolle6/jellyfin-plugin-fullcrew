@@ -61,6 +61,7 @@ internal static class LibraryStatsCategories
             "videocodecs" => ("videoCodecs", "Video codecs"),
             "audio" or "audiochannels" => ("audioChannels", "Audio channels"),
             "audiocodecs" => ("audioCodecs", "Audio codecs"),
+            "audiotracks" or "specialaudio" or "specialaudiotracks" => ("audioTracks", "Special audio"),
             _ => null
         };
 
