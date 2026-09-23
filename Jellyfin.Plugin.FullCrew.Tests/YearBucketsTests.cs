@@ -67,4 +67,20 @@ public class YearBucketsTests
 
         Assert.Equal(["2020", "2015", "2001"], buckets.Select(b => b.Name).ToList());
     }
+
+    [Fact]
+    public void ToYearBuckets_MaxCount_KeepsSortedPrefixOnly()
+    {
+        var counts = new Dictionary<string, int>
+        {
+            ["2015"] = 3,
+            ["2001"] = 1,
+            ["2020"] = 5,
+            ["1999"] = 2
+        };
+
+        var buckets = LibraryStatsService.ToYearBuckets(counts, total: 11, "NewestFirst", maxCount: 2);
+
+        Assert.Equal(["2020", "2015"], buckets.Select(b => b.Name).ToList());
+    }
 }

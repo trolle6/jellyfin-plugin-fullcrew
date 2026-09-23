@@ -207,13 +207,17 @@ public sealed class AudioTrackIndexService : IDisposable
         }
 
         var trackList = matches.ToList();
-        var languages = trackList
-            .Select(t => t.LanguageName ?? t.Language)
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Cast<string>()
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        IReadOnlyList<string> languages = [];
+        if (startIndex <= 0)
+        {
+            languages = trackList
+                .Select(t => t.LanguageName ?? t.Language)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Cast<string>()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
 
         var grouped = trackList
             .GroupBy(t => t.ItemId)

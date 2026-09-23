@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.8.5.0';
+    var PLUGIN_VERSION = '1.8.6.0';
     var ROLE_PREVIEW_MAX = 2;
     var CREW_JOB_TITLES = {
         'creator': 1,
@@ -2358,6 +2358,7 @@
     var statsBucketItemsFetchInFlight = {};
     var statsDetailBuckets = null;
     var statsDetailCategoryKey = null;
+    var statsDetailRenderCap = 80;
 
     var BUCKET_ITEMS_CATEGORY_KEYS = {
         types: 1, resolutions: 1, hdr: 1, videoCodecs: 1, audioChannels: 1, audioCodecs: 1,
@@ -2869,6 +2870,19 @@
         return statsConfigPromise;
     }
 
+    function pollUntilReady(path, attempt) {
+        return Core.getJson(path).then(function (data) {
+            if (prop(data, 'IsBuilding', 'isBuilding') && (attempt || 0) < 45) {
+                return new Promise(function (resolve, reject) {
+                    window.setTimeout(function () {
+                        pollUntilReady(path, (attempt || 0) + 1).then(resolve).catch(reject);
+                    }, (attempt || 0) < 4 ? 700 : 2000);
+                });
+            }
+            return data;
+        });
+    }
+
     function fetchStats() {
         if (statsCachedData) {
             return Promise.resolve(statsCachedData);
@@ -2877,7 +2891,7 @@
             return statsFetchInFlight;
         }
 
-        statsFetchInFlight = Core.getJson('FullCrew/stats')
+        statsFetchInFlight = pollUntilReady('FullCrew/stats', 0)
             .then(function (data) {
                 statsCachedData = data;
                 statsFetchInFlight = null;
@@ -2900,7 +2914,7 @@
             return statsCategoryFetchInFlight[key];
         }
 
-        statsCategoryFetchInFlight[key] = Core.getJson('FullCrew/stats/' + encodeURIComponent(key))
+        statsCategoryFetchInFlight[key] = pollUntilReady('FullCrew/stats/' + encodeURIComponent(key), 0)
             .then(function (data) {
                 statsCategoryCache[key] = data;
                 delete statsCategoryFetchInFlight[key];
@@ -2914,20 +2928,26 @@
         return statsCategoryFetchInFlight[key];
     }
 
-    function fetchStatsBucketItems(category, bucket) {
+    var STATS_BUCKET_PAGE_SIZE = 80;
+
+    function fetchStatsBucketItems(category, bucket, startIndex) {
         var cat = String(category || '');
         var name = String(bucket || '');
-        var cacheKey = cat + '\0' + name;
-        if (statsBucketItemsCache[cacheKey]) {
+        var start = startIndex || 0;
+        var cacheKey = cat + '\0' + name + '\0' + start;
+        if (start === 0 && statsBucketItemsCache[cacheKey]) {
             return Promise.resolve(statsBucketItemsCache[cacheKey]);
         }
         if (statsBucketItemsFetchInFlight[cacheKey]) {
             return statsBucketItemsFetchInFlight[cacheKey];
         }
-        var path = 'FullCrew/stats/' + encodeURIComponent(cat) + '/items?bucket=' + encodeURIComponent(name);
-        statsBucketItemsFetchInFlight[cacheKey] = Core.getJson(path)
+        var path = 'FullCrew/stats/' + encodeURIComponent(cat) + '/items?bucket=' + encodeURIComponent(name)
+            + '&startIndex=' + start + '&limit=' + STATS_BUCKET_PAGE_SIZE;
+        statsBucketItemsFetchInFlight[cacheKey] = pollUntilReady(path, 0)
             .then(function (data) {
-                statsBucketItemsCache[cacheKey] = data;
+                if (start === 0) {
+                    statsBucketItemsCache[cacheKey] = data;
+                }
                 delete statsBucketItemsFetchInFlight[cacheKey];
                 return data;
             })
@@ -3602,7 +3622,7 @@
             { title: 'Genres', categoryKey: 'genres', keyPascal: 'Genres', keyCamel: 'genres', hint: 'Share of genre tags · top names (full list via title)' },
             { title: 'Studios', categoryKey: 'studios', keyPascal: 'Studios', keyCamel: 'studios', hint: 'Share of studio credits · top names (full list via title)' },
             { title: 'Collections', categoryKey: 'collections', keyPascal: 'Collections', keyCamel: 'collections', hint: 'Share of collection memberships' },
-            { title: 'Release years', categoryKey: 'years', keyPascal: 'Years', keyCamel: 'years', hint: 'Every production year · click a year to list matching titles' },
+            { title: 'Release years', categoryKey: 'years', keyPascal: 'Years', keyCamel: 'years', hint: 'Recent years on this page · open the title for every year' },
             { title: 'Decades', categoryKey: 'decades', keyPascal: 'Decades', keyCamel: 'decades' },
             { title: 'Official ratings', categoryKey: 'ratings', keyPascal: 'OfficialRatings', keyCamel: 'officialRatings' },
             { title: 'Community scores', categoryKey: 'community', keyPascal: 'CommunityRatings', keyCamel: 'communityRatings' },
@@ -3702,9 +3722,21 @@
         ctx.fill();
     }
 
-    function renderChartInto(container, buckets, mode, omitDominantOther, categoryKey) {
+    function renderChartInto(container, buckets, mode, omitDominantOther, categoryKey, options) {
         container.innerHTML = '';
         var items = chartDisplayBuckets(buckets, !!omitDominantOther);
+        options = options || {};
+        var cap = options.maxVisible;
+        if (cap == null) {
+            cap = omitDominantOther
+                ? (mode === 'pie' ? 10 : 16)
+                : (mode === 'pie' ? 16 : 80);
+        }
+        var hidden = 0;
+        if (items.length > cap) {
+            hidden = items.length - cap;
+            items = items.slice(0, cap);
+        }
         if (!items.length) {
             container.appendChild(createElement('div', 'fullCrewStatsEmpty', 'No data'));
             return;
@@ -3716,6 +3748,7 @@
                 appendClusteredRankItem(list, bucket, 0, categoryKey);
             });
             container.appendChild(list);
+            appendChartOverflowHint(container, hidden, options);
             return;
         }
 
@@ -3731,6 +3764,7 @@
                 appendClusteredBarRow(bars, bucket, max, 0, index, categoryKey);
             });
             container.appendChild(bars);
+            appendChartOverflowHint(container, hidden, options);
             return;
         }
 
@@ -3801,6 +3835,23 @@
         wrap.appendChild(legend);
         container.appendChild(wrap);
         drawPieChart(canvas, items);
+        appendChartOverflowHint(container, hidden, options);
+    }
+
+    function appendChartOverflowHint(container, hidden, options) {
+        if (!hidden) {
+            return;
+        }
+        if (options && typeof options.onShowMore === 'function') {
+            var btn = createElement('button', 'fullCrewStatsMoreBtn', 'Show ' + hidden + ' more');
+            btn.type = 'button';
+            btn.addEventListener('click', options.onShowMore);
+            container.appendChild(btn);
+            return;
+        }
+        container.appendChild(
+            createElement('p', 'fullCrewStatsSectionHint', '+' + hidden + ' more — open the section title for the full list')
+        );
     }
 
     function renderStatsContent(page, data) {
@@ -3961,7 +4012,13 @@
                 }).filter(Boolean);
             }
             buckets = applyYearSortIfNeeded(buckets, statsDetailCategoryKey);
-            renderChartInto(detailHost, buckets, mode, false, statsDetailCategoryKey);
+            renderChartInto(detailHost, buckets, mode, false, statsDetailCategoryKey, {
+                maxVisible: statsDetailRenderCap,
+                onShowMore: function () {
+                    statsDetailRenderCap += 80;
+                    reRenderStatsCharts(page, true);
+                }
+            });
             return;
         }
 
@@ -4049,7 +4106,7 @@
         page.appendChild(header);
 
         var body = createElement('div', 'fullCrewStatsBody');
-        body.appendChild(createElement('div', 'fullCrewStatsStatus', 'Loading library stats…'));
+        body.appendChild(createElement('div', 'fullCrewStatsStatus', 'Building library stats… this can take a moment on a large library.'));
         page.appendChild(body);
         return page;
     }
@@ -4114,6 +4171,7 @@
         var totalBuckets = Number(prop(data, 'TotalBuckets', 'totalBuckets')) || 0;
         var buckets = normalizeBuckets(prop(data, 'Buckets', 'buckets'));
         statsDetailBuckets = buckets;
+        statsDetailRenderCap = 80;
         if (!statsDetailCategoryKey) {
             statsDetailCategoryKey = String(prop(data, 'Category', 'category') || '').toLowerCase();
         }
@@ -4133,7 +4191,11 @@
         search.placeholder = 'Filter…';
         search.setAttribute('aria-label', 'Filter ranking');
         search.addEventListener('input', function () {
-            reRenderStatsCharts(page, true);
+            window.clearTimeout(search._fcTimer);
+            search._fcTimer = window.setTimeout(function () {
+                statsDetailRenderCap = 80;
+                reRenderStatsCharts(page, true);
+            }, 200);
         });
         toolbar.appendChild(search);
 
@@ -4167,7 +4229,14 @@
             applyYearSortIfNeeded(buckets, statsDetailCategoryKey),
             getStatsViewMode(true),
             false,
-            statsDetailCategoryKey
+            statsDetailCategoryKey,
+            {
+                maxVisible: statsDetailRenderCap,
+                onShowMore: function () {
+                    statsDetailRenderCap += 80;
+                    reRenderStatsCharts(page, true);
+                }
+            }
         );
 
         var generatedAt = prop(data, 'GeneratedAt', 'generatedAt');
@@ -4176,6 +4245,16 @@
         }
     }
 
+
+    function statsBucketCard(t) {
+        return Core.Ui.posterCard({
+            id: prop(t, 'Id', 'id'),
+            name: prop(t, 'Name', 'name'),
+            type: String(prop(t, 'Type', 'type') || ''),
+            year: prop(t, 'ProductionYear', 'productionYear'),
+            imageTag: prop(t, 'ImageTag', 'imageTag')
+        });
+    }
 
     function renderStatsBucketContent(page, data, route) {
         var body = page.querySelector('.fullCrewStatsBody');
@@ -4188,6 +4267,7 @@
         var items = prop(data, 'Items', 'items') || [];
         var totalCount = Number(prop(data, 'TotalCount', 'totalCount'));
         if (!isFinite(totalCount)) { totalCount = items.length; }
+        var hasMore = !!(prop(data, 'HasMore', 'hasMore'));
         var truncated = !!(prop(data, 'Truncated', 'truncated'));
 
         var titleEl = page.querySelector('.fullCrewStatsTitle');
@@ -4202,7 +4282,6 @@
             'p',
             'fullCrewStatsSectionHint',
             'Items in this bucket · ' + categoryTitle + ' · ' + totalCount +
-                (truncated ? ' (showing first ' + items.length + ')' : '') +
                 ' title' + (totalCount === 1 ? '' : 's')
         ));
 
@@ -4211,27 +4290,45 @@
             return;
         }
 
-        var movies = [];
-        var shows = [];
+        var grid = createElement('div', 'fullCrewStatsItemGrid');
         items.forEach(function (t) {
-            var type = String(prop(t, 'Type', 'type') || '');
-            var card = {
-                id: prop(t, 'Id', 'id'),
-                name: prop(t, 'Name', 'name'),
-                type: type,
-                year: prop(t, 'ProductionYear', 'productionYear'),
-                imageTag: prop(t, 'ImageTag', 'imageTag')
-            };
-            if (/series/i.test(type)) { shows.push(Core.Ui.posterCard(card)); }
-            else { movies.push(Core.Ui.posterCard(card)); }
+            grid.appendChild(statsBucketCard(t));
         });
+        body.appendChild(grid);
 
-        if (movies.length && shows.length) {
-            body.appendChild(Core.Ui.posterRow('Movies', movies));
-            body.appendChild(Core.Ui.posterRow('Shows', shows));
-        } else {
-            body.appendChild(Core.Ui.posterRow('In your library', movies.length ? movies : shows));
+        var moreHost = createElement('div', 'fullCrewStatsMore');
+        body.appendChild(moreHost);
+        var loaded = items.length;
+        function paintMoreButton() {
+            moreHost.innerHTML = '';
+            if (!hasMore) {
+                if (truncated) {
+                    moreHost.appendChild(createElement('p', 'fullCrewStatsSectionHint', 'Stopped at the safety cap.'));
+                }
+                return;
+            }
+            var btn = createElement('button', 'fullCrewStatsMoreBtn', 'Load more');
+            btn.type = 'button';
+            btn.addEventListener('click', function () {
+                btn.disabled = true;
+                btn.textContent = 'Loading…';
+                fetchStatsBucketItems(categoryKey, bucketName, loaded).then(function (next) {
+                    var extra = prop(next, 'Items', 'items') || [];
+                    extra.forEach(function (t) {
+                        grid.appendChild(statsBucketCard(t));
+                    });
+                    loaded += extra.length;
+                    hasMore = !!(prop(next, 'HasMore', 'hasMore'));
+                    truncated = !!(prop(next, 'Truncated', 'truncated'));
+                    paintMoreButton();
+                }).catch(function () {
+                    btn.disabled = false;
+                    btn.textContent = 'Load more';
+                });
+            });
+            moreHost.appendChild(btn);
         }
+        paintMoreButton();
 
         var generatedAt = prop(data, 'GeneratedAt', 'generatedAt');
         if (generatedAt) {
@@ -4641,14 +4738,16 @@
                     return false;
                 }
                 if (n.id === STATS_PAGE_ID || n.id === STUDIO_PAGE_ID || n.id === STATS_TAB_ID ||
+                    n.id === AUDIO_PAGE_ID || n.id === AUDIO_TAB_ID || n.id === AUDIO_CHIP_ID ||
                     n.id === CRITICAL_STYLE_ID || n.id === STYLE_ID || n.id === SECTION_ID) {
                     continue;
                 }
                 if (n.classList && (n.classList.contains('fullCrewPage') || n.classList.contains('fullCrewStatsPage') ||
-                    n.classList.contains('fullCrewSection'))) {
+                    n.classList.contains('fullCrewAudioPage') || n.classList.contains('fullCrewSection'))) {
                     continue;
                 }
                 if (n.closest && (n.closest('#' + STATS_PAGE_ID) || n.closest('#' + STUDIO_PAGE_ID) ||
+                    n.closest('#' + AUDIO_PAGE_ID) || n.closest('#' + AUDIO_TAB_ID) ||
                     n.closest('#' + STATS_TAB_ID) || n.closest('#' + SECTION_ID))) {
                     continue;
                 }
@@ -5138,6 +5237,8 @@
     var AUDIO_HASH = '#/fullcrew/audio';
     var AUDIO_PAGE_SIZE = 50;
     var audioEnabled = true;
+    var audioTypesFetched = false;
+    var audioTypesPromise = null;
     var audioState = {
         types: [],
         isIndexing: false,
@@ -5150,6 +5251,16 @@
         languages: [],
         loading: false
     };
+
+    function audioQueryKey(state) {
+        state = state || audioState;
+        return [
+            state.typeId || state.type || 'commentary',
+            state.search || state.q || '',
+            state.language || state.lang || '',
+            state.sort || 'name'
+        ].join('\0');
+    }
 
     function isAudioRoute() {
         var route = peekFullCrewRoute();
@@ -5345,6 +5456,9 @@
         if (!page) {
             return;
         }
+        if (audioState.loading && !reset) {
+            return;
+        }
         if (reset) {
             audioState.items = [];
         }
@@ -5403,6 +5517,7 @@
                     more.appendChild(btn);
                 }
             }
+            page.setAttribute('data-items-query', audioQueryKey());
             refreshAudioLanguageSelect();
         }).catch(function (err) {
             audioState.loading = false;
@@ -5431,9 +5546,39 @@
         lang.value = current;
     }
 
+    function updateAudioChips() {
+        var page = document.getElementById(AUDIO_PAGE_ID);
+        if (!page) {
+            return;
+        }
+        var chips = page.querySelectorAll('.fullCrewAudioChip');
+        Array.prototype.forEach.call(chips, function (chip, index) {
+            var id = index === 0 ? 'all' : (audioState.types[index - 1] && Core.prop(audioState.types[index - 1], 'Id', 'id'));
+            chip.classList.toggle('is-active', id === audioState.typeId);
+        });
+        var desc = page.querySelector('.fullCrewAudioTypeDesc');
+        if (desc) {
+            var meta = null;
+            audioState.types.forEach(function (type) {
+                if (Core.prop(type, 'Id', 'id') === audioState.typeId) {
+                    meta = type;
+                }
+            });
+            desc.textContent = meta
+                ? (Core.prop(meta, 'Description', 'description') || '')
+                : (audioState.typeId === 'commentary'
+                    ? 'Director, cast, and crew commentary — across every show and movie.'
+                    : 'Every movie and episode that carries a labeled extra audio track.');
+        }
+    }
+
     function paintAudioPage() {
         var mount = Core.findMount();
         var page = document.getElementById(AUDIO_PAGE_ID);
+        if (page && page.getAttribute('data-shell') === '1') {
+            updateAudioChips();
+            return page;
+        }
         if (!page) {
             page = Core.el('div', 'fullCrewPage fullCrewAudioPage');
             page.id = AUDIO_PAGE_ID;
@@ -5458,8 +5603,12 @@
             refresh.disabled = true;
             refresh.textContent = 'Indexing…';
             Core.postJson('FullCrew/audio/refresh', {}).then(function () {
+                audioTypesFetched = false;
                 window.setTimeout(function () {
-                    syncAudioUi();
+                    ensureAudioTypes(true).then(function () {
+                        paintAudioPage();
+                        loadAudioItems(true);
+                    });
                 }, 600);
             }).catch(function () {
                 refresh.disabled = false;
@@ -5478,7 +5627,7 @@
             chip.addEventListener('click', function () {
                 audioState.typeId = id;
                 writeAudioHash();
-                paintAudioPage();
+                updateAudioChips();
                 loadAudioItems(true);
             });
             chips.appendChild(chip);
@@ -5514,16 +5663,23 @@
         search.className = 'fullCrewAudioSearch';
         search.placeholder = 'Search title, show, or track name';
         search.value = audioState.search;
-        search.addEventListener('change', function () {
-            audioState.search = search.value.trim();
+        function applySearch() {
+            var next = search.value.trim();
+            if (next === audioState.search) {
+                return;
+            }
+            audioState.search = next;
             writeAudioHash();
             loadAudioItems(true);
+        }
+        search.addEventListener('input', function () {
+            window.clearTimeout(search._fcTimer);
+            search._fcTimer = window.setTimeout(applySearch, 280);
         });
         search.addEventListener('keydown', function (e) {
             if (e.key === 'Enter') {
-                audioState.search = search.value.trim();
-                writeAudioHash();
-                loadAudioItems(true);
+                window.clearTimeout(search._fcTimer);
+                applySearch();
             }
         });
         toolbar.appendChild(search);
@@ -5560,7 +5716,9 @@
         wrap.appendChild(Core.el('div', 'fullCrewAudioGrid'));
         wrap.appendChild(Core.el('div', 'fullCrewAudioMore'));
         page.appendChild(wrap);
+        page.setAttribute('data-shell', '1');
         page.setAttribute('data-loaded', '1');
+        return page;
     }
 
     function renderAudioDetailChips() {
@@ -5630,6 +5788,27 @@
         });
     }
 
+    function ensureAudioTypes(force) {
+        if (!force && audioTypesFetched) {
+            return Promise.resolve(audioState.types);
+        }
+        if (audioTypesPromise) {
+            return audioTypesPromise;
+        }
+        audioTypesPromise = Core.getJson('FullCrew/audio/types').then(function (data) {
+            audioEnabled = Core.prop(data, 'Enabled', 'enabled') !== false;
+            audioState.isIndexing = !!Core.prop(data, 'IsIndexing', 'isIndexing');
+            audioState.types = Core.prop(data, 'Types', 'types') || [];
+            audioTypesFetched = true;
+            audioTypesPromise = null;
+            return audioState.types;
+        }).catch(function (err) {
+            audioTypesPromise = null;
+            throw err;
+        });
+        return audioTypesPromise;
+    }
+
     function syncAudioUi() {
         injectAudioTab();
         if (!isAudioRoute()) {
@@ -5639,19 +5818,26 @@
         }
 
         var parsed = parseAudioQuery();
+        var nextKey = audioQueryKey(parsed);
+        var page = document.getElementById(AUDIO_PAGE_ID);
+        applyRouteChrome(peekFullCrewRoute(), { pending: false, setTitle: false });
+        Core.PageTitle.claim('Audio Tracks');
+        injectAudioTab();
+
+        if (page && page.getAttribute('data-items-query') === nextKey && page.getAttribute('data-loaded') === '1') {
+            audioState.typeId = parsed.type;
+            audioState.search = parsed.search;
+            audioState.language = parsed.language;
+            audioState.sort = parsed.sort;
+            return;
+        }
+
         audioState.typeId = parsed.type;
         audioState.search = parsed.search;
         audioState.language = parsed.language;
         audioState.sort = parsed.sort;
 
-        applyRouteChrome(peekFullCrewRoute(), { pending: false, setTitle: false });
-        Core.PageTitle.claim('Audio Tracks');
-        injectAudioTab();
-
-        Core.getJson('FullCrew/audio/types').then(function (data) {
-            audioEnabled = Core.prop(data, 'Enabled', 'enabled') !== false;
-            audioState.isIndexing = !!Core.prop(data, 'IsIndexing', 'isIndexing');
-            audioState.types = Core.prop(data, 'Types', 'types') || [];
+        ensureAudioTypes().then(function () {
             if (!audioEnabled) {
                 tearDownAudioPage();
                 return;
@@ -5660,7 +5846,9 @@
                 return;
             }
             paintAudioPage();
-            loadAudioItems(true);
+            if (document.getElementById(AUDIO_PAGE_ID).getAttribute('data-items-query') !== audioQueryKey()) {
+                loadAudioItems(true);
+            }
         }).catch(function (err) {
             console.warn('[FullCrew] audio types failed', err);
             paintAudioPage();

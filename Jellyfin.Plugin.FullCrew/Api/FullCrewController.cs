@@ -195,10 +195,12 @@ public class FullCrewController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ActionResult<LibraryStatsBucketItemsResponse> GetLibraryStatsBucketItems(
         [FromRoute] string category,
-        [FromQuery] string? bucket)
+        [FromQuery] string? bucket,
+        [FromQuery] int startIndex = 0,
+        [FromQuery] int limit = 80)
     {
         var user = TryGetCurrentUser();
-        var result = _libraryStatsService.GetBucketItems(user, category, bucket);
+        var result = _libraryStatsService.GetBucketItems(user, category, bucket, startIndex, limit);
         if (result is null)
         {
             return NotFound();
