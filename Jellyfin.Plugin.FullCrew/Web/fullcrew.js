@@ -14,7 +14,7 @@
     /* ================================================================== */
 
     var PLUGIN_GUID = 'a8f3c2e1-9b4d-4f6a-8e2c-1d5b7a9c0e3f';
-    var PLUGIN_VERSION = '1.8.9.0';
+    var PLUGIN_VERSION = '1.8.10.0';
     var ROLE_PREVIEW_MAX = 2;
     var CREW_JOB_TITLES = {
         'creator': 1,
@@ -1374,17 +1374,24 @@
                     roles = prioritizeCastRoles(roles);
                 }
                 var profileUrl = person.ProfileUrl || person.profileUrl;
-                var tmdbId = person.TmdbPersonId || person.tmdbPersonId;
+                var jellyfinId = person.ItemId || person.itemId;
                 var card;
 
-                if (tmdbId) {
+                if (jellyfinId) {
                     card = createElement('a', 'fullCrewPerson');
-                    card.href = 'https://www.themoviedb.org/person/' + encodeURIComponent(String(tmdbId));
-                    card.target = '_blank';
-                    card.rel = 'noopener noreferrer';
-                    card.title = personName + ' on TMDB';
+                    card.href = Core.detailsHashForItem(jellyfinId);
+                    card.title = personName;
+                    card.addEventListener('click', function (ev) {
+                        if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) {
+                            return;
+                        }
+                        if (Core.navigateToItem(jellyfinId)) {
+                            ev.preventDefault();
+                        }
+                    });
                 } else {
                     card = createElement('div', 'fullCrewPerson');
+                    card.title = personName;
                 }
 
                 if (profileUrl) {
@@ -1422,7 +1429,7 @@
                     }
                     text.appendChild(roleList);
                     if (preview.tooltip) {
-                        card.title = (tmdbId ? personName + ' on TMDB — ' : personName + ' — ') + preview.tooltip;
+                        card.title = personName + ' — ' + preview.tooltip;
                     }
                 }
                 card.appendChild(text);

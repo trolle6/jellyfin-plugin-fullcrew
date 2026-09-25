@@ -147,8 +147,8 @@ public class CreditsService
         var forceFlag = forceIncludeCast ? "1" : "0";
         var aggFlag = preferSeriesAggregate ? "1" : "0";
         var cacheKey = lookup.SeasonNumber is int seasonNumber
-            ? $"fullcrew-v5-{lookup.MediaKind}-{lookup.TmdbId}-s{seasonNumber}-m{maxPeople}-c{forceFlag}-a{aggFlag}-[{enabledDepts}]"
-            : $"fullcrew-v5-{lookup.MediaKind}-{lookup.TmdbId}-m{maxPeople}-c{forceFlag}-a{aggFlag}-[{enabledDepts}]";
+            ? $"fullcrew-v6-{lookup.MediaKind}-{lookup.TmdbId}-s{seasonNumber}-m{maxPeople}-c{forceFlag}-a{aggFlag}-[{enabledDepts}]"
+            : $"fullcrew-v6-{lookup.MediaKind}-{lookup.TmdbId}-m{maxPeople}-c{forceFlag}-a{aggFlag}-[{enabledDepts}]";
         if (_memoryCache.TryGetValue(cacheKey, out FullCrewResponse? cached) && cached is not null)
         {
             return CloneForItem(cached, item);
@@ -260,6 +260,7 @@ public class CreditsService
             .ConfigureAwait(false);
 
         var departments = BuildDepartments(payload, Plugin.Instance?.Configuration, forceIncludeCast);
+        AttachPersonItemIds(departments);
         return new FullCrewResponse
         {
             ItemId = item.Id.ToString("N", CultureInfo.InvariantCulture),
@@ -268,6 +269,101 @@ public class CreditsService
             MediaType = item.GetBaseItemKind().ToString(),
             Departments = departments
         };
+    }
+
+    /// <summary>
+    /// Maps crew cards to Jellyfin Person items (TMDB id first, then name) so the
+    /// client can open the local person page instead of themoviedb.org.
+    /// </summary>
+    private void AttachPersonItemIds(IReadOnlyList<CrewDepartment> departments)
+    {
+        var people = departments.SelectMany(d => d.People).ToList();
+        if (people.Count == 0)
+        {
+            return;
+        }
+
+        var byTmdb = new Dictionary<int, Guid>();
+        var byName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            var query = new InternalItemsQuery
+            {
+                Recursive = true,
+                IncludeItemTypes = [BaseItemKind.Person],
+                IsVirtualItem = false
+            };
+
+            foreach (var person in _libraryManager.GetItemList(query))
+            {
+                if (person is null || person.Id == Guid.Empty)
+                {
+                    continue;
+                }
+
+                if (TryGetTmdbPersonId(person, out var tmdbId) && !byTmdb.ContainsKey(tmdbId))
+                {
+                    byTmdb[tmdbId] = person.Id;
+                }
+
+                if (!string.IsNullOrWhiteSpace(person.Name))
+                {
+                    var name = person.Name.Trim();
+                    if (!byName.ContainsKey(name))
+                    {
+                        byName[name] = person.Id;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Full Crew: failed to scan Person library for credit links.");
+        }
+
+        foreach (var person in people)
+        {
+            if (person.TmdbPersonId is int tid and > 0 && byTmdb.TryGetValue(tid, out var tmdbMatch))
+            {
+                person.ItemId = tmdbMatch.ToString("D", CultureInfo.InvariantCulture);
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(person.Name)
+                && byName.TryGetValue(person.Name.Trim(), out var nameMatch))
+            {
+                person.ItemId = nameMatch.ToString("D", CultureInfo.InvariantCulture);
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(person.Name))
+            {
+                continue;
+            }
+
+            try
+            {
+                var resolved = _libraryManager.GetPerson(person.Name.Trim());
+                if (resolved is not null && resolved.Id != Guid.Empty)
+                {
+                    person.ItemId = resolved.Id.ToString("D", CultureInfo.InvariantCulture);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Full Crew: GetPerson failed for {Name}", person.Name);
+            }
+        }
+    }
+
+    private static bool TryGetTmdbPersonId(BaseItem person, out int tmdbId)
+    {
+        tmdbId = 0;
+        var raw = GetProviderId(person, "Tmdb");
+        return !string.IsNullOrWhiteSpace(raw)
+            && int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out tmdbId)
+            && tmdbId > 0;
     }
 
     private static IReadOnlyList<CrewDepartment> BuildDepartments(

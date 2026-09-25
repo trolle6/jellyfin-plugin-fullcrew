@@ -2,7 +2,7 @@
 
 **Complete TMDB cast & crew on Jellyfin Web — Audio Tracks, Library Stats, studio profiles, break bumpers, and a local scene index you grow while watching.**
 
-[![Version](https://img.shields.io/badge/version-1.8.9.0-00a4dc)](meta.json)
+[![Version](https://img.shields.io/badge/version-1.8.10.0-00a4dc)](meta.json)
 [![Jellyfin](https://img.shields.io/badge/Jellyfin-10.11%2B-00a4dc?logo=jellyfin&logoColor=white)](https://jellyfin.org)
 [![.NET](https://img.shields.io/badge/.NET-9.0-512BD4)](Jellyfin.Plugin.FullCrew/Jellyfin.Plugin.FullCrew.csproj)
 [![Repo](https://img.shields.io/badge/github-trolle6%2Fjellyfin--plugin--fullcrew-181717?logo=github)](https://github.com/trolle6/jellyfin-plugin-fullcrew)
@@ -29,7 +29,7 @@ Screenshots are not in the repo yet. Suggested paths once you capture them:
 
 ## Features
 
-- **Full cast & crew accordion** — Cast, Directing, Writing, Production, Camera, Editing, Sound, Art, Costume & Make-Up, Visual Effects, Lighting, Crew, and Other, with roles collapsed per person (unique names, “+N more”, tooltip)
+- **Full cast & crew accordion** — Cast, Directing, Writing, Production, Camera, Editing, Sound, Art, Costume & Make-Up, Visual Effects, Lighting, Crew, and Other, with roles collapsed per person (unique names, “+N more”, tooltip). Cards open the Jellyfin person page when that person exists locally.
 - **Media-only injection** — mounts on Movie, Series, Season, and Episode; deliberately skipped on Person and other entity detail shells
 - **Library Stats** — Home header tab next to Favourites → `#/fullcrew/stats` with charts, auto insights, per-category drill-downs, and bucket item lists (e.g. every title that is Stereo / HEVC). Special audio (commentary, descriptions, dubs) is one of those charts.
 - **Special audio** — Stats → Special audio lists labeled extra tracks across the library. Item detail pages show chips that jump to the matching Stats bucket.
@@ -88,7 +88,7 @@ Or before `</body>` in `index.html`:
 ### Manual
 
 1. Build (see [Building from source](#building-from-source)).
-2. Copy `Jellyfin.Plugin.FullCrew.dll` and `meta.json` into a **single** plugin folder, e.g. `plugins/Jellyfin.Plugin.FullCrew_1.8.9.0/`. Remove any older `Jellyfin.Plugin.FullCrew_*` / `Full Crew_*` folders first — Jellyfin 10.11 will try to load every copy.
+2. Copy `Jellyfin.Plugin.FullCrew.dll` and `meta.json` into a **single** plugin folder, e.g. `plugins/Jellyfin.Plugin.FullCrew_1.8.10.0/`. Remove any older `Jellyfin.Plugin.FullCrew_*` / `Full Crew_*` folders first — Jellyfin 10.11 will try to load every copy.
 3. The Jellyfin process must be able to **write** that folder (`chown` to the container `PUID`, or `chmod 666 meta.json`). SMB copies as another user are the usual cause of `Access to the path '.../meta.json' is denied`.
 4. **Stop → Start** Jellyfin, then hard-refresh the web client.
 
@@ -122,7 +122,7 @@ Dashboard → Plugins → **Full Crew**
 
 ### Cast & crew
 
-Open a movie, series, season, or episode in Jellyfin Web. Below the usual detail content you’ll get a **Full Cast & Crew** accordion.
+Open a movie, series, season, or episode in Jellyfin Web. Below the usual detail content you’ll get a **Full Cast & Crew** accordion. Clicking a person opens their **Jellyfin** person page when they exist in your library (TMDB links stay on that person page).
 
 | Item | TMDB source |
 | --- | --- |
@@ -187,8 +187,8 @@ Client assets (`fullcrew.js` / `fullcrew.css`) are embedded; URLs are version-qu
 ### Release packaging
 
 ```bash
-git tag v1.8.9.0
-git push origin v1.8.9.0
+git tag v1.8.10.0
+git push origin v1.8.10.0
 ```
 
 ---
