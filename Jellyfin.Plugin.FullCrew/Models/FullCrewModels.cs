@@ -84,6 +84,12 @@ public class CrewPerson
     public int? TmdbPersonId { get; set; }
 
     /// <summary>
+    /// Gets or sets the Jellyfin Person item id when this name exists in the library.
+    /// Prefer this for navigation; TMDB links belong on the person page.
+    /// </summary>
+    public string? ItemId { get; set; }
+
+    /// <summary>
     /// Gets or sets the profile image URL.
     /// </summary>
     public string? ProfileUrl { get; set; }
