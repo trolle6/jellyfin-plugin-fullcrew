@@ -1139,8 +1139,11 @@
     /* ================================================================== */
 
     var SECTION_ID = 'fullCrewSection';
+    var FACTS_SECTION_ID = 'fullCrewFactsSection';
     /** itemId → true after credits failed/empty for this navigation (no remount thrash). */
     var creditsGaveUp = Object.create(null);
+    /** itemId → true after title facts failed/empty for this navigation. */
+    var factsGaveUp = Object.create(null);
     /** Track detail item from the hash so we clear the circuit breaker on navigate. */
     var creditsNavItemId = null;
     var creditsFetchEpoch = 0;
@@ -1150,6 +1153,7 @@
         if (id !== creditsNavItemId) {
             creditsNavItemId = id;
             creditsGaveUp = Object.create(null);
+            factsGaveUp = Object.create(null);
             creditsFetchEpoch += 1;
         }
     }
@@ -1480,6 +1484,7 @@
             return;
         }
         removeExisting(view);
+        removeFactsSection(view);
         showNativeCast(view);
         removeDetailButtons(view);
     }
@@ -1675,6 +1680,7 @@
 
             mountDetailButtons(view, itemId);
             mountCreditsSection(view, itemId);
+            mountFactsSection(view, itemId, type);
         });
     }
 
@@ -1760,6 +1766,165 @@
                 }
                 console.warn('[FullCrew] failed to load credits', err);
                 settleCreditsFailure(view, section, itemId);
+            });
+    }
+
+    /* ================================================================== */
+    /* Feature: Title facts (budget, box office, runtime, status, …)      */
+    /* ================================================================== */
+
+    function fetchFacts(itemId) {
+        return Core.getJson('FullCrew/' + encodeURIComponent(itemId) + '/facts');
+    }
+
+    function createFactsSection() {
+        var section = createElement('div', 'fullCrewFacts verticalSection');
+        section.id = FACTS_SECTION_ID;
+
+        var header = createElement('div', 'fullCrewHeader');
+        header.appendChild(createElement('h2', 'fullCrewTitle sectionTitle', 'Title Facts'));
+        header.appendChild(createElement('div', 'fullCrewFactsTagline', ''));
+        section.appendChild(header);
+
+        section.appendChild(createElement('div', 'fullCrewFactsBody'));
+        return section;
+    }
+
+    function renderFacts(section, data) {
+        var facts = data.Facts || data.facts || [];
+        var tagline = data.Tagline || data.tagline || '';
+        var homepage = data.Homepage || data.homepage || '';
+        var tmdbId = data.TmdbId || data.tmdbId;
+        var mediaType = String(data.MediaType || data.mediaType || '');
+
+        var taglineEl = section.querySelector('.fullCrewFactsTagline');
+        if (taglineEl) {
+            taglineEl.textContent = tagline ? '“' + tagline + '”' : '';
+            taglineEl.style.display = tagline ? '' : 'none';
+        }
+
+        var body = section.querySelector('.fullCrewFactsBody');
+        body.innerHTML = '';
+
+        var grid = createElement('div', 'fullCrewFactsGrid');
+        facts.forEach(function (fact) {
+            var label = fact.Label || fact.label || '';
+            var value = fact.Value || fact.value || '';
+            if (!label || !value) {
+                return;
+            }
+            var cell = createElement('div', 'fullCrewFact');
+            cell.appendChild(createElement('div', 'fullCrewFactLabel', label));
+            cell.appendChild(createElement('div', 'fullCrewFactValue', value));
+            grid.appendChild(cell);
+        });
+        body.appendChild(grid);
+
+        var links = createElement('div', 'fullCrewFactsLinks');
+        if (homepage) {
+            var site = createElement('a', 'fullCrewFactsLink', 'Official site');
+            site.href = homepage;
+            site.target = '_blank';
+            site.rel = 'noopener noreferrer';
+            links.appendChild(site);
+        }
+        if (tmdbId) {
+            var path = /movie/i.test(mediaType) ? 'movie' : 'tv';
+            var tmdb = createElement('a', 'fullCrewFactsLink', 'View on TMDB');
+            tmdb.href = 'https://www.themoviedb.org/' + path + '/' + encodeURIComponent(String(tmdbId));
+            tmdb.target = '_blank';
+            tmdb.rel = 'noopener noreferrer';
+            links.appendChild(tmdb);
+        }
+        if (links.childNodes.length) {
+            body.appendChild(links);
+        }
+    }
+
+    function removeFactsSection(view) {
+        var existing = view.querySelector('#' + FACTS_SECTION_ID);
+        if (existing) {
+            existing.remove();
+        }
+    }
+
+    function mountFactsSection(view, itemId, type) {
+        // Title-level facts only make sense on the Movie / Series shells.
+        if (!/^(Movie|Series)$/i.test(String(type || ''))) {
+            removeFactsSection(view);
+            return;
+        }
+
+        if (!itemId || factsGaveUp[itemId]) {
+            return;
+        }
+
+        var existing = view.querySelector('#' + FACTS_SECTION_ID);
+        if (existing && existing.getAttribute('data-item-id') === itemId) {
+            if (
+                existing.getAttribute('data-loaded') === '1' ||
+                existing.getAttribute('data-loading') === '1' ||
+                existing.getAttribute('data-error') === '1'
+            ) {
+                return;
+            }
+            return;
+        }
+
+        removeFactsSection(view);
+
+        var section = createFactsSection();
+        section.setAttribute('data-item-id', itemId);
+        section.setAttribute('data-loading', '1');
+        var fetchGen = String(creditsFetchEpoch) + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        section.setAttribute('data-fetch-gen', fetchGen);
+
+        // Sit directly above the Cast & Crew section when present, otherwise at the native anchor.
+        var creditsSection = view.querySelector('#' + SECTION_ID);
+        if (creditsSection && creditsSection.parentNode) {
+            creditsSection.parentNode.insertBefore(section, creditsSection);
+        } else {
+            var anchor = findInsertionPoint(view);
+            if (anchor && anchor.parentNode) {
+                anchor.parentNode.insertBefore(section, anchor);
+            } else {
+                view.appendChild(section);
+            }
+        }
+
+        function stillCurrent() {
+            return (
+                document.body.contains(section) &&
+                section.getAttribute('data-fetch-gen') === fetchGen &&
+                !factsGaveUp[itemId]
+            );
+        }
+
+        fetchFacts(itemId)
+            .then(function (data) {
+                if (!stillCurrent()) {
+                    return;
+                }
+
+                var error = data && (data.Error || data.error);
+                var facts = (data && (data.Facts || data.facts)) || [];
+                if (error || !facts.length) {
+                    factsGaveUp[itemId] = true;
+                    section.remove();
+                    return;
+                }
+
+                renderFacts(section, data);
+                section.setAttribute('data-loaded', '1');
+                section.removeAttribute('data-loading');
+            })
+            .catch(function (err) {
+                if (!stillCurrent()) {
+                    return;
+                }
+                console.warn('[FullCrew] failed to load title facts', err);
+                factsGaveUp[itemId] = true;
+                section.remove();
             });
     }
 

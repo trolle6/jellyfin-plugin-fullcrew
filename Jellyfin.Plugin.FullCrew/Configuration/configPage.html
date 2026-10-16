@@ -62,6 +62,20 @@
                     </div>
 
                     <div class="verticalSection">
+                        <h3 class="sectionTitle">Title facts</h3>
+                        <div class="checkboxContainer">
+                            <label>
+                                <input is="emby-checkbox" type="checkbox" id="EnableTitleFacts" />
+                                <span>Show production facts on movie &amp; series pages</span>
+                            </label>
+                        </div>
+                        <div class="fieldDescription">
+                            Adds a panel with status, release/air dates, runtime, budget, box office, net,
+                            seasons/episodes, network, TMDB rating, genres, language, studios, and countries.
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
                         <h3 class="sectionTitle">Audio type browser</h3>
                         <div class="checkboxContainer">
                             <label>
@@ -256,6 +270,7 @@
                         document.querySelector('#MaxPeoplePerDepartment').value =
                             config.MaxPeoplePerDepartment != null ? config.MaxPeoplePerDepartment : 100;
                         document.querySelector('#EnableLibraryStats').checked = config.EnableLibraryStats !== false;
+                        document.querySelector('#EnableTitleFacts').checked = config.EnableTitleFacts !== false;
                         document.querySelector('#EnableAudioBrowser').checked = config.EnableAudioBrowser !== false;
                         document.querySelector('#IndexMovies').checked = config.IndexMovies !== false;
                         document.querySelector('#IndexEpisodes').checked = config.IndexEpisodes !== false;
@@ -283,6 +298,7 @@
                         config.MaxPeoplePerDepartment =
                             parseInt(document.querySelector('#MaxPeoplePerDepartment').value, 10) || 100;
                         config.EnableLibraryStats = !!document.querySelector('#EnableLibraryStats').checked;
+                        config.EnableTitleFacts = !!document.querySelector('#EnableTitleFacts').checked;
                         config.EnableAudioBrowser = !!document.querySelector('#EnableAudioBrowser').checked;
                         config.IndexMovies = !!document.querySelector('#IndexMovies').checked;
                         config.IndexEpisodes = !!document.querySelector('#IndexEpisodes').checked;

@@ -32,6 +32,7 @@ Screenshots are not in the repo yet. Suggested paths once you capture them:
 - **Full cast & crew accordion** — Cast, Directing, Writing, Production, Camera, Editing, Sound, Art, Costume & Make-Up, Visual Effects, Lighting, Crew, and Other, with roles collapsed per person (unique names, “+N more”, tooltip)
 - **Media-only injection** — mounts on Movie, Series, Season, and Episode; deliberately skipped on Person and other entity detail shells
 - **Audio Tracks** — Home header tab → `#/fullcrew/audio?type=commentary` lists every commentary (or description/dub/isolated score) across the library, without picking a show first
+- **Title Facts** — detail-page panel with production status, release/air dates, runtime, **budget**, **box office**, **net profit/loss**, seasons/episodes, network, TMDB rating, genres, language, studios, and countries (movies and series)
 - **Library Stats** — Home header tab next to Favourites → `#/fullcrew/stats` with charts, auto insights, per-category drill-downs, and bucket item lists (e.g. every title that is Stereo / HEVC)
 - **Studio pages** — `#/fullcrew/studio/...` profile layout: TMDB company metadata, library titles, studio-scoped stats, name-root clusters from Stats
 - **Break bumpers** — detail-page Bumper button; prefers a local “Bumpers” collection/folder, then curated/search YouTube when enabled
@@ -108,6 +109,7 @@ Dashboard → Plugins → **Full Crew**
 | Max people per department | `100` | Cap per accordion section |
 | Hide episode play badges | on | Episode stills stay clear; click the thumbnail to play |
 | Enable Library Stats | on | Stats tab + `/FullCrew/stats` API |
+| Enable Title Facts | on | Production facts panel + `/FullCrew/{id}/facts` API |
 | Enable audio type browser | on | Audio tab + `/FullCrew/audio` API |
 | Include movies / episodes / videos | on / on / off | What the audio index scans |
 | Enable bumpers | on | Bumper button on media detail pages |
@@ -209,6 +211,7 @@ The Y playback rail is TMDB-only. Leave **Enable scene identify** off unless you
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/FullCrew/{itemId}` | Categorized cast/crew |
+| `GET` | `/FullCrew/{itemId}/facts` | Production facts (budget, box office, runtime, status, …) |
 | `GET` | `/FullCrew/{itemId}/bumper` | Resolve break bumper |
 | `GET` | `/FullCrew/{itemId}/trailer` | Resolve trailer companion |
 | `GET` | `/FullCrew/scene-identify/status` | Vision enabled? (no secrets) |
