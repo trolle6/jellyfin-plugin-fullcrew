@@ -20,6 +20,7 @@ public class PluginConfiguration : BasePluginConfiguration
         EnableBumpers = true;
         EnableYouTubeBumpers = true;
         EnableLibraryStats = true;
+        EnableTitleFacts = true;
         LibraryStatsYearSort = "OldestFirst";
         EnableGlassPlayButtons = true;
         EnableSceneIdentify = false;
@@ -63,6 +64,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets a value indicating whether the Library Stats page and API are enabled.
     /// </summary>
     public bool EnableLibraryStats { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the Title Facts panel (budget, box office,
+    /// runtime, status, …) is shown on movie and series detail pages.
+    /// </summary>
+    public bool EnableTitleFacts { get; set; }
 
     /// <summary>
     /// Gets or sets how Library Stats release years are ordered.

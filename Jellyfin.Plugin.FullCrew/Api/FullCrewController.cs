@@ -24,6 +24,7 @@ public class FullCrewController : ControllerBase
     private const string JellyfinUserIdClaim = "Jellyfin-UserId";
 
     private readonly CreditsService _creditsService;
+    private readonly TitleFactsService _titleFactsService;
     private readonly BumperService _bumperService;
     private readonly LibraryStatsService _libraryStatsService;
     private readonly StudioPageService _studioPageService;
@@ -37,6 +38,7 @@ public class FullCrewController : ControllerBase
     /// </summary>
     public FullCrewController(
         CreditsService creditsService,
+        TitleFactsService titleFactsService,
         BumperService bumperService,
         LibraryStatsService libraryStatsService,
         StudioPageService studioPageService,
@@ -46,6 +48,7 @@ public class FullCrewController : ControllerBase
         ILogger<FullCrewController> logger)
     {
         _creditsService = creditsService;
+        _titleFactsService = titleFactsService;
         _bumperService = bumperService;
         _libraryStatsService = libraryStatsService;
         _studioPageService = studioPageService;
@@ -69,6 +72,32 @@ public class FullCrewController : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _creditsService.GetCreditsAsync(itemId, cancellationToken).ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Gets production facts (budget, box office, runtime, status, …) for a movie or series.
+    /// </summary>
+    /// <param name="itemId">The Jellyfin item id.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Production facts.</returns>
+    [HttpGet("{itemId:guid}/facts")]
+    [Authorize]
+    [ProducesResponseType(typeof(TitleFactsResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<TitleFactsResponse>> GetFacts(
+        [FromRoute] Guid itemId,
+        CancellationToken cancellationToken)
+    {
+        if (Plugin.Instance?.Configuration?.EnableTitleFacts == false)
+        {
+            return Ok(new TitleFactsResponse
+            {
+                ItemId = itemId.ToString("N"),
+                Error = "Title facts are disabled."
+            });
+        }
+
+        var result = await _titleFactsService.GetFactsAsync(itemId, cancellationToken).ConfigureAwait(false);
         return Ok(result);
     }
 
